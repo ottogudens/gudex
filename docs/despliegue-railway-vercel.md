@@ -18,20 +18,9 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 1. En Railway crea un proyecto y agrega un servicio **PostgreSQL**.
 2. Agrega otro servicio desde el repositorio GitHub `ottogudens/gudex`, rama `main`.
 3. En los ajustes del servicio API configura **Root Directory** como `/backend`. Este repositorio contiene backend y frontend en directorios separados.
-4. Configura el comando de instalación/build como:
-
-   ```bash
-   pip install .
-   ```
-
-5. Configura el **Start Command**:
-
-   ```bash
-   uvicorn app.main:app --host 0.0.0.0 --port $PORT
-   ```
-
-6. Configura la ruta de health check como `/health`.
-7. En Variables del servicio API añade:
+4. Deja que Railway/Railpack instale las dependencias declaradas en `requirements.txt` y `pyproject.toml`. El archivo `requirements.txt` hace explícitas las dependencias de ejecución, incluido Uvicorn.
+5. El archivo `railway.json` en la raíz del repositorio configura el inicio de la API con `python -m uvicorn` y el health check `/health`. En los detalles del despliegue confirma que Railway haya aplicado esos valores.
+6. En Variables del servicio API añade:
 
    | Variable | Valor |
    |---|---|
@@ -46,10 +35,10 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 
    Railway proporciona `DATABASE_URL` para que los servicios del mismo proyecto se conecten a PostgreSQL. No copies ni expongas la contraseña de la base de datos en el frontend.
 
-8. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
-9. Pulsa Deploy. Al iniciar, la API crea las tablas y el usuario administrador indicado en las variables si todavía no existe.
-10. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
-11. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
+7. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
+8. Pulsa Deploy. Al iniciar, la API crea las tablas y el usuario administrador indicado en las variables si todavía no existe.
+9. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
+10. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
 
    ```text
    https://<dominio-api>/health
@@ -244,7 +233,8 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 
 | Síntoma | Qué revisar |
 |---|---|
-| Railway no encuentra `app.main` | Root Directory debe ser `/backend`; Start Command debe usar `uvicorn app.main:app`. |
+| Railway indica `No module named uvicorn` | Confirma Root Directory `/backend` y revisa que el build instale `backend/requirements.txt`, donde se declara `uvicorn[standard]`. El comando versionado usa `python -m uvicorn`. |
+| Railway no encuentra `app.main` | Root Directory debe ser `/backend`; el código de la API vive en `backend/app`. |
 | Error de conexión PostgreSQL | Revisa `DATABASE_URL=${{Postgres.DATABASE_URL}}`, que el nombre de servicio sea correcto y que `psycopg` se instale desde `pyproject.toml`. |
 | El servicio termina al arrancar en producción | Define `JWT_SECRET` aleatorio de 32+ caracteres, `SEED_DEFAULT_USERS=false` y una clave admin de 12+ caracteres. |
 | API funciona con curl pero falla desde Vercel | Añade el origen HTTPS exacto del frontend a `CORS_ORIGINS` y espera el redeploy de Railway. |
