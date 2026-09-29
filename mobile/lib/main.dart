@@ -51,6 +51,15 @@ class ApiClient {
     return _decode(response);
   }
 
+  Future<dynamic> patchJson(String path, Map<String, dynamic> data) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl$path'),
+      headers: {..._headers, 'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+    return _decode(response);
+  }
+
   dynamic _decode(http.Response response) {
     final body = response.body.isEmpty ? null : jsonDecode(response.body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -282,7 +291,9 @@ class _HomePageState extends State<HomePage> {
         Expanded(
           child: modules[selected].path == '/api/v1/sales'
               ? _PosScreen(api: api)
-              : _ModuleList(api: api, module: modules[selected], role: widget.role),
+              : {'/api/v1/work-orders', '/api/v1/customers'}.contains(modules[selected].path)
+                  ? _WorkshopScreen(api: api, module: modules[selected], role: widget.role)
+                  : _ModuleList(api: api, module: modules[selected], role: widget.role),
         ),
       ]),
       bottomNavigationBar: NavigationBar(
@@ -382,6 +393,510 @@ class _ModuleListState extends State<_ModuleList> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
+}
+
+class _WorkshopScreen extends StatefulWidget {
+  const _WorkshopScreen({required this.api, required this.module, required this.role});
+  final ApiClient api;
+  final _Module module;
+  final String role;
+
+  @override
+  State<_WorkshopScreen> createState() => _WorkshopScreenState();
+}
+
+class _WorkshopScreenState extends State<_WorkshopScreen> {
+  List<Map<String, dynamic>> _records = [];
+  List<Map<String, dynamic>> _customers = [];
+  List<Map<String, dynamic>> _vehicles = [];
+  int _customerSection = 0;
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  bool get _isOrders => widget.module.path == '/api/v1/work-orders';
+  bool get _canCreate => widget.role == 'admin';
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    setState(() { _loading = true; _error = null; });
+    try {
+      if (_isOrders) {
+        final values = await Future.wait([
+          widget.api.get('/api/v1/work-orders'),
+          widget.api.get('/api/v1/customers'),
+          widget.api.get('/api/v1/vehicles'),
+        ]);
+        _records = _maps(values[0]);
+        _customers = _maps(values[1]);
+        _vehicles = _maps(values[2]);
+      } else {
+        final values = await Future.wait([
+          widget.api.get('/api/v1/customers'),
+          widget.api.get('/api/v1/vehicles'),
+        ]);
+        _customers = _maps(values[0]);
+        _vehicles = _maps(values[1]);
+        _records = _customerSection == 0 ? _customers : _vehicles;
+      }
+    } catch (error) {
+      _error = error.toString().replaceFirst('Exception: ', '');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  List<Map<String, dynamic>> _maps(dynamic value) => value is List
+      ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+      : <Map<String, dynamic>>[];
+
+  Future<void> _createCustomer() async {
+    final form = GlobalKey<FormState>();
+    final name = TextEditingController();
+    final email = TextEditingController();
+    final phone = TextEditingController();
+    final rut = TextEditingController();
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Registrar cliente'),
+          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo *'), validator: (v) => (v == null || v.trim().length < 2) ? 'Ingresa el nombre' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: rut, decoration: const InputDecoration(labelText: 'RUT (opcional)')),
+            const SizedBox(height: 10),
+            TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono')),
+            const SizedBox(height: 10),
+            TextFormField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
+          ]))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(context, {
+                'full_name': name.text.trim(),
+                if (rut.text.trim().isNotEmpty) 'rut': rut.text.trim(),
+                if (phone.text.trim().isNotEmpty) 'phone': phone.text.trim(),
+                if (email.text.trim().isNotEmpty) 'email': email.text.trim(),
+              });
+            }, child: const Text('Guardar')),
+          ],
+        ),
+      );
+      if (data != null) await _save('/api/v1/customers', data, 'Cliente registrado');
+    } finally {
+      name.dispose(); email.dispose(); phone.dispose(); rut.dispose();
+    }
+  }
+
+  Future<void> _createVehicle() async {
+    if (_customers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registra un cliente antes de agregar su vehículo.')));
+      return;
+    }
+    final form = GlobalKey<FormState>();
+    final plate = TextEditingController();
+    final make = TextEditingController();
+    final model = TextEditingController();
+    final year = TextEditingController();
+    final vin = TextEditingController();
+    final engine = TextEditingController();
+    final mileage = TextEditingController();
+    int customerId = _customers.first['id'] as int;
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, updateDialog) => AlertDialog(
+          title: const Text('Registrar vehículo'),
+          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<int>(
+              value: customerId,
+              decoration: const InputDecoration(labelText: 'Cliente *'),
+              items: _customers.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text('${item['full_name']}'))).toList(),
+              onChanged: (value) { if (value != null) updateDialog(() => customerId = value); },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(controller: plate, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Patente *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Ingresa la patente' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: make, decoration: const InputDecoration(labelText: 'Marca *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Ingresa la marca' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: model, decoration: const InputDecoration(labelText: 'Modelo *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Ingresa el modelo' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: year, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Año'), validator: (v) => v == null || v.trim().isEmpty || int.tryParse(v.trim()) != null ? null : 'Ingresa un año válido'),
+            const SizedBox(height: 10),
+            TextFormField(controller: vin, decoration: const InputDecoration(labelText: 'VIN')),
+            const SizedBox(height: 10),
+            TextFormField(controller: engine, decoration: const InputDecoration(labelText: 'Motor')),
+            const SizedBox(height: 10),
+            TextFormField(controller: mileage, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Kilometraje'), validator: (v) => v == null || v.trim().isEmpty || int.tryParse(v.trim()) != null ? null : 'Ingresa un kilometraje válido'),
+          ]))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              final parsedYear = int.tryParse(year.text.trim());
+              final parsedMileage = int.tryParse(mileage.text.trim());
+              Navigator.pop(context, {
+                'customer_id': customerId,
+                'plate': plate.text.trim().toUpperCase(),
+                'make': make.text.trim(),
+                'model': model.text.trim(),
+                if (parsedYear != null) 'year': parsedYear,
+                if (vin.text.trim().isNotEmpty) 'vin': vin.text.trim().toUpperCase(),
+                if (engine.text.trim().isNotEmpty) 'engine': engine.text.trim(),
+                if (parsedMileage != null) 'current_mileage_km': parsedMileage,
+              });
+            }, child: const Text('Guardar')),
+          ],
+        )),
+      );
+      if (data != null) await _save('/api/v1/vehicles', data, 'Vehículo registrado');
+    } finally {
+      plate.dispose(); make.dispose(); model.dispose(); year.dispose(); vin.dispose(); engine.dispose(); mileage.dispose();
+    }
+  }
+
+  Future<void> _createWorkOrder() async {
+    if (_customers.isEmpty || _vehicles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registra primero un cliente y su vehículo.')));
+      return;
+    }
+    final form = GlobalKey<FormState>();
+    final mileage = TextEditingController();
+    final symptoms = TextEditingController();
+    final notes = TextEditingController();
+    int customerId = _customers.first['id'] as int;
+    int? vehicleId = _vehicles.firstWhere((v) => v['customer_id'] == customerId, orElse: () => _vehicles.first)['id'] as int;
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, updateDialog) {
+          final customerVehicles = _vehicles.where((v) => v['customer_id'] == customerId).toList();
+          if (customerVehicles.isNotEmpty && !customerVehicles.any((v) => v['id'] == vehicleId)) vehicleId = customerVehicles.first['id'] as int;
+          return AlertDialog(
+            title: const Text('Abrir orden de trabajo'),
+            content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<int>(
+                value: customerId,
+                decoration: const InputDecoration(labelText: 'Cliente *'),
+                items: _customers.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text('${item['full_name']}'))).toList(),
+                onChanged: (value) { if (value != null) updateDialog(() { customerId = value; vehicleId = null; }); },
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int>(
+                value: customerVehicles.any((v) => v['id'] == vehicleId) ? vehicleId : null,
+                decoration: const InputDecoration(labelText: 'Vehículo *'),
+                items: customerVehicles.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text('${item['plate']} · ${item['make']} ${item['model']}'))).toList(),
+                onChanged: (value) { if (value != null) updateDialog(() => vehicleId = value); },
+                validator: (value) => value == null ? 'Selecciona un vehículo del cliente' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(controller: mileage, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Kilometraje de recepción'), validator: (v) => v == null || v.trim().isEmpty || int.tryParse(v.trim()) != null ? null : 'Ingresa un kilometraje válido'),
+              const SizedBox(height: 10),
+              TextFormField(controller: symptoms, maxLines: 2, decoration: const InputDecoration(labelText: 'Síntomas informados')),
+              const SizedBox(height: 10),
+              TextFormField(controller: notes, maxLines: 2, decoration: const InputDecoration(labelText: 'Notas de recepción')),
+            ]))),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+              FilledButton(onPressed: () {
+                if (!form.currentState!.validate() || vehicleId == null) return;
+                final parsedMileage = int.tryParse(mileage.text.trim());
+                Navigator.pop(context, {
+                  'customer_id': customerId,
+                  'vehicle_id': vehicleId,
+                  if (parsedMileage != null) 'mileage_km': parsedMileage,
+                  if (symptoms.text.trim().isNotEmpty) 'reported_symptoms': symptoms.text.trim(),
+                  if (notes.text.trim().isNotEmpty) 'initial_notes': notes.text.trim(),
+                });
+              }, child: const Text('Crear orden')),
+            ],
+          );
+        }),
+      );
+      if (data != null) await _save('/api/v1/work-orders', data, 'Orden de trabajo creada');
+    } finally {
+      mileage.dispose(); symptoms.dispose(); notes.dispose();
+    }
+  }
+
+  Future<void> _save(String path, Map<String, dynamic> data, String success) async {
+    setState(() => _saving = true);
+    try {
+      await widget.api.postJson(path, data);
+      if (!mounted) return;
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(success)));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openOrder(Map<String, dynamic> order) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => _WorkOrderDetails(api: widget.api, order: order, onChanged: _refresh),
+    );
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Text('No se pudieron cargar los datos.\n$_error', textAlign: TextAlign.center),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(onPressed: _refresh, icon: const Icon(Icons.refresh), label: const Text('Reintentar')),
+    ])));
+
+    final isCustomerPage = !_isOrders;
+    final label = _isOrders ? 'órdenes de trabajo' : (_customerSection == 0 ? 'clientes' : 'vehículos');
+    return Stack(children: [
+      Column(children: [
+        if (isCustomerPage)
+          Padding(padding: const EdgeInsets.fromLTRB(12, 4, 12, 2), child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Clientes'), icon: Icon(Icons.people_outline)),
+              ButtonSegment(value: 1, label: Text('Vehículos'), icon: Icon(Icons.directions_car_outlined)),
+            ],
+            selected: {_customerSection},
+            onSelectionChanged: (value) => setState(() { _customerSection = value.first; _records = _customerSection == 0 ? _customers : _vehicles; }),
+          )),
+        Expanded(child: _records.isEmpty
+            ? RefreshIndicator(onRefresh: _refresh, child: ListView(children: [SizedBox(height: 300, child: Center(child: Text('No hay $label registrados.')))]))
+            : RefreshIndicator(onRefresh: _refresh, child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+                itemCount: _records.length,
+                itemBuilder: (context, index) {
+                  final item = _records[index];
+                  if (_isOrders) return _workOrderTile(item);
+                  if (_customerSection == 0) return _customerTile(item);
+                  return _vehicleTile(item);
+                },
+              ))),
+      ]),
+      if (_canCreate) Positioned(
+        right: 18, bottom: 18,
+        child: FloatingActionButton.extended(
+          onPressed: _saving ? null : _isOrders ? _createWorkOrder : _customerSection == 0 ? _createCustomer : _createVehicle,
+          icon: Icon(_isOrders ? Icons.add_task : _customerSection == 0 ? Icons.person_add_alt_1 : Icons.add),
+          label: Text(_isOrders ? 'Nueva orden' : _customerSection == 0 ? 'Nuevo cliente' : 'Nuevo vehículo'),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _customerTile(Map<String, dynamic> item) {
+    final owned = _vehicles.where((vehicle) => vehicle['customer_id'] == item['id']).length;
+    return Card(child: ListTile(
+      leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+      title: Text('${item['full_name'] ?? 'Cliente'}'),
+      subtitle: Text([item['phone'], item['email'], '$owned vehículo(s)'].where((value) => value != null && '$value'.isNotEmpty).join(' · ')),
+    ));
+  }
+
+  Widget _vehicleTile(Map<String, dynamic> item) {
+    final owner = _customers.where((customer) => customer['id'] == item['customer_id']);
+    final customerName = owner.isEmpty ? 'Cliente no disponible' : '${owner.first['full_name']}';
+    return Card(child: ListTile(
+      leading: const CircleAvatar(child: Icon(Icons.directions_car_outlined)),
+      title: Text('${item['plate']} · ${item['make']} ${item['model']}'),
+      subtitle: Text('$customerName${item['year'] == null ? '' : ' · ${item['year']}'}${item['current_mileage_km'] == null ? '' : ' · ${item['current_mileage_km']} km'}'),
+    ));
+  }
+
+  Widget _workOrderTile(Map<String, dynamic> item) {
+    final vehicle = _vehicles.where((v) => v['id'] == item['vehicle_id']);
+    final customer = _customers.where((c) => c['id'] == item['customer_id']);
+    final vehicleLabel = vehicle.isEmpty ? 'Vehículo #${item['vehicle_id']}' : '${vehicle.first['plate']} · ${vehicle.first['make']} ${vehicle.first['model']}';
+    final customerLabel = customer.isEmpty ? 'Cliente #${item['customer_id']}' : '${customer.first['full_name']}';
+    return Card(child: ListTile(
+      leading: const CircleAvatar(child: Icon(Icons.build_outlined)),
+      title: Text('${item['code'] ?? 'Orden'} · $vehicleLabel'),
+      subtitle: Text('$customerLabel\nEstado: ${'${item['status'] ?? 'received'}'.replaceAll('_', ' ')}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
+      isThreeLine: true,
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _openOrder(item),
+    ));
+  }
+}
+
+class _WorkOrderDetails extends StatefulWidget {
+  const _WorkOrderDetails({required this.api, required this.order, required this.onChanged});
+  final ApiClient api;
+  final Map<String, dynamic> order;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_WorkOrderDetails> createState() => _WorkOrderDetailsState();
+}
+
+class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
+  late final TextEditingController _diagnosis;
+  late String _status;
+  late Future<List<Map<String, dynamic>>> _inspections;
+  bool _saving = false;
+  String? _error;
+
+  static const _statuses = [
+    'received', 'inspecting', 'quoted', 'awaiting_approval', 'quote_rejected',
+    'approved', 'in_progress', 'ready', 'delivered', 'cancelled',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _diagnosis = TextEditingController(text: '${widget.order['diagnosis'] ?? ''}');
+    _status = '${widget.order['status'] ?? 'received'}';
+    _inspections = _loadInspections();
+  }
+
+  @override
+  void dispose() {
+    _diagnosis.dispose();
+    super.dispose();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadInspections() async {
+    final result = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/inspections');
+    return result is List ? result.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : [];
+  }
+
+  Future<void> _saveOrder() async {
+    setState(() { _saving = true; _error = null; });
+    try {
+      await widget.api.patchJson('/api/v1/work-orders/${widget.order['id']}', {
+        'status': _status,
+        'diagnosis': _diagnosis.text.trim(),
+      });
+      if (!mounted) return;
+      await widget.onChanged();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Orden actualizada')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _addInspection() async {
+    final form = GlobalKey<FormState>();
+    final category = TextEditingController();
+    final item = TextEditingController();
+    final notes = TextEditingController();
+    final measured = TextEditingController();
+    String result = 'normal';
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, updateDialog) => AlertDialog(
+          title: const Text('Nueva inspección'),
+          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: category, decoration: const InputDecoration(labelText: 'Sistema / categoría *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: item, decoration: const InputDecoration(labelText: 'Punto inspeccionado *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              value: result,
+              decoration: const InputDecoration(labelText: 'Resultado'),
+              items: const [
+                DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                DropdownMenuItem(value: 'observation', child: Text('Requiere atención')),
+                DropdownMenuItem(value: 'failed', child: Text('Falla detectada')),
+              ],
+              onChanged: (value) { if (value != null) updateDialog(() => result = value); },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(controller: measured, decoration: const InputDecoration(labelText: 'Medición (opcional)')),
+            const SizedBox(height: 10),
+            TextFormField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Observaciones')),
+          ]))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(context, {
+                'category': category.text.trim(), 'item': item.text.trim(), 'result': result,
+                if (measured.text.trim().isNotEmpty) 'measured_value': measured.text.trim(),
+                if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim(),
+              });
+            }, child: const Text('Guardar')),
+          ],
+        )),
+      );
+      if (data == null) return;
+      setState(() { _saving = true; _error = null; });
+      await widget.api.postJson('/api/v1/work-orders/${widget.order['id']}/inspections', data);
+      if (!mounted) return;
+      setState(() => _inspections = _loadInspections());
+      await widget.onChanged();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Inspección guardada')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      category.dispose(); item.dispose(); notes.dispose(); measured.dispose();
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+        child: ListView(shrinkWrap: true, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.outlineVariant, borderRadius: BorderRadius.circular(4)))),
+          const SizedBox(height: 18),
+          Text('${widget.order['code'] ?? 'Orden de trabajo'}', style: Theme.of(context).textTheme.headlineSmall),
+          const SizedBox(height: 8),
+          Text('Síntomas informados: ${widget.order['reported_symptoms'] ?? 'Sin síntomas registrados'}'),
+          if (widget.order['initial_notes'] != null) ...[
+            const SizedBox(height: 4),
+            Text('Recepción: ${widget.order['initial_notes']}'),
+          ],
+          const SizedBox(height: 18),
+          DropdownButtonFormField<String>(
+            value: _statuses.contains(_status) ? _status : 'received',
+            decoration: const InputDecoration(labelText: 'Estado del trabajo'),
+            items: _statuses.map((value) => DropdownMenuItem(value: value, child: Text(value.replaceAll('_', ' ')))).toList(),
+            onChanged: (value) { if (value != null) setState(() => _status = value); },
+          ),
+          const SizedBox(height: 12),
+          TextField(controller: _diagnosis, maxLines: 4, decoration: const InputDecoration(labelText: 'Diagnóstico / pruebas pendientes', alignLabelWithHint: true)),
+          const SizedBox(height: 12),
+          if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          FilledButton.icon(onPressed: _saving ? null : _saveOrder, icon: const Icon(Icons.save_outlined), label: Text(_saving ? 'Guardando…' : 'Guardar cambios')),
+          const Divider(height: 28),
+          Row(children: [
+            Expanded(child: Text('Inspecciones', style: Theme.of(context).textTheme.titleLarge)),
+            IconButton(onPressed: _saving ? null : _addInspection, icon: const Icon(Icons.add_circle_outline), tooltip: 'Agregar inspección'),
+          ]),
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: _inspections,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+              if (snapshot.hasError) return Text('No se pudieron cargar las inspecciones: ${snapshot.error}');
+              final records = snapshot.data ?? [];
+              if (records.isEmpty) return const Text('Todavía no hay puntos de inspección registrados.');
+              return Column(children: records.map((inspection) => Card(child: ListTile(
+                leading: Icon(inspection['result'] == 'normal' ? Icons.check_circle_outline : Icons.warning_amber_outlined),
+                title: Text('${inspection['category']}: ${inspection['item']}'),
+                subtitle: Text('${inspection['result']}${inspection['measured_value'] == null ? '' : ' · ${inspection['measured_value']}'}${inspection['notes'] == null ? '' : '\n${inspection['notes']}'}'),
+                isThreeLine: inspection['notes'] != null,
+              ))).toList());
+            },
+          ),
+        ]),
+      );
 }
 
 class _PosScreen extends StatefulWidget {

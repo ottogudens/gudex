@@ -244,7 +244,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 
 ## Límites actuales
 
-El despliegue deja disponible la base funcional, no completa todos los módulos previstos. La app incluye un POS inicial para venta de productos, pero no emite boletas electrónicas ni inicia cobros directos de Mercado Pago. Formularios completos de administración, importación automática de Gmail/Drive, sincronización de Calendar y asistente de IA todavía requieren desarrollo/configuración. No registres pagos como cobrados hasta confirmar el pago por el medio externo correspondiente.
+El despliegue deja disponible la base funcional, no completa todos los módulos previstos. Administración puede registrar clientes, vehículos, órdenes, diagnósticos e inspecciones desde Flutter, además de usar el POS inicial para venta de productos. La app todavía no emite boletas electrónicas ni inicia cobros directos de Mercado Pago. Importación automática de Gmail/Drive, sincronización de Calendar y asistente de IA requieren desarrollo/configuración. No registres pagos como cobrados hasta confirmar el pago por el medio externo correspondiente.
 
 ## Referencias oficiales
 
