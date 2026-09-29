@@ -7,9 +7,9 @@
 - En desarrollo, creación única de cuentas de demostración para administrador, mecánico y cliente; contraseñas aleatorias emitidas al primer arranque y cambio de contraseña con invalidación de sesiones previas.
 - Roles de administración, mecánico y cliente. La cuenta cliente queda acotada a rutas del portal y sus recursos.
 - Clientes, vehículos, órdenes, inspecciones, diagnósticos en órdenes, cotizaciones, aprobación del cliente, citas, catálogo y movimientos de stock.
-- POS API con ítems de venta, descuento, salida de stock y registro de pagos. Un pago Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
+- POS API y pantalla inicial para administración, con carrito, descuento, cliente opcional, selección de medio de pago, confirmación de venta, historial reciente y descuento de stock. El cobro Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
 - Recepción de informe PDF LAUNCH, asociado a vehículo y opcionalmente a una orden; el original se conserva en almacenamiento local privado.
-- App Flutter inicial para autenticación y consulta de módulos por rol. El cliente puede responder a una cotización publicada.
+- App Flutter inicial para autenticación y consulta de módulos por rol. El cliente puede responder a una cotización publicada y administración ya puede registrar ventas desde el POS móvil/web.
 - Preparación de despliegue: PostgreSQL/psycopg, CORS configurable, bootstrap admin para producción y compilación Flutter Web para Vercel.
 
 ## Integraciones aún por conectar
@@ -24,7 +24,7 @@
 ## Secuencia recomendada
 
 1. Acordar el flujo tributario y el tipo de integración de Mercado Pago.
-2. Completar pantallas móviles para recepción, inspección, orden de trabajo, cotización, stock y POS.
+2. Completar pantallas móviles para recepción, inspección, orden de trabajo, cotización y gestión de stock; ampliar el POS con edición de líneas, servicios y documentos tributarios.
 3. Autorizar Google por OAuth con permisos mínimos; importar reportes del scanner y sincronizar calendario/correos.
 4. Agregar el asistente IA con herramientas de solo lectura primero y confirmación explícita para acciones.
 5. Migrar a PostgreSQL, configurar almacenamiento protegido y desplegar; agregar migraciones antes de producción.

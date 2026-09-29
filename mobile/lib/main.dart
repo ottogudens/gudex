@@ -42,6 +42,15 @@ class ApiClient {
     return _decode(response);
   }
 
+  Future<dynamic> postJson(String path, Map<String, dynamic> data) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl$path'),
+      headers: {..._headers, 'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+    return _decode(response);
+  }
+
   dynamic _decode(http.Response response) {
     final body = response.body.isEmpty ? null : jsonDecode(response.body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -253,6 +262,7 @@ class _HomePageState extends State<HomePage> {
       _Module('Clientes', '/api/v1/customers'),
       _Module('Inventario', '/api/v1/products'),
       _Module('Agenda', '/api/v1/appointments'),
+      _Module('POS', '/api/v1/sales'),
     ];
   }
 
@@ -269,7 +279,11 @@ class _HomePageState extends State<HomePage> {
         Padding(padding: const EdgeInsets.fromLTRB(18, 14, 18, 8), child: Text(
           'Hola, ${widget.name}', style: Theme.of(context).textTheme.titleLarge,
         )),
-        Expanded(child: _ModuleList(api: api, module: modules[selected], role: widget.role)),
+        Expanded(
+          child: modules[selected].path == '/api/v1/sales'
+              ? _PosScreen(api: api)
+              : _ModuleList(api: api, module: modules[selected], role: widget.role),
+        ),
       ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selected,
@@ -368,6 +382,299 @@ class _ModuleListState extends State<_ModuleList> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
+}
+
+class _PosScreen extends StatefulWidget {
+  const _PosScreen({required this.api});
+  final ApiClient api;
+
+  @override
+  State<_PosScreen> createState() => _PosScreenState();
+}
+
+class _PosScreenState extends State<_PosScreen> {
+  final _discountController = TextEditingController(text: '0');
+  List<Map<String, dynamic>> _products = [];
+  List<Map<String, dynamic>> _customers = [];
+  List<Map<String, dynamic>> _sales = [];
+  final Map<int, double> _cart = {};
+  int? _customerId;
+  String _paymentMethod = 'cash';
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    _discountController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final results = await Future.wait([
+        widget.api.get('/api/v1/products'),
+        widget.api.get('/api/v1/customers'),
+        widget.api.get('/api/v1/sales'),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _products = _asMaps(results[0]);
+        _customers = _asMaps(results[1]);
+        _sales = _asMaps(results[2]);
+        _cart.removeWhere((id, quantity) {
+          final product = _findProduct(id);
+          return product == null || quantity > _number(product['stock_quantity']);
+        });
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  List<Map<String, dynamic>> _asMaps(dynamic value) => value is List
+      ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+      : <Map<String, dynamic>>[];
+
+  Map<String, dynamic>? _findProduct(int id) {
+    for (final product in _products) {
+      if (product['id'] == id) return product;
+    }
+    return null;
+  }
+
+  double _number(dynamic value) => value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+  int _money(dynamic value) => value is num ? value.round() : int.tryParse('$value') ?? 0;
+
+  int get _subtotal => _cart.entries.fold(0, (total, entry) {
+        final product = _findProduct(entry.key);
+        if (product == null) return total;
+        return total + (entry.value * _money(product['price_clp'])).round();
+      });
+
+  int get _discount => int.tryParse(_discountController.text.trim()) ?? 0;
+  int get _total => (_subtotal - _discount).clamp(0, _subtotal).toInt();
+
+  void _changeQuantity(Map<String, dynamic> product, double delta) {
+    final id = product['id'] as int?;
+    if (id == null) return;
+    final next = (_cart[id] ?? 0) + delta;
+    if (next <= 0) {
+      setState(() => _cart.remove(id));
+    } else if (next > _number(product['stock_quantity'])) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('La cantidad supera el stock disponible.')));
+    } else {
+      setState(() => _cart[id] = next);
+    }
+  }
+
+  Future<void> _checkout() async {
+    if (_cart.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agrega al menos un producto a la venta.')));
+      return;
+    }
+    if (_discount < 0 || _discount > _subtotal) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El descuento debe estar entre cero y el subtotal.')));
+      return;
+    }
+    final total = _total;
+    final method = _paymentMethod;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar venta'),
+        content: Text(method == 'mercado_pago'
+            ? 'Se registrará la venta por ${_formatMoney(total)}. Mercado Pago quedará pendiente; esta versión no inicia el cobro.'
+            : 'Se registrará la venta por ${_formatMoney(total)} y se descontarán los productos del inventario.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmar')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _saving = true);
+    Map<String, dynamic>? sale;
+    try {
+      final result = await widget.api.postJson('/api/v1/sales', {
+        if (_customerId != null) 'customer_id': _customerId,
+        'discount_clp': _discount,
+        'lines': _cart.entries.map((entry) {
+          final product = _products.firstWhere((item) => item['id'] == entry.key);
+          return {
+            'product_id': entry.key,
+            'description': product['name'],
+            'quantity': entry.value,
+            'unit_price_clp': _money(product['price_clp']),
+          };
+        }).toList(),
+      });
+      sale = Map<String, dynamic>.from(result as Map);
+      setState(() {
+        _cart.clear();
+        _discountController.text = '0';
+      });
+
+      if (total > 0) {
+        await widget.api.postJson('/api/v1/sales/${sale['id']}/payments', {
+          'method': method,
+          'amount_clp': total,
+        });
+      }
+      await _refresh();
+      if (!mounted) return;
+      final message = method == 'mercado_pago' && total > 0
+          ? 'Venta ${sale['receipt_code']} registrada; pago Mercado Pago pendiente.'
+          : 'Venta ${sale['receipt_code']} registrada correctamente.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (sale != null) {
+        await _refresh();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Venta ${sale['receipt_code']} creada, pero no se pudo registrar el pago: ${error.toString().replaceFirst('Exception: ', '')}'),
+          duration: const Duration(seconds: 7),
+        ));
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  String _formatMoney(int amount) => '\$${amount.toString()} CLP';
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Center(child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('No se pudo cargar el POS.\n$_error', textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(onPressed: _refresh, icon: const Icon(Icons.refresh), label: const Text('Reintentar')),
+        ]),
+      ));
+    }
+    final available = _products.where((product) => product['active'] != false).toList();
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 28), children: [
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Nueva venta', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            if (available.isEmpty)
+              const Text('No hay productos disponibles en el inventario.')
+            else
+              ...available.map(_productTile),
+            const Divider(height: 28),
+            Text('Detalle', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (_cart.isEmpty) const Text('Agrega productos para comenzar.')
+            else ..._cart.entries.map(_cartTile),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<int?>(
+              value: _customerId,
+              decoration: const InputDecoration(labelText: 'Cliente (opcional)'),
+              items: [
+                const DropdownMenuItem<int?>(value: null, child: Text('Venta sin cliente')),
+                ..._customers.map((customer) => DropdownMenuItem<int?>(
+                  value: customer['id'] as int?, child: Text('${customer['full_name']}'),
+                )),
+              ],
+              onChanged: (value) => setState(() => _customerId = value),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _discountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Descuento (CLP)', prefixText: '\$'),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _paymentMethod,
+              decoration: const InputDecoration(labelText: 'Medio de pago'),
+              items: const [
+                DropdownMenuItem(value: 'cash', child: Text('Efectivo')),
+                DropdownMenuItem(value: 'card', child: Text('Tarjeta / terminal externa')),
+                DropdownMenuItem(value: 'transfer', child: Text('Transferencia')),
+                DropdownMenuItem(value: 'mercado_pago', child: Text('Mercado Pago (pendiente)')),
+              ],
+              onChanged: (value) { if (value != null) setState(() => _paymentMethod = value); },
+            ),
+            const SizedBox(height: 16),
+            _totalRow('Subtotal', _subtotal),
+            _totalRow('Descuento', _discount.clamp(0, _subtotal).toInt()),
+            const Divider(),
+            _totalRow('Total', _total, emphasize: true),
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: _saving ? null : _checkout,
+              icon: _saving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.point_of_sale),
+              label: Text(_saving ? 'Guardando…' : 'Confirmar venta'),
+            )),
+          ],
+        ))),
+        const SizedBox(height: 12),
+        Text('Ventas recientes', style: Theme.of(context).textTheme.titleLarge),
+        if (_sales.isEmpty)
+          const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Todavía no hay ventas.')))
+        else
+          ..._sales.take(10).map((sale) => _RecordCard(data: sale)),
+      ]),
+    );
+  }
+
+  Widget _productTile(Map<String, dynamic> product) {
+    final id = product['id'] as int?;
+    final stock = _number(product['stock_quantity']);
+    final quantity = id == null ? 0 : (_cart[id] ?? 0);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text('${product['name'] ?? 'Producto'}'),
+      subtitle: Text('Stock: ${stock.toStringAsFixed(stock % 1 == 0 ? 0 : 2)} ${product['unit'] ?? ''} · ${_formatMoney(_money(product['price_clp']))}'),
+      trailing: stock <= 0
+          ? const Chip(label: Text('Sin stock'))
+          : quantity == 0
+              ? IconButton(onPressed: () => _changeQuantity(product, 1), icon: const Icon(Icons.add_shopping_cart), tooltip: 'Agregar')
+              : TextButton.icon(onPressed: () => _changeQuantity(product, 1), icon: const Icon(Icons.add), label: Text(quantity.toStringAsFixed(quantity % 1 == 0 ? 0 : 2))),
+    );
+  }
+
+  Widget _cartTile(MapEntry<int, double> entry) {
+    final product = _products.firstWhere((item) => item['id'] == entry.key);
+    final lineTotal = (entry.value * _money(product['price_clp'])).round();
+    return Row(children: [
+      Expanded(child: Text('${product['name']} × ${entry.value.toStringAsFixed(entry.value % 1 == 0 ? 0 : 2)}')),
+      IconButton(onPressed: () => _changeQuantity(product, -1), icon: const Icon(Icons.remove_circle_outline), tooltip: 'Quitar una unidad'),
+      Text(_formatMoney(lineTotal)),
+    ]);
+  }
+
+  Widget _totalRow(String label, int value, {bool emphasize = false}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(label, style: emphasize ? const TextStyle(fontWeight: FontWeight.bold) : null),
+          Text(_formatMoney(value), style: emphasize ? Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold) : null),
+        ]),
+      );
 }
 
 class _RecordCard extends StatelessWidget {
