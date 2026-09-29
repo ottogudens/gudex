@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+backend/uploads/
+mobile/.dart_tool/
+mobile/.flutter-plugins*
+mobile/build/
+mobile/.packages
+mobile/pubspec.lock
+.DS_Store
