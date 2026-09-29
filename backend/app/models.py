@@ -36,6 +36,7 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.mechanic)
     customer_id: Optional[int] = Field(default=None, foreign_key="customer.id", index=True)
     active: bool = True
+    token_version: int = 0
     created_at: datetime = Field(default_factory=now_utc)
 
 

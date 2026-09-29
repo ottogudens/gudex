@@ -23,7 +23,7 @@ pip install -e .
 uvicorn app.main:app --reload
 ```
 
-La API se sirve en `http://127.0.0.1:8000`; la documentación interactiva está en `/docs`. El usuario inicial se crea al arrancar cuando `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` tienen valor. El acceso a módulos requiere Bearer JWT. La base SQLite y los archivos adjuntos se crean localmente. Para despliegue se debe configurar PostgreSQL, almacenamiento privado, HTTPS y secretos del proveedor en el servidor.
+La API se sirve en `http://127.0.0.1:8000`; la documentación interactiva está en `/docs`. En `APP_ENV=development`, el primer arranque crea un administrador, un mecánico y un cliente con contraseñas aleatorias, que se muestran una sola vez en la terminal. Anótalas y cámbialas después del primer acceso. En producción configura `APP_ENV=production`; las cuentas de demostración no se crearán. El acceso a módulos requiere Bearer JWT. La base SQLite y los archivos adjuntos se crean localmente. Para despliegue se debe configurar PostgreSQL, almacenamiento privado, HTTPS y secretos del proveedor en el servidor.
 
 ## Aplicación Flutter
 

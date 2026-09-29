@@ -23,7 +23,8 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user: User) -> str:
     expiry = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_LIFETIME_MINUTES)
-    return jwt.encode({"sub": user.email, "role": user.role.value, "exp": expiry}, settings.jwt_secret, algorithm="HS256")
+    return jwt.encode({"sub": user.email, "role": user.role.value, "ver": user.token_version,
+                       "exp": expiry}, settings.jwt_secret, algorithm="HS256")
 
 
 def authenticate(email: str, password: str) -> User | None:
@@ -56,11 +57,15 @@ async def require_authenticated_request(request: Request, call_next):
                 if not user or user.role != role:
                     return _unauthorized()
                 if role == UserRole.customer:
-                    if not request.url.path.startswith("/api/v1/portal/") or not user.customer_id:
+                    allowed_customer_path = request.url.path.startswith("/api/v1/portal/") or request.url.path == "/api/v1/account/password"
+                    if not allowed_customer_path or (request.url.path.startswith("/api/v1/portal/") and not user.customer_id):
                         return JSONResponse(status_code=403, content={"detail": "Este recurso no está disponible para clientes"})
-                    request.state.customer_id = user.customer_id
+                    if user.customer_id:
+                        request.state.customer_id = user.customer_id
                 elif request.url.path.startswith("/api/v1/portal/"):
                     return JSONResponse(status_code=403, content={"detail": "El portal requiere una cuenta de cliente"})
+                if payload.get("ver", 0) != user.token_version:
+                    return _unauthorized()
                 request.state.user_role = role.value
                 request.state.user_email = email
         except (jwt.PyJWTError, ValueError):

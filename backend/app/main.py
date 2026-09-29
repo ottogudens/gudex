@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import secrets
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -14,9 +15,9 @@ from app.models import (
 )
 from app.schemas import (
     AppointmentCreate, CustomerCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
-    SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderCreate, WorkOrderUpdate,
+    PasswordChange, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderCreate, WorkOrderUpdate,
 )
-from app.security import authenticate, create_access_token, hash_password, require_admin, require_authenticated_request
+from app.security import authenticate, create_access_token, hash_password, require_admin, require_authenticated_request, verify_password
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
 app.middleware("http")(require_authenticated_request)
@@ -26,13 +27,35 @@ app.middleware("http")(require_authenticated_request)
 def on_startup() -> None:
     create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
+    if settings.app_env.lower() == "development" and settings.seed_default_users:
         with Session(engine) as session:
-            existing = session.exec(select(User).where(User.email == settings.bootstrap_admin_email.lower())).first()
-            if not existing:
-                session.add(User(email=settings.bootstrap_admin_email.lower(), full_name="Administrador",
-                                 password_hash=hash_password(settings.bootstrap_admin_password), role=UserRole.admin))
+            customer = session.exec(select(Customer).where(Customer.email == settings.default_customer_email.lower())).first()
+            if not customer:
+                customer = Customer(full_name="Cliente de demostración", email=settings.default_customer_email.lower(),
+                                    phone="+56900000000", notes="Cuenta inicial de demostración")
+                session.add(customer)
                 session.commit()
+                session.refresh(customer)
+            accounts = [
+                (settings.default_admin_email, "Administrador", UserRole.admin, None),
+                (settings.default_mechanic_email, "Mecánico", UserRole.mechanic, None),
+                (settings.default_customer_email, "Cliente de demostración", UserRole.customer, customer.id),
+            ]
+            created = []
+            for email, full_name, role, customer_id in accounts:
+                normalized_email = email.strip().lower()
+                if session.exec(select(User).where(User.email == normalized_email)).first():
+                    continue
+                password = secrets.token_urlsafe(18)
+                session.add(User(email=normalized_email, full_name=full_name, password_hash=hash_password(password),
+                                 role=role, customer_id=customer_id))
+                created.append((normalized_email, role.value, password))
+            if created:
+                session.commit()
+                print("\nCUENTAS INICIALES DE DESARROLLO (se muestran solo al crearlas):")
+                for email, role, password in created:
+                    print(f"  perfil={role}  correo={email}  contraseña={password}")
+                print("Guarda estas contraseñas ahora y cambia cada una después del primer inicio.\n")
 
 
 @app.post("/auth/token")
@@ -42,6 +65,20 @@ def login(username: str = Form(...), password: str = Form(...)):
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos", headers={"WWW-Authenticate": "Bearer"})
     return {"access_token": create_access_token(user), "token_type": "bearer", "role": user.role.value,
             "full_name": user.full_name, "expires_in": 28800}
+
+
+@app.post("/api/v1/account/password")
+def change_password(data: PasswordChange, request: Request, session: Session = Depends(get_session)):
+    if len(data.new_password) < 12:
+        raise HTTPException(422, "La nueva contraseña debe tener al menos 12 caracteres")
+    user = session.exec(select(User).where(User.email == request.state.user_email)).first()
+    if not user or not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(401, "La contraseña actual es incorrecta")
+    user.password_hash = hash_password(data.new_password)
+    user.token_version += 1
+    session.add(user)
+    session.commit()
+    return {"message": "Contraseña actualizada. Inicia sesión nuevamente."}
 
 
 @app.post("/api/v1/users", status_code=201, dependencies=[Depends(require_admin)])

@@ -3,7 +3,8 @@
 ## Base implementada
 
 - API FastAPI y persistencia SQLModel/SQLite para desarrollo.
-- Inicio de sesión con JWT, contraseñas Argon2, usuario inicial de administración por variables de entorno y alta de cuentas por administración.
+- Inicio de sesión con JWT, contraseñas Argon2 y alta de cuentas de equipo por administración.
+- En desarrollo, creación única de cuentas de demostración para administrador, mecánico y cliente; contraseñas aleatorias emitidas al primer arranque y cambio de contraseña con invalidación de sesiones previas.
 - Roles de administración, mecánico y cliente. La cuenta cliente queda acotada a rutas del portal y sus recursos.
 - Clientes, vehículos, órdenes, inspecciones, diagnósticos en órdenes, cotizaciones, aprobación del cliente, citas, catálogo y movimientos de stock.
 - POS API con ítems de venta, descuento, salida de stock y registro de pagos. Un pago Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
@@ -26,4 +27,3 @@
 3. Autorizar Google por OAuth con permisos mínimos; importar reportes del scanner y sincronizar calendario/correos.
 4. Agregar el asistente IA con herramientas de solo lectura primero y confirmación explícita para acciones.
 5. Migrar a PostgreSQL, configurar almacenamiento protegido y desplegar; agregar migraciones antes de producción.
-

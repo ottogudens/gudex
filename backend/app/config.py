@@ -3,12 +3,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "Lubricentro API"
+    app_env: str = "development"
+    seed_default_users: bool = True
+    default_admin_email: str = "admin@lubricentro.local"
+    default_mechanic_email: str = "mecanico@lubricentro.local"
+    default_customer_email: str = "cliente@lubricentro.local"
     database_url: str = "sqlite:///./lubricentro.db"
     upload_dir: str = "./uploads"
     max_upload_bytes: int = 15_000_000
     jwt_secret: str = "development-only-change-me"
-    bootstrap_admin_email: str | None = None
-    bootstrap_admin_password: str | None = None
     mercadopago_access_token: str | None = None
     google_client_id: str | None = None
     google_client_secret: str | None = None

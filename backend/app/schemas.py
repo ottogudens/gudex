@@ -14,6 +14,11 @@ class UserCreate(SQLModel):
     customer_id: Optional[int] = None
 
 
+class PasswordChange(SQLModel):
+    current_password: str
+    new_password: str
+
+
 class ScannerReportRead(SQLModel):
     id: int
     vehicle_id: int
