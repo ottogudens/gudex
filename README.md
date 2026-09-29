@@ -29,6 +29,8 @@ La API se sirve en `http://127.0.0.1:8000`; la documentación interactiva está 
 
 Instala Flutter, entra a `mobile/`, ejecuta `flutter pub get` y `flutter run`. En el emulador Android, la dirección inicial de API es `http://10.0.2.2:8000`; para un teléfono físico, ingresa la dirección local del servidor que ambos dispositivos puedan alcanzar.
 
+Para desplegar backend y PostgreSQL en Railway, y Flutter Web en Vercel, sigue el [manual de despliegue y pruebas](docs/despliegue-railway-vercel.md).
+
 ## Módulos MVP
 
 - Clientes y vehículos.

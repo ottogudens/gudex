@@ -7,6 +7,10 @@ import 'package:http/http.dart' as http;
 void main() => runApp(const LubricentroApp());
 
 const _storage = FlutterSecureStorage();
+const _defaultApiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8000',
+);
 
 class ApiClient {
   ApiClient(this.baseUrl, {this.token});
@@ -145,7 +149,7 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final _baseUrl = TextEditingController(text: 'http://10.0.2.2:8000');
+  final _baseUrl = TextEditingController(text: _defaultApiBaseUrl);
   bool _busy = false;
   String? _error;
 

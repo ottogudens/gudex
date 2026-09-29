@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -21,12 +22,33 @@ from app.security import authenticate, create_access_token, hash_password, requi
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
 app.middleware("http")(require_authenticated_request)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.on_event("startup")
 def on_startup() -> None:
+    if settings.app_env.lower() == "production":
+        if settings.jwt_secret == "development-only-change-me" or len(settings.jwt_secret) < 32:
+            raise RuntimeError("En producción JWT_SECRET debe ser una clave aleatoria de al menos 32 caracteres")
+        if settings.seed_default_users:
+            raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
     create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    if settings.app_env.lower() == "production" and settings.bootstrap_admin_email and settings.bootstrap_admin_password:
+        with Session(engine) as session:
+            existing = session.exec(select(User).where(User.email == settings.bootstrap_admin_email.lower())).first()
+            if not existing:
+                if len(settings.bootstrap_admin_password) < 12:
+                    raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD debe tener al menos 12 caracteres")
+                session.add(User(email=settings.bootstrap_admin_email.lower(), full_name="Administrador",
+                                 password_hash=hash_password(settings.bootstrap_admin_password), role=UserRole.admin))
+                session.commit()
     if settings.app_env.lower() == "development" and settings.seed_default_users:
         with Session(engine) as session:
             customer = session.exec(select(Customer).where(Customer.email == settings.default_customer_email.lower())).first()

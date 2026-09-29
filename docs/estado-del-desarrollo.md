@@ -10,6 +10,7 @@
 - POS API con ítems de venta, descuento, salida de stock y registro de pagos. Un pago Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
 - Recepción de informe PDF LAUNCH, asociado a vehículo y opcionalmente a una orden; el original se conserva en almacenamiento local privado.
 - App Flutter inicial para autenticación y consulta de módulos por rol. El cliente puede responder a una cotización publicada.
+- Preparación de despliegue: PostgreSQL/psycopg, CORS configurable, bootstrap admin para producción y compilación Flutter Web para Vercel.
 
 ## Integraciones aún por conectar
 
