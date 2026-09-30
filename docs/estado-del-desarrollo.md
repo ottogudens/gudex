@@ -26,6 +26,7 @@
 - Fase 3: autorización OAuth Google de backend, almacenamiento cifrado de tokens, listado/importación manual de informes PDF desde Gmail/Drive y sincronización explícita de citas a Calendar.
 - Fase 4: asistente Responses API con salida estructurada, contextos acotados por rol, portal de cliente aislado, registro de propuestas/confirmaciones y ejecución confirmada de cambios de estado permitidos.
 - Flutter: pantalla de integraciones para administración y acceso al asistente para cada rol; Google OAuth abre en navegador externo.
+- Fase 5 (primera pasada): tema visual compartido Gudex, acceso renovado, shell adaptable con contenido centrado, etiquetas de navegación compactas, tarjetas de estado y estados de carga/error/vacío más claros. Pendiente verificación visual en Flutter Web, Android y iOS.
 
 ## Integraciones aún por conectar
 

@@ -9,6 +9,15 @@ import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(const LubricentroApp());
 
+abstract final class GudexColors {
+  static const ink = Color(0xFF163247);
+  static const primary = Color(0xFF0B7285);
+  static const secondary = Color(0xFF159A9C);
+  static const canvas = Color(0xFFF3F7F9);
+  static const line = Color(0xFFDCE6EA);
+  static const success = Color(0xFF237A57);
+}
+
 const _storage = FlutterSecureStorage();
 const _defaultApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -101,12 +110,73 @@ class LubricentroApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Lubricentro',
+        title: 'Gudex',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0E7490)),
+          colorScheme: ColorScheme.fromSeed(seedColor: GudexColors.primary).copyWith(
+            primary: GudexColors.primary,
+            secondary: GudexColors.secondary,
+            surface: Colors.white,
+          ),
           useMaterial3: true,
-          inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),
+          scaffoldBackgroundColor: GudexColors.canvas,
+          appBarTheme: const AppBarTheme(
+            backgroundColor: GudexColors.canvas,
+            foregroundColor: GudexColors.ink,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+          ),
+          cardTheme: CardThemeData(
+            color: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: GudexColors.line),
+            ),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: GudexColors.line),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: GudexColors.primary, width: 1.7),
+            ),
+          ),
+          filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(48, 48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(44, 44),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          dialogTheme: DialogThemeData(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+          navigationBarTheme: NavigationBarThemeData(
+            backgroundColor: Colors.white,
+            indicatorColor: const Color(0xFFD9F0EF),
+            elevation: 2,
+            labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
+              fontSize: 11,
+              fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+            )),
+          ),
         ),
         home: const SessionGate(),
       );
@@ -221,34 +291,75 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                const Icon(Icons.build_circle_outlined, size: 64),
-                const SizedBox(height: 12),
-                Text('Gestión del lubricentro', textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 28),
-                TextField(controller: _baseUrl, decoration: const InputDecoration(labelText: 'Dirección de la API')),
-                const SizedBox(height: 12),
-                TextField(controller: _email, keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Correo')),
-                const SizedBox(height: 12),
-                TextField(controller: _password, obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Contraseña'),
-                    onSubmitted: (_) => _submit()),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ],
-                const SizedBox(height: 20),
-                FilledButton(onPressed: _busy ? null : _submit,
-                    child: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator()) : const Text('Ingresar')),
-              ]),
+        body: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [GudexColors.ink, GudexColors.primary],
             ),
+          ),
+          child: SafeArea(
+            child: LayoutBuilder(builder: (context, constraints) => Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(22),
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    child: Padding(
+                      padding: EdgeInsets.all(constraints.maxWidth < 380 ? 22 : 30),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        Align(alignment: Alignment.centerLeft, child: Container(
+                          width: 58, height: 58,
+                          decoration: BoxDecoration(color: const Color(0xFFE0F2F1), borderRadius: BorderRadius.circular(18)),
+                          child: const Icon(Icons.build_rounded, size: 31, color: GudexColors.primary),
+                        )),
+                        const SizedBox(height: 22),
+                        Text('Gudex', style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          color: GudexColors.ink, fontWeight: FontWeight.w800, letterSpacing: -0.6,
+                        )),
+                        const SizedBox(height: 5),
+                        Text('Gestión simple para tu lubricentro', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: const Color(0xFF5B6F7A))),
+                        const SizedBox(height: 28),
+                        TextField(controller: _email, keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [AutofillHints.username, AutofillHints.email],
+                          decoration: const InputDecoration(labelText: 'Correo', prefixIcon: Icon(Icons.mail_outline))),
+                        const SizedBox(height: 14),
+                        TextField(controller: _password, obscureText: true,
+                          autofillHints: const [AutofillHints.password],
+                          decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock_outline)),
+                          onSubmitted: (_) => _submit()),
+                        if (_error != null) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(color: Theme.of(context).colorScheme.errorContainer, borderRadius: BorderRadius.circular(12)),
+                            child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                          ),
+                        ],
+                        const SizedBox(height: 22),
+                        FilledButton(
+                          onPressed: _busy ? null : _submit,
+                          child: _busy
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('Ingresar'),
+                        ),
+                        const SizedBox(height: 8),
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          childrenPadding: EdgeInsets.zero,
+                          title: const Text('Configuración de conexión', style: TextStyle(fontSize: 13)),
+                          children: [TextField(controller: _baseUrl, keyboardType: TextInputType.url,
+                            decoration: const InputDecoration(labelText: 'Dirección de la API', prefixIcon: Icon(Icons.dns_outlined)))],
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            )),
           ),
         ),
       );
@@ -306,6 +417,43 @@ class _HomePageState extends State<HomePage> {
     final modules = _modules;
     final selected = _selected.clamp(0, modules.length - 1).toInt();
     final api = ApiClient(widget.baseUrl, token: widget.token);
+    final useNavigationRail = MediaQuery.sizeOf(context).width >= 900;
+    final pageContent = SafeArea(child: LayoutBuilder(builder: (context, constraints) => Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1320),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 12), child: Row(children: [
+            CircleAvatar(
+              radius: 23,
+              backgroundColor: const Color(0xFFD9F0EF),
+              child: Icon(widget.role == 'customer' ? Icons.person_outline : Icons.handyman_outlined,
+                  color: GudexColors.primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Hola, ${widget.name}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: GudexColors.ink)),
+              Text(_roleName(widget.role), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFF637986))),
+            ])),
+            if (constraints.maxWidth >= 600) _RoleChip(role: widget.role),
+          ])),
+          Expanded(
+            child: Center(child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1120),
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child:
+                modules[selected].path == '/api/v1/sales'
+                    ? _PosScreen(api: api)
+                    : modules[selected].path == '/api/v1/products'
+                        ? _InventoryScreen(api: api, canManage: widget.role == 'admin')
+                    : {'/api/v1/work-orders', '/api/v1/customers'}.contains(modules[selected].path)
+                        ? _WorkshopScreen(api: api, module: modules[selected], role: widget.role)
+                        : _ModuleList(api: api, module: modules[selected], role: widget.role),
+              ),
+            )),
+          ),
+        ]),
+      ),
+    )));
     return Scaffold(
       appBar: AppBar(title: const Text('Gudex'), actions: [
         IconButton(tooltip: 'Asistente IA', icon: const Icon(Icons.auto_awesome), onPressed: () => Navigator.push(context,
@@ -314,25 +462,24 @@ class _HomePageState extends State<HomePage> {
           MaterialPageRoute(builder: (_) => _IntegrationSettingsScreen(api: api)))),
         IconButton(onPressed: widget.onSignOut, tooltip: 'Cerrar sesión', icon: const Icon(Icons.logout)),
       ]),
-      body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(padding: const EdgeInsets.fromLTRB(18, 14, 18, 8), child: Text(
-          'Hola, ${widget.name}', style: Theme.of(context).textTheme.titleLarge,
-        )),
-        Expanded(
-          child: modules[selected].path == '/api/v1/sales'
-              ? _PosScreen(api: api)
-              : modules[selected].path == '/api/v1/products'
-                  ? _InventoryScreen(api: api, canManage: widget.role == 'admin')
-              : {'/api/v1/work-orders', '/api/v1/customers'}.contains(modules[selected].path)
-                  ? _WorkshopScreen(api: api, module: modules[selected], role: widget.role)
-                  : _ModuleList(api: api, module: modules[selected], role: widget.role),
+      body: useNavigationRail ? Row(children: [
+        NavigationRail(
+          extended: true,
+          selectedIndex: selected,
+          onDestinationSelected: (index) => setState(() => _selected = index),
+          destinations: [for (final module in modules) NavigationRailDestination(
+            icon: Icon(_iconFor(module.title)), label: Text(module.title),
+          )],
         ),
-      ]),
-      bottomNavigationBar: NavigationBar(
+        const VerticalDivider(width: 1, thickness: 1, color: GudexColors.line),
+        Expanded(child: pageContent),
+      ]) : pageContent,
+      bottomNavigationBar: useNavigationRail ? null : NavigationBar(
         selectedIndex: selected,
         onDestinationSelected: (index) => setState(() => _selected = index),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: [for (final module in modules.take(5)) NavigationDestination(
-          icon: Icon(_iconFor(module.title)), label: module.title,
+          icon: Icon(_iconFor(module.title)), label: _navLabel(module.title),
         )],
       ),
     );
@@ -345,6 +492,35 @@ class _HomePageState extends State<HomePage> {
     if (title.contains('Cotizaciones')) return Icons.request_quote_outlined;
     return Icons.calendar_month_outlined;
   }
+
+  String _navLabel(String title) {
+    if (title == 'Órdenes de trabajo') return 'Órdenes';
+    if (title == 'Trabajos anteriores') return 'Trabajos';
+    if (title == 'Mis vehículos') return 'Vehículos';
+    if (title == 'Inventario') return 'Stock';
+    if (title == 'Cotizaciones') return 'Cotiz.';
+    if (title == 'Mis citas') return 'Citas';
+    return title;
+  }
+
+  String _roleName(String role) {
+    if (role == 'admin') return 'Administración';
+    if (role == 'mechanic') return 'Equipo mecánico';
+    return 'Portal de cliente';
+  }
+}
+
+class _RoleChip extends StatelessWidget {
+  const _RoleChip({required this.role});
+  final String role;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+    decoration: BoxDecoration(color: const Color(0xFFE5F2F4), borderRadius: BorderRadius.circular(30)),
+    child: Text(role == 'admin' ? 'ADMINISTRACIÓN' : role == 'mechanic' ? 'MECÁNICO' : 'CLIENTE',
+      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: .5, color: GudexColors.primary)),
+  );
 }
 
 class _AssistantScreen extends StatefulWidget {
@@ -655,14 +831,36 @@ class _ModuleListState extends State<_ModuleList> {
   Widget build(BuildContext context) => FutureBuilder<List<dynamic>>(
         future: _items,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(
-            'No se pudieron cargar los datos.\n${snapshot.error}', textAlign: TextAlign.center,
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              CircularProgressIndicator(), SizedBox(height: 12), Text('Cargando información…'),
+            ]),
+          );
+          if (snapshot.hasError) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(
+            mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.cloud_off_outlined, size: 40, color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: 12),
+              Text('No se pudo cargar ${widget.module.title.toLowerCase()}.', textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              Text('${snapshot.error}'.replaceFirst('Exception: ', ''), textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(onPressed: () => setState(() => _items = _load()),
+                icon: const Icon(Icons.refresh), label: const Text('Reintentar')),
+            ],
           )));
           final items = snapshot.data ?? [];
           if (items.isEmpty) return RefreshIndicator(
             onRefresh: () async => setState(() => _items = _load()),
-            child: ListView(children: [SizedBox(height: 340, child: Center(child: Text('No hay ${widget.module.title.toLowerCase()} para mostrar.')))]),
+            child: ListView(children: [SizedBox(height: 360, child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 64, height: 64, decoration: const BoxDecoration(color: Color(0xFFE5F2F4), shape: BoxShape.circle),
+                child: const Icon(Icons.inbox_outlined, color: GudexColors.primary, size: 30)),
+              const SizedBox(height: 14),
+              Text('Aún no hay ${widget.module.title.toLowerCase()}.', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 5),
+              const Text('Desliza hacia abajo para actualizar.', style: TextStyle(color: Color(0xFF637986))),
+            ])))]),
           );
           return RefreshIndicator(
             onRefresh: () async => setState(() => _items = _load()),
@@ -930,7 +1128,7 @@ class _InventoryScreenState extends State<_InventoryScreen> {
               final dateText = date == null ? '' : '${date.toLocal()}'.split('.').first;
               return ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(delta >= 0 ? Icons.arrow_downward : Icons.arrow_upward, color: delta >= 0 ? Colors.green : Theme.of(context).colorScheme.error),
+                leading: Icon(delta >= 0 ? Icons.arrow_downward : Icons.arrow_upward, color: delta >= 0 ? GudexColors.success : Theme.of(context).colorScheme.error),
                 title: Text('${delta >= 0 ? '+' : ''}${_qtyText(delta)} ${product['unit'] ?? 'unidad'} · ${movement['reason'] ?? 'movimiento'}'),
                 subtitle: Text([dateText, movement['reference']].where((value) => value != null && '$value'.isNotEmpty).join(' · ')),
               );
@@ -2141,12 +2339,25 @@ class _RecordCard extends StatelessWidget {
         !{'id', 'customer_id', 'vehicle_id', 'work_order_id', 'storage_path', 'google_event_id'}.contains(entry.key) &&
         _displayValue(entry.key, entry.value).isNotEmpty).take(4).toList();
     final title = (data['code'] ?? data['plate'] ?? data['full_name'] ?? data['name'] ?? data['description'] ?? data['service_type'] ?? 'Registro').toString();
+    final status = data['status']?.toString();
+    final statusStyle = _statusStyle(context, status);
     return Card(margin: const EdgeInsets.symmetric(vertical: 6), child: Padding(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: GudexColors.ink))),
+          if (statusStyle != null) ...[
+            const SizedBox(width: 8),
+            Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(color: statusStyle.$1, borderRadius: BorderRadius.circular(30)),
+              child: Text(status!.replaceAll('_', ' '), maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: statusStyle.$2, fontSize: 10, fontWeight: FontWeight.w700)))),
+          ],
+        ]),
         for (final entry in entries)
-          Padding(padding: const EdgeInsets.only(top: 5), child: Text('${entry.key.replaceAll('_', ' ')}: ${_displayValue(entry.key, entry.value)}')),
+          Padding(padding: const EdgeInsets.only(top: 6), child: Text('${entry.key.replaceAll('_', ' ')}: ${_displayValue(entry.key, entry.value)}',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: const Color(0xFF536B78)))),
         if (onApprove != null || onReject != null || onOpen != null) ...[
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [
@@ -2157,5 +2368,19 @@ class _RecordCard extends StatelessWidget {
         ],
       ]),
     ));
+  }
+
+  (Color, Color)? _statusStyle(BuildContext context, String? status) {
+    if (status == null) return null;
+    if ({'failed', 'cancelled', 'rejected', 'quote_rejected'}.contains(status)) {
+      return (Theme.of(context).colorScheme.errorContainer, Theme.of(context).colorScheme.onErrorContainer);
+    }
+    if ({'ready', 'delivered', 'approved', 'paid', 'normal', 'completed'}.contains(status)) {
+      return (const Color(0xFFE3F3E9), GudexColors.success);
+    }
+    if ({'in_progress', 'inspecting', 'awaiting_approval', 'requested', 'sent', 'pending'}.contains(status)) {
+      return (const Color(0xFFFFF2D8), const Color(0xFF835A00));
+    }
+    return (const Color(0xFFE5F2F4), GudexColors.primary);
   }
 }
