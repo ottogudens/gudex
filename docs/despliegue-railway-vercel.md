@@ -18,9 +18,10 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 1. En Railway crea un proyecto y agrega un servicio **PostgreSQL**.
 2. Agrega otro servicio desde el repositorio GitHub `ottogudens/gudex`, rama `main`.
 3. En los ajustes del servicio API configura **Root Directory** como `/backend`. Este repositorio contiene backend y frontend en directorios separados.
-4. Deja que Railway/Railpack instale las dependencias declaradas en `requirements.txt` y `pyproject.toml`. El archivo `requirements.txt` hace explícitas las dependencias de ejecución, incluido Uvicorn.
-5. El archivo `railway.json` en la raíz configura `alembic upgrade head` como comando previo, el inicio con `python -m uvicorn` y el health check `/health`. En los detalles confirma que Railway haya aplicado esos valores.
-6. En Variables del servicio API añade:
+4. En **Config as Code → Config File Path** configura `/backend/railway.json`. Railway no ajusta automáticamente esta ruta al Root Directory. Si queda usando `/railway.json`, el predeploy de Alembic no se ejecutará.
+5. Deja que Railway/Railpack instale las dependencias declaradas en `requirements.txt` y `pyproject.toml`. El archivo `requirements.txt` hace explícitas las dependencias de ejecución, incluido Uvicorn.
+6. El archivo `backend/railway.json` configura `alembic upgrade head` como comando previo, el inicio con `python -m uvicorn` y el health check `/health`. En los detalles confirma que Railway haya aplicado esos valores.
+7. En Variables del servicio API añade:
 
    | Variable | Valor |
    |---|---|
@@ -36,10 +37,10 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 
    Railway proporciona `DATABASE_URL` para que los servicios del mismo proyecto se conecten a PostgreSQL. No copies ni expongas la contraseña de la base de datos en el frontend.
 
-7. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
-8. Pulsa Deploy. Railway debe mostrar la migración `20260930_0001` antes de iniciar Uvicorn. En producción la API no crea tablas durante el arranque; si la migración falla, el contenedor no debe reemplazar la versión activa.
-9. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
-10. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
+8. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
+9. Pulsa Deploy. Railway debe mostrar la migración `20260930_0001` antes de iniciar Uvicorn. Como recuperación de instalaciones anteriores, el arranque puede crear únicamente tablas faltantes de esta línea base; los cambios posteriores deben seguir pasando por Alembic.
+10. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
+11. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
 
    ```text
    https://<dominio-api>/health

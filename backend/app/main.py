@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -44,6 +45,12 @@ def on_startup() -> None:
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
     if settings.app_env.lower() != "production":
+        create_db_and_tables()
+    elif not inspect(engine).has_table("inspectiontemplate"):
+        # Recupera instalaciones anteriores cuyo servicio Railway aún no tenía
+        # configurado el predeploy de Alembic. create_all solo agrega tablas
+        # faltantes; la migración posterior adopta el esquema sin borrar datos.
+        print("ADVERTENCIA: falta la línea base de inspecciones; creando tablas faltantes antes del sembrado.")
         create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     seed_default_inspection_templates()
