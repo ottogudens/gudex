@@ -2939,7 +2939,7 @@ class _AgendaScreenState extends State<_AgendaScreen> {
               subtitle: Text('Cliente #' + item['customer_id'].toString() + ' · ' + item['status'].toString()),
               trailing: widget.role == 'admin' && item['status'] == 'requested' ? FilledButton(onPressed: () => _changeStatus(item['id'] as int, 'confirmed'), child: const Text('Confirmar')) : null,
             ); }),
-          ]));
+          ])));
         },
       ))),
     ]);
