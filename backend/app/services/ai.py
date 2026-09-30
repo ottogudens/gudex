@@ -52,7 +52,19 @@ async def generate_answer(question: str, context: dict, model: str | None = None
     if response.status_code in {401, 403}:
         raise HTTPException(503, "El proveedor rechazó AI_API_KEY o el modelo configurado")
     if response.status_code == 429:
-        raise HTTPException(429, "Se alcanzó el límite temporal del proveedor de IA")
+        # Un 429 puede ser una pausa temporal o un límite de crédito/cuota. No
+        # se expone el cuerpo del proveedor, pero sí una indicación accionable.
+        try:
+            provider_error = response.json().get("error", {})
+        except ValueError:
+            provider_error = {}
+        code = str(provider_error.get("code", ""))
+        if code in {"credit_balance_exhausted", "organization_spend_limit_exceeded",
+                    "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
+            raise HTTPException(429, "El crédito o límite de gasto de la API de IA está agotado. Revisa la facturación y los límites del proyecto.")
+        retry_after = response.headers.get("retry-after")
+        wait = f" Espera al menos {retry_after} segundos antes de reintentar." if retry_after else ""
+        raise HTTPException(429, "El proveedor de IA alcanzó un límite temporal de solicitudes." + wait)
     if response.is_error:
         raise HTTPException(502, f"Error del proveedor de IA ({response.status_code})")
     body = response.json()
