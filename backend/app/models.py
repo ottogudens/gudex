@@ -124,6 +124,15 @@ class WorkOrderAssignment(SQLModel, table=True):
     assigned_at: datetime = Field(default_factory=now_utc)
 
 
+class AIConfiguration(SQLModel, table=True):
+    """Non-secret, administrator-selected model configuration."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    selected_model: str = Field(max_length=120)
+    updated_by_email: Optional[str] = Field(default=None, max_length=254)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
 class Inspection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     work_order_id: int = Field(foreign_key="workorder.id", index=True)

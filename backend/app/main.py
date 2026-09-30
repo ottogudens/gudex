@@ -369,6 +369,47 @@ def vehicle_history(vehicle_id: int, session: Session = Depends(get_session)):
     return vehicle_history_payload(session, vehicle)
 
 
+@app.get("/api/v1/dashboard", dependencies=[Depends(require_admin)])
+def workshop_dashboard(session: Session = Depends(get_session)):
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    orders = session.exec(select(WorkOrder).order_by(WorkOrder.opened_at.desc())).all()
+    appointments = session.exec(select(Appointment).order_by(Appointment.starts_at)).all()
+    products = session.exec(select(Product).where(Product.active == True)).all()  # noqa: E712
+    quotes = session.exec(select(Quote).where(Quote.status == "sent")).all()
+    sales = session.exec(select(Sale)).all()
+
+    def as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+    def local_day(value: datetime | None) -> bool:
+        if not value:
+            return False
+        return as_utc(value).date() == today
+
+    active = [order for order in orders if order.status not in {WorkStatus.delivered, WorkStatus.cancelled}]
+    overdue = [order for order in active if order.promised_at and as_utc(order.promised_at) < now]
+    today_appointments = [item for item in appointments if local_day(item.starts_at) and item.status != "cancelled"]
+    low_stock = [product for product in products if product.stock_quantity <= product.minimum_quantity]
+    today_sales = [sale for sale in sales if local_day(sale.created_at) and sale.status == "paid"]
+    return {
+        "generated_at": now,
+        "metrics": {
+            "active_orders": len(active), "overdue_orders": len(overdue),
+            "today_appointments": len(today_appointments), "requested_appointments": sum(1 for item in appointments if item.status == "requested"),
+            "low_stock": len(low_stock), "quotes_pending": len(quotes),
+            "sales_today_clp": sum(sale.total_clp for sale in today_sales),
+        },
+        "urgent_orders": [{"id": item.id, "code": item.code, "status": item.status.value, "promised_at": item.promised_at,
+                           "technician_name": item.technician_name, "vehicle_id": item.vehicle_id} for item in overdue[:8]],
+        "today_schedule": [{"id": item.id, "starts_at": item.starts_at, "service_type": item.service_type,
+                            "status": item.status, "customer_id": item.customer_id, "vehicle_id": item.vehicle_id}
+                           for item in today_appointments[:10]],
+        "low_stock_items": [{"id": item.id, "name": item.name, "stock_quantity": item.stock_quantity,
+                             "minimum_quantity": item.minimum_quantity, "unit": item.unit} for item in low_stock[:10]],
+    }
+
+
 @app.get("/api/v1/portal/vehicles/{vehicle_id}/history")
 def customer_vehicle_history(vehicle_id: int, request: Request, session: Session = Depends(get_session)):
     vehicle = session.get(Vehicle, vehicle_id)

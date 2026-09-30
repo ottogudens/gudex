@@ -10,7 +10,7 @@ from app.config import settings
 SYSTEM_PROMPT = """Eres el asistente de Gudex, un lubricentro chileno. Usa solo hechos del contexto recibido; nunca inventes historial ni especificaciones. Separa hechos, posibles causas y verificaciones sugeridas. Ninguna causa es diagnóstico confirmado sin pruebas. Advierte riesgos de seguridad. Responde en español claro. Solo propone acciones permitidas; nunca las ejecutes."""
 
 
-async def generate_answer(question: str, context: dict) -> dict:
+async def generate_answer(question: str, context: dict, model: str | None = None) -> dict:
     if (settings.ai_provider or "").lower() != "openai" or not settings.ai_api_key:
         raise HTTPException(503, "Asistente IA sin configurar: establece AI_PROVIDER=openai y AI_API_KEY en Railway")
     schema = {
@@ -32,7 +32,7 @@ async def generate_answer(question: str, context: dict) -> dict:
         "required": ["answer", "known_facts", "possible_causes", "suggested_checks", "safety_warning", "proposed_action"],
     }
     payload = {
-        "model": settings.ai_model,
+        "model": model or settings.ai_model,
         "store": False,
         "max_output_tokens": settings.ai_max_output_tokens,
         "input": [

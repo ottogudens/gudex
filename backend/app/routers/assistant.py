@@ -9,6 +9,7 @@ from app.models import (AIInteraction, Appointment, Customer, Inspection, Produc
                         ScannerReport, UserRole, Vehicle, WorkOrder, WorkStatus)
 from app.schemas import AssistantConfirmation, AssistantQuery
 from app.services.ai import generate_answer
+from app.routers.integrations import selected_ai_model
 
 router = APIRouter()
 
@@ -131,7 +132,7 @@ async def _query(query: AssistantQuery, request: Request, session: Session, cust
     context = build_context(session, query, role, customer_id)
     _audit_cleanup(session)
     try:
-        answer = await generate_answer(query.message, context)
+        answer = await generate_answer(query.message, context, selected_ai_model(session))
     except HTTPException as exc:
         session.add(AIInteraction(
             requested_by_email=request.state.user_email, user_role=role, question=query.message,

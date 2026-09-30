@@ -33,6 +33,8 @@
 
 - Vistas operativas P0: ficha navegable de vehículo con historial de órdenes, citas e informes LAUNCH; agenda semanal para equipo con confirmación de solicitudes; bandeja Mis trabajos para mecánicos y asignación de responsable real por administración; carga y consulta de PDF del scanner LAUNCH; y solicitud de cita desde el portal de clientes.
 - Las asignaciones se guardan en una tabla independiente de órdenes para que la migración sea aditiva y mantenga las órdenes ya existentes. La API aplica los permisos: solo administración asigna, mientras cada mecánico solo consulta su propia bandeja.
+- Panel principal de administración con órdenes activas o atrasadas, citas y solicitudes del día, alertas de stock, cotizaciones pendientes y ventas cobradas. Cada indicador abre el módulo operativo correspondiente.
+- Administración puede seleccionar el modelo del asistente desde Integraciones. Gudex consulta los modelos disponibles para la cuenta configurada, filtra los compatibles con Responses y salida JSON estructurada, y conserva la selección sin exponer la clave de API.
 
 ## Integraciones aún por conectar
 

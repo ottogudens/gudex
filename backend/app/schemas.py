@@ -149,6 +149,10 @@ class WorkOrderAssignmentUpdate(SQLModel):
     technician_user_id: Optional[int] = None
 
 
+class AIModelUpdate(SQLModel):
+    model: str = Field(min_length=2, max_length=120)
+
+
 class InspectionCreate(SQLModel):
     category: str
     item: str

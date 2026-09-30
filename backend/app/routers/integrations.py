@@ -12,13 +12,43 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import get_session
-from app.models import Appointment, Customer, ExternalImport, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WorkOrder
-from app.schemas import GoogleImportRequest
+from app.models import AIConfiguration, Appointment, Customer, ExternalImport, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WorkOrder
+from app.schemas import AIModelUpdate, GoogleImportRequest
 from app.security import require_admin
 from app.services import google
 from app.services.crypto import decrypt_secret
 
 router = APIRouter()
+
+
+def selected_ai_model(session: Session) -> str:
+    configuration = session.get(AIConfiguration, 1)
+    return configuration.selected_model if configuration else settings.ai_model
+
+
+def _compatible_assistant_model(model_id: str) -> bool:
+    """Models supported by Gudex's Responses + strict JSON contract."""
+    value = model_id.lower()
+    return value.startswith(("gpt-5", "gpt-4.1", "gpt-4o")) and not any(
+        term in value for term in ("audio", "realtime", "transcribe", "image", "search", "codex")
+    )
+
+
+async def _available_ai_models() -> list[str]:
+    if (settings.ai_provider or "").lower() != "openai" or not settings.ai_api_key:
+        raise HTTPException(503, "Configura AI_PROVIDER=openai y AI_API_KEY en Railway antes de elegir un modelo")
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            response = await client.get(f"{settings.ai_base_url.rstrip('/')}/models",
+                                        headers={"Authorization": f"Bearer {settings.ai_api_key}"})
+        except httpx.HTTPError:
+            raise HTTPException(503, "No se pudo consultar los modelos disponibles del proveedor")
+    if response.status_code in {401, 403}:
+        raise HTTPException(503, "El proveedor rechazó AI_API_KEY")
+    if response.is_error:
+        raise HTTPException(502, f"No se pudieron listar los modelos ({response.status_code})")
+    return sorted(item["id"] for item in response.json().get("data", [])
+                  if isinstance(item, dict) and isinstance(item.get("id"), str) and _compatible_assistant_model(item["id"]))
 
 
 @router.get("/api/v1/integrations/status", dependencies=[Depends(require_admin)])
@@ -35,9 +65,35 @@ def integration_status(session: Session = Depends(get_session)):
                    "granted_scopes": credential.granted_scopes.split() if credential else [],
                    "drive_folder_configured": bool(settings.google_drive_folder_id)},
         "ai": {"credentials_present": bool(settings.ai_provider and settings.ai_api_key), "provider": settings.ai_provider,
-               "model": settings.ai_model, "available": bool(settings.ai_provider and settings.ai_api_key)},
+               "model": selected_ai_model(session), "available": bool(settings.ai_provider and settings.ai_api_key)},
         "scanner": {"brand": "LAUNCH", "model": "X-431 PRO", "ingest": ["pdf_upload", "gmail", "drive"]},
     }
+
+
+@router.get("/api/v1/integrations/ai/models", dependencies=[Depends(require_admin)])
+async def list_ai_models(session: Session = Depends(get_session)):
+    models = await _available_ai_models()
+    current = selected_ai_model(session)
+    if current not in models:
+        models.insert(0, current)
+    return {"current_model": current, "models": models}
+
+
+@router.put("/api/v1/integrations/ai/model", dependencies=[Depends(require_admin)])
+async def update_ai_model(data: AIModelUpdate, request: Request, session: Session = Depends(get_session)):
+    models = await _available_ai_models()
+    if data.model not in models:
+        raise HTTPException(422, "El modelo no está disponible o no es compatible con el asistente Gudex")
+    configuration = session.get(AIConfiguration, 1)
+    if configuration:
+        configuration.selected_model = data.model
+        configuration.updated_by_email = request.state.user_email
+        configuration.updated_at = datetime.now(timezone.utc)
+    else:
+        configuration = AIConfiguration(id=1, selected_model=data.model, updated_by_email=request.state.user_email)
+    session.add(configuration)
+    session.commit()
+    return {"model": configuration.selected_model, "updated_at": configuration.updated_at}
 
 
 @router.post("/api/v1/integrations/google/authorize", dependencies=[Depends(require_admin)])
