@@ -115,6 +115,55 @@ class ApiClient {
   }
 }
 
+class WorkOrderDraftStore {
+  static String _key(int orderId) => 'work_order_draft_$orderId';
+  static String _receptionKey(int orderId) => 'work_order_reception_draft_$orderId';
+  static String _inspectionKey(int orderId, int inspectionId) => 'work_order_inspection_draft_${orderId}_$inspectionId';
+
+  static Future<Map<String, dynamic>?> _load(String key) async {
+    final stored = await _storage.read(key: key);
+    if (stored == null) return null;
+    try {
+      final decoded = jsonDecode(stored);
+      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+    } on FormatException {
+      await _storage.delete(key: key);
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> load(int orderId) => _load(_key(orderId));
+
+  static Future<void> save(int orderId, {required String status, required String diagnosis}) => _storage.write(
+        key: _key(orderId),
+        value: jsonEncode({
+          'status': status,
+          'diagnosis': diagnosis,
+          'saved_at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+
+  static Future<void> clear(int orderId) => _storage.delete(key: _key(orderId));
+
+  static Future<Map<String, dynamic>?> loadReception(int orderId) => _load(_receptionKey(orderId));
+
+  static Future<void> saveReception(int orderId, Map<String, dynamic> data) => _storage.write(
+        key: _receptionKey(orderId),
+        value: jsonEncode({...data, 'saved_at': DateTime.now().toUtc().toIso8601String()}),
+      );
+
+  static Future<void> clearReception(int orderId) => _storage.delete(key: _receptionKey(orderId));
+
+  static Future<Map<String, dynamic>?> loadInspection(int orderId, int inspectionId) => _load(_inspectionKey(orderId, inspectionId));
+
+  static Future<void> saveInspection(int orderId, int inspectionId, Map<String, dynamic> data) => _storage.write(
+        key: _inspectionKey(orderId, inspectionId),
+        value: jsonEncode({...data, 'saved_at': DateTime.now().toUtc().toIso8601String()}),
+      );
+
+  static Future<void> clearInspection(int orderId, int inspectionId) => _storage.delete(key: _inspectionKey(orderId, inspectionId));
+}
+
 class LubricentroApp extends StatelessWidget {
   const LubricentroApp({super.key});
 
@@ -1577,6 +1626,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
   late Future<List<Map<String, dynamic>>> _evidence;
   late Future<Map<String, dynamic>> _report;
   bool _saving = false;
+  bool _restoringDraft = true;
   String? _error;
 
   static const _statuses = [
@@ -1594,6 +1644,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     _templates = _loadList('/api/v1/inspection-templates');
     _evidence = _loadList('/api/v1/work-orders/${widget.order['id']}/evidence');
     _report = _loadReport();
+    _restoreDraft();
   }
 
   @override
@@ -1622,6 +1673,49 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     return result is Map ? Map<String, dynamic>.from(result) : <String, dynamic>{};
   }
 
+  int? get _orderId => int.tryParse('${widget.order['id']}');
+
+  Future<void> _restoreDraft() async {
+    final orderId = _orderId;
+    final draft = orderId == null ? null : await WorkOrderDraftStore.load(orderId);
+    if (!mounted) return;
+    setState(() => _restoringDraft = false);
+    if (draft == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final restore = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Borrador local encontrado'),
+          content: const Text('Hay cambios de estado y diagnóstico guardados en este dispositivo. ¿Quieres recuperarlos?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Descartar')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Recuperar')),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (restore == true) {
+        final status = '${draft['status'] ?? ''}';
+        setState(() {
+          if (_statuses.contains(status)) _status = status;
+          _diagnosis.text = '${draft['diagnosis'] ?? ''}';
+        });
+      } else if (orderId != null) {
+        await WorkOrderDraftStore.clear(orderId);
+      }
+    });
+  }
+
+  Future<void> _saveLocalDraft({bool showFeedback = true}) async {
+    final orderId = _orderId;
+    if (orderId == null) return;
+    await WorkOrderDraftStore.save(orderId, status: _status, diagnosis: _diagnosis.text.trim());
+    if (showFeedback && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Borrador guardado en este dispositivo')));
+    }
+  }
+
   Future<void> _printInspectionReport() async {
     try {
       await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/work-orders/${widget.order['id']}/inspection-report.pdf'));
@@ -1637,10 +1731,17 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
         'status': _status,
         'diagnosis': _diagnosis.text.trim(),
       });
+      final orderId = _orderId;
+      if (orderId != null) await WorkOrderDraftStore.clear(orderId);
       if (!mounted) return;
       await widget.onChanged();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Orden actualizada')));
     } catch (error) {
+      try {
+        await _saveLocalDraft(showFeedback: false);
+      } catch (_) {
+        // El fallo de almacenamiento local no debe ocultar el error de la API.
+      }
       if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1743,15 +1844,23 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
   }
 
   Future<void> _editInspection(Map<String, dynamic> inspection) async {
-    final notes = TextEditingController(text: '${inspection['notes'] ?? ''}');
-    final measured = TextEditingController(text: '${inspection['measured_value'] ?? ''}');
-    String result = '${inspection['result'] ?? 'not_inspected'}';
+    final orderId = _orderId;
+    final inspectionId = int.tryParse('${inspection['id']}');
+    final savedDraft = orderId == null || inspectionId == null ? null : await WorkOrderDraftStore.loadInspection(orderId, inspectionId);
+    final initial = savedDraft ?? inspection;
+    final notes = TextEditingController(text: '${initial['notes'] ?? ''}');
+    final measured = TextEditingController(text: '${initial['measured_value'] ?? ''}');
+    String result = '${initial['result'] ?? 'not_inspected'}';
     try {
       final data = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
           title: Text('${inspection['item']}'),
           content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (savedDraft != null) ...[
+              const Text('Estás editando un borrador local pendiente de envío.', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+            ],
             DropdownButtonFormField<String>(
               value: result,
               decoration: const InputDecoration(labelText: 'Resultado'),
@@ -1779,9 +1888,21 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
       );
       if (data == null) return;
       await widget.api.patchJson('/api/v1/inspections/${inspection['id']}', data);
+      if (orderId != null && inspectionId != null) await WorkOrderDraftStore.clearInspection(orderId, inspectionId);
       if (!mounted) return;
       setState(() { _inspections = _loadInspections(); _report = _loadReport(); });
     } catch (error) {
+      if (orderId != null && inspectionId != null) {
+        try {
+          await WorkOrderDraftStore.saveInspection(orderId, inspectionId, {
+            'result': result,
+            'measured_value': measured.text.trim(),
+            'notes': notes.text.trim(),
+          });
+        } catch (_) {
+          // Conserva el error de API aunque el dispositivo no pueda guardar el borrador.
+        }
+      }
       if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
     } finally {
       notes.dispose(); measured.dispose();
@@ -1789,8 +1910,17 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
   }
 
   Future<void> _editReception() async {
-    final currentRaw = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/reception');
-    final current = currentRaw is Map ? Map<String, dynamic>.from(currentRaw) : <String, dynamic>{};
+    final orderId = _orderId;
+    final savedDraft = orderId == null ? null : await WorkOrderDraftStore.loadReception(orderId);
+    Map<String, dynamic> current = savedDraft ?? <String, dynamic>{};
+    try {
+      final currentRaw = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/reception');
+      if (savedDraft == null && currentRaw is Map) current = Map<String, dynamic>.from(currentRaw);
+    } catch (_) {
+      if (savedDraft == null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sin conexión: puedes preparar y guardar un borrador de recepción local.')));
+      }
+    }
     final damage = TextEditingController(text: '${current['visible_damage'] ?? ''}');
     final accessories = TextEditingController(text: '${current['accessories'] ?? ''}');
     final observations = TextEditingController(text: '${current['customer_observations'] ?? ''}');
@@ -1803,6 +1933,10 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
         builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
           title: const Text('Recepción del vehículo'),
           content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (savedDraft != null) ...[
+              const Text('Estás editando un borrador local pendiente de envío.', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+            ],
             DropdownButtonFormField<int>(value: fuel, decoration: const InputDecoration(labelText: 'Combustible'),
               items: [0, 25, 50, 75, 100].map((v) => DropdownMenuItem(value: v, child: Text('$v%'))).toList(),
               onChanged: (value) => update(() => fuel = value)),
@@ -1827,10 +1961,26 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
       );
       if (data == null) return;
       await widget.api.putJson('/api/v1/work-orders/${widget.order['id']}/reception', data);
+      if (orderId != null) await WorkOrderDraftStore.clearReception(orderId);
       if (!mounted) return;
       setState(() => _report = _loadReport());
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Recepción actualizada')));
     } catch (error) {
+      if (orderId != null) {
+        try {
+          final draft = <String, dynamic>{
+            'fuel_level_percent': fuel,
+            'visible_damage': damage.text.trim(),
+            'accessories': accessories.text.trim(),
+            'customer_observations': observations.text.trim(),
+            'terms_accepted': accepted,
+            'accepted_by_name': acceptedBy.text.trim(),
+          };
+          await WorkOrderDraftStore.saveReception(orderId, draft);
+        } catch (_) {
+          // Conserva el error de API aunque el dispositivo no pueda guardar el borrador.
+        }
+      }
       if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
     } finally {
       damage.dispose(); accessories.dispose(); observations.dispose(); acceptedBy.dispose();
@@ -1976,8 +2126,12 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
           const SizedBox(height: 12),
           TextField(controller: _diagnosis, maxLines: 4, decoration: const InputDecoration(labelText: 'Diagnóstico / pruebas pendientes', alignLabelWithHint: true)),
           const SizedBox(height: 12),
+          if (_restoringDraft) const LinearProgressIndicator(),
+          if (_restoringDraft) const SizedBox(height: 12),
           if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
           FilledButton.icon(onPressed: _saving ? null : _saveOrder, icon: const Icon(Icons.save_outlined), label: Text(_saving ? 'Guardando…' : 'Guardar cambios')),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(onPressed: _saving ? null : _saveLocalDraft, icon: const Icon(Icons.save_as_outlined), label: const Text('Guardar borrador local')),
           const SizedBox(height: 10),
           OutlinedButton.icon(onPressed: _saving ? null : _editReception, icon: const Icon(Icons.assignment_outlined), label: const Text('Completar recepción')),
           const Divider(height: 28),

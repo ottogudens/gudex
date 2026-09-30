@@ -48,4 +48,4 @@ Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace
 
 ## Próximas etapas
 
-Las fases 1 a 4 están implementadas. La fase 5 auditará y mejorará el diseño visual y la experiencia de uso por perfil y tamaño de pantalla. Revisa [el estado del desarrollo](docs/estado-del-desarrollo.md) y [el alcance de la fase 5](docs/fase-5-auditoria-visual.md).
+Las fases 1 a 4 están implementadas; las fases 5 y 6 ya tienen una primera entrega. Lo siguiente es validar visualmente la aplicación en dispositivos y navegador, probar Mercado Pago con credenciales sandbox o reales, y avanzar con operación sin conexión, respaldo de evidencias y la decisión tributaria. Revisa [el estado del desarrollo](docs/estado-del-desarrollo.md) y [el alcance de la fase 5](docs/fase-5-auditoria-visual.md).

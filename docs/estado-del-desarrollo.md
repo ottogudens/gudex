@@ -10,7 +10,7 @@
 - En Flutter, administración puede registrar clientes y vehículos, abrir órdenes de trabajo, actualizar su estado y diagnóstico, y agregar puntos de inspección con resultados y mediciones; mecánicos pueden revisar y completar las órdenes.
 - Desde el detalle de una orden, el equipo puede preparar cotizaciones con descripción, mano de obra, repuestos y observaciones, y publicarlas para aprobación del cliente con confirmación explícita. El cliente ve los importes en su portal y puede aprobar o rechazar.
 - Inventario móvil: el equipo consulta y filtra productos por nombre/código y stock bajo; administración puede dar de alta productos y registrar ingresos o salidas con motivo. Los movimientos quedan consultables como historial y la API rechaza ajustes de stock hechos por otros roles.
-- POS API y pantalla inicial para administración, con carrito, descuento, cliente opcional, selección de medio de pago, confirmación de venta, historial reciente y descuento de stock. El cobro Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
+- POS API y pantalla de administración, con carrito, descuentos, cliente opcional, productos y servicios, historial reciente, descuento de stock y comprobante interno PDF. Checkout Pro registra el pago como pendiente hasta que el backend valide el webhook y consulte a Mercado Pago.
 - Fase 5: paleta y cabecera alineadas al logo oficial Gudex; el logo se usa en Flutter Web/móvil y en PDFs generados por la app. El cliente puede imprimir/guardar informes consolidados de inspección y comprobantes internos de venta desde la app.
 - Fase 6 (primera integración): POS permite líneas manuales de servicio y productos de inventario. Checkout Pro crea preferencias desde el backend y confirma pagos solo al recibir webhook verificado y consultar el estado en Mercado Pago. La terminal Point se registra como pago externo confirmado por el operador.
 - Recepción de informe PDF LAUNCH, asociado a vehículo y opcionalmente a una orden; el original se conserva en almacenamiento local privado.
@@ -37,7 +37,7 @@
 - **Gmail y Drive:** OAuth y la importación por acción de administrador ya están implementados. Se requiere configurar Google Cloud, scopes y variables en Railway; no hay lectura automática en segundo plano.
 - **Google Calendar:** ya se sincronizan citas pendientes tras confirmación administrativa. Requiere credenciales Google y permisos Calendar.
 - **Asistente IA:** la integración con OpenAI está implementada, apagada hasta configurar `AI_PROVIDER` y `AI_API_KEY`. Actualmente propone y ejecuta, tras confirmación, cambios de estado de órdenes como única acción mutante.
-- **Móvil:** ya incluye recepción, listas guiadas, edición de resultados, cámara/archivos y resumen para el cliente. Falta generar un documento PDF final descargable, trabajo sin conexión y ampliar los formularios operativos restantes.
+- **Móvil:** ya incluye recepción, listas guiadas, edición de resultados, cámara/archivos, resumen para el cliente e impresión/guardado del informe de inspección PDF. El detalle de orden conserva localmente borradores de estado, diagnóstico, recepción y resultados de inspección existentes, y los recupera tras una conexión fallida. Faltan una cola de sincronización, resolución de conflictos y ampliar los formularios operativos restantes.
 
 ## Secuencia recomendada
 
@@ -45,5 +45,5 @@ Las fases 1 a 4 están implementadas. Las siguientes etapas propuestas son:
 
 5. **Auditoría visual y de experiencia de usuario:** primera pasada aplicada con marca Gudex; pendiente revisión visual real en Android/iOS/Web y verificación de contraste/tamaños en dispositivos.
 6. **POS, pagos y documentos tributarios:** POS de productos y servicios, comprobante PDF interno y Checkout Pro implementados; pendiente probar credenciales/webhook reales o sandbox. Falta definir e integrar boleta electrónica mediante la opción tributaria habilitada para el taller.
-7. **Operación móvil:** generar informe de inspección descargable, completar formularios restantes y agregar borradores/sincronización offline con resolución de conflictos.
+7. **Operación móvil:** completar formularios restantes, añadir borradores para nuevas inspecciones/evidencias y agregar sincronización con resolución de conflictos.
 8. **Operación y continuidad:** mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir respaldo, retención y recuperación.
