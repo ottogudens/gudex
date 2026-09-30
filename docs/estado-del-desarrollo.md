@@ -29,6 +29,7 @@
 - Fase 4: asistente Responses API con salida estructurada, contextos acotados por rol, portal de cliente aislado, registro de propuestas/confirmaciones y ejecución confirmada de cambios de estado permitidos.
 - Flutter: pantalla de integraciones para administración y acceso al asistente para cada rol; Google OAuth abre en navegador externo.
 - Fase 5 (primera pasada): tema visual compartido Gudex, acceso renovado, shell adaptable con contenido centrado, etiquetas de navegación compactas, tarjetas de estado y estados de carga/error/vacío más claros. Pendiente verificación visual en Flutter Web, Android y iOS.
+- Auditoría de vistas: se documentó el inventario por rol y las pantallas faltantes o incompletas. La prioridad operativa es ficha de vehículo e historial, agenda, asignación de técnicos, flujo del scanner LAUNCH y solicitud de citas desde el portal. Ver `docs/auditoria-vistas-pendientes.md`.
 
 ## Integraciones aún por conectar
 
