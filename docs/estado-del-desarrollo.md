@@ -38,9 +38,9 @@
 
 ## Secuencia recomendada
 
-1. Acordar el flujo tributario y el tipo de integración de Mercado Pago.
-2. Generar el documento final de inspección, agregar firma avanzada si el taller la requiere, edición de productos y ampliar el POS con servicios y documentos tributarios.
-3. Autorizar Google por OAuth con permisos mínimos; importar reportes del scanner y sincronizar calendario/correos.
-4. Completar la revisión de Google OAuth, scopes y credenciales del proyecto Gudex.
-5. Elegir un proveedor de boleta electrónica y completar integración con Mercado Pago según el dispositivo de cobro usado.
-6. Mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir copia de seguridad y retención.
+Las fases 1 a 4 están implementadas. Las siguientes etapas propuestas son:
+
+5. **Auditoría visual y de experiencia de usuario:** revisar pantallas y flujos de administración, mecánicos y clientes; establecer paleta de color, tipografía, jerarquía visual, componentes comunes, estados vacíos/errores/carga, contraste y accesibilidad; comprobar adaptación a móvil, tablet y web; documentar hallazgos priorizados y aplicar las mejoras acordadas. Entregables: inventario de pantallas, lista de problemas priorizada, guía visual/tokens y cambios de interfaz revisables.
+6. **POS, pagos y documentos tributarios:** acordar terminal/flujo de Mercado Pago y proveedor o modalidad de boleta electrónica; ampliar venta para productos y servicios, y generar documentos fiscales según la integración definida.
+7. **Operación móvil:** generar informe de inspección descargable, completar formularios restantes y agregar borradores/sincronización offline con resolución de conflictos.
+8. **Operación y continuidad:** mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir respaldo, retención y recuperación.

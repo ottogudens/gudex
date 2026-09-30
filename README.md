@@ -43,4 +43,8 @@ Para desplegar backend y PostgreSQL en Railway, y Flutter Web en Vercel, sigue e
 
 ## Integraciones externas
 
-Las credenciales no se guardan en Flutter ni en el repositorio. Se administrarán mediante variables de entorno o un gestor de secretos. Las integraciones externas y la emisión de boletas electrónicas aún no están conectadas; el POS puede registrar pagos, pero no confirma cobros Mercado Pago ni emite boletas en esta etapa.
+Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace (Gmail, Drive y Calendar) y el asistente IA tienen integración de backend configurable con secretos en Railway. El POS puede registrar pagos, pero todavía no confirma cobros Mercado Pago ni emite boletas electrónicas.
+
+## Próximas etapas
+
+Las fases 1 a 4 están implementadas. La fase 5 auditará y mejorará el diseño visual y la experiencia de uso por perfil y tamaño de pantalla. Revisa [el estado del desarrollo](docs/estado-del-desarrollo.md) y [el alcance de la fase 5](docs/fase-5-auditoria-visual.md).
