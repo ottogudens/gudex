@@ -9,6 +9,10 @@ Gudex ya cubre el núcleo de recepción, órdenes, inspecciones, cotizaciones, i
 
 La prioridad recomendada es completar primero la operación diaria del taller: agenda, ficha de vehículo, asignación de trabajo, scanner e historial. Después se deben incorporar gestión administrativa, cierre de caja y reportes. Las vistas tributarias quedan condicionadas a decidir el proveedor o modalidad de boleta electrónica.
 
+## Avance posterior a la auditoría
+
+Las cinco vistas P0 ya tienen una primera implementación en Flutter y API: ficha e historial de vehículo, agenda semanal, bandeja Mis trabajos con asignación por usuario, flujo de informes LAUNCH PDF y solicitud de cita desde el portal. Quedan en P1 los filtros avanzados, edición o movimiento de citas, recursos físicos del taller y la importación de candidatos Gmail/Drive directamente desde la nueva vista del scanner.
+
 ## Método y evidencia
 
 Se revisaron:

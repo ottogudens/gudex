@@ -31,6 +31,9 @@
 - Fase 5 (primera pasada): tema visual compartido Gudex, acceso renovado, shell adaptable con contenido centrado, etiquetas de navegación compactas, tarjetas de estado y estados de carga/error/vacío más claros. Pendiente verificación visual en Flutter Web, Android y iOS.
 - Auditoría de vistas: se documentó el inventario por rol y las pantallas faltantes o incompletas. La prioridad operativa es ficha de vehículo e historial, agenda, asignación de técnicos, flujo del scanner LAUNCH y solicitud de citas desde el portal. Ver `docs/auditoria-vistas-pendientes.md`.
 
+- Vistas operativas P0: ficha navegable de vehículo con historial de órdenes, citas e informes LAUNCH; agenda semanal para equipo con confirmación de solicitudes; bandeja Mis trabajos para mecánicos y asignación de responsable real por administración; carga y consulta de PDF del scanner LAUNCH; y solicitud de cita desde el portal de clientes.
+- Las asignaciones se guardan en una tabla independiente de órdenes para que la migración sea aditiva y mantenga las órdenes ya existentes. La API aplica los permisos: solo administración asigna, mientras cada mecánico solo consulta su propia bandeja.
+
 ## Integraciones aún por conectar
 
 - **Mercado Pago:** Checkout Pro está integrado como opción en línea. Falta configurar credenciales de prueba/producción y webhook en Railway y completar una transacción de prueba en la cuenta del taller. Point/terminal física se ingresa como tarjeta externa; la aplicación no recibe confirmación automática de ese terminal.

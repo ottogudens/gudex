@@ -20,11 +20,11 @@ from app.database import create_db_and_tables, engine, get_session
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
-    StockMovement, User, UserRole, Vehicle, WorkOrder, WorkStatus,
+    StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus,
 )
 from app.schemas import (
     AppointmentCreate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
-    PasswordChange, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderCreate, WorkOrderUpdate,
+    PasswordChange, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate,
 )
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
@@ -334,6 +334,52 @@ def list_vehicles(customer_id: int | None = None, plate: str | None = None, sess
     return session.exec(statement).all()
 
 
+def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
+    """Return the operational history needed at reception without exposing paths."""
+    orders = session.exec(select(WorkOrder).where(WorkOrder.vehicle_id == vehicle.id)
+                          .order_by(WorkOrder.opened_at.desc())).all()
+    reports = session.exec(select(ScannerReport).where(ScannerReport.vehicle_id == vehicle.id)
+                           .order_by(ScannerReport.scanned_at.desc())).all()
+    appointments = session.exec(select(Appointment).where(Appointment.vehicle_id == vehicle.id)
+                                .order_by(Appointment.starts_at.desc())).all()
+    order_ids = [order.id for order in orders]
+    quotes = session.exec(select(Quote).where(Quote.work_order_id.in_(order_ids))
+                          .order_by(Quote.created_at.desc())).all() if order_ids else []
+    return {
+        "vehicle": vehicle,
+        "customer": session.get(Customer, vehicle.customer_id),
+        "work_orders": orders,
+        "quotes": quotes,
+        "appointments": appointments,
+        "scanner_reports": [
+            {"id": report.id, "vehicle_id": report.vehicle_id, "work_order_id": report.work_order_id,
+             "filename": report.filename, "source": report.source, "scanned_at": report.scanned_at,
+             "mileage_km": report.mileage_km, "summary": report.summary,
+             "download_url": f"/api/v1/scanner-reports/{report.id}/file"}
+            for report in reports
+        ],
+    }
+
+
+@app.get("/api/v1/vehicles/{vehicle_id}/history", dependencies=[Depends(require_staff)])
+def vehicle_history(vehicle_id: int, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(404, "Vehículo no encontrado")
+    return vehicle_history_payload(session, vehicle)
+
+
+@app.get("/api/v1/portal/vehicles/{vehicle_id}/history")
+def customer_vehicle_history(vehicle_id: int, request: Request, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, vehicle_id)
+    if not vehicle or vehicle.customer_id != request.state.customer_id:
+        raise HTTPException(404, "Vehículo no encontrado")
+    data = vehicle_history_payload(session, vehicle)
+    for report in data["scanner_reports"]:
+        report["download_url"] = f"/api/v1/portal/scanner-reports/{report['id']}/file"
+    return data
+
+
 @app.post("/api/v1/work-orders", response_model=WorkOrder, status_code=201, dependencies=[Depends(require_admin)])
 def create_work_order(data: WorkOrderCreate, session: Session = Depends(get_session)):
     vehicle = session.get(Vehicle, data.vehicle_id)
@@ -357,6 +403,55 @@ def list_work_orders(status: WorkStatus | None = None, vehicle_id: int | None = 
     if vehicle_id:
         statement = statement.where(WorkOrder.vehicle_id == vehicle_id)
     return session.exec(statement).all()
+
+
+@app.get("/api/v1/team/mechanics", dependencies=[Depends(require_admin)])
+def list_mechanics(session: Session = Depends(get_session)):
+    return [
+        {"id": user.id, "full_name": user.full_name, "email": user.email}
+        for user in session.exec(select(User).where(User.role == UserRole.mechanic, User.active == True)
+                                 .order_by(User.full_name)).all()  # noqa: E712
+    ]
+
+
+@app.get("/api/v1/work-orders/mine", response_model=list[WorkOrder], dependencies=[Depends(require_staff)])
+def my_work_orders(request: Request, session: Session = Depends(get_session)):
+    user = session.exec(select(User).where(User.email == request.state.user_email)).first()
+    if not user:
+        raise HTTPException(401, "Usuario no encontrado")
+    assignments = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.technician_user_id == user.id)).all()
+    order_ids = [assignment.work_order_id for assignment in assignments]
+    if not order_ids:
+        return []
+    return session.exec(select(WorkOrder).where(WorkOrder.id.in_(order_ids)).order_by(WorkOrder.promised_at, WorkOrder.opened_at.desc())).all()
+
+
+@app.put("/api/v1/work-orders/{order_id}/assignment", response_model=WorkOrder, dependencies=[Depends(require_admin)])
+def assign_work_order(order_id: int, data: WorkOrderAssignmentUpdate, request: Request, session: Session = Depends(get_session)):
+    order = session.get(WorkOrder, order_id)
+    if not order:
+        raise HTTPException(404, "Orden de trabajo no encontrada")
+    assignment = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.work_order_id == order_id)).first()
+    if data.technician_user_id is None:
+        if assignment:
+            session.delete(assignment)
+        order.technician_name = None
+    else:
+        mechanic = session.get(User, data.technician_user_id)
+        if not mechanic or mechanic.role != UserRole.mechanic or not mechanic.active:
+            raise HTTPException(422, "Selecciona un mecánico activo")
+        if assignment:
+            assignment.technician_user_id = mechanic.id
+            assignment.assigned_by_email = request.state.user_email
+            assignment.assigned_at = datetime.now(timezone.utc)
+        else:
+            session.add(WorkOrderAssignment(work_order_id=order_id, technician_user_id=mechanic.id,
+                                            assigned_by_email=request.state.user_email))
+        order.technician_name = mechanic.full_name
+    session.add(order)
+    session.commit()
+    session.refresh(order)
+    return order
 
 
 @app.get("/api/v1/work-orders/{order_id}", response_model=WorkOrder, dependencies=[Depends(require_staff)])
@@ -640,7 +735,7 @@ async def upload_scanner_report(
         order = session.get(WorkOrder, work_order_id)
         if not order or order.vehicle_id != vehicle_id:
             raise HTTPException(409, "La orden no corresponde al vehículo")
-    if file.content_type != "application/pdf":
+    if file.content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(415, "Solo se aceptan informes PDF")
     data = await file.read(settings.max_upload_bytes + 1)
     if len(data) > settings.max_upload_bytes:

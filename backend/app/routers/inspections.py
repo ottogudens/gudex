@@ -249,7 +249,7 @@ def portal_download_evidence(evidence_id: int, request: Request, session: Sessio
 @portal_router.get("/scanner-reports/{report_id}/file")
 def portal_download_scanner_report(report_id: int, request: Request, session: Session = Depends(get_session)):
     report = session.get(ScannerReport, report_id)
-    order = session.get(WorkOrder, report.work_order_id) if report and report.work_order_id else None
-    if not report or not order or order.customer_id != request.state.customer_id or not Path(report.storage_path).is_file():
+    vehicle = session.get(Vehicle, report.vehicle_id) if report else None
+    if not report or not vehicle or vehicle.customer_id != request.state.customer_id or not Path(report.storage_path).is_file():
         raise HTTPException(status_code=404, detail="Informe no encontrado")
     return FileResponse(report.storage_path, media_type="application/pdf", filename=report.filename)

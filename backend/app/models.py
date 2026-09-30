@@ -114,6 +114,16 @@ class WorkOrder(SQLModel, table=True):
     scanner_reports: list["ScannerReport"] = Relationship(back_populates="work_order")
 
 
+class WorkOrderAssignment(SQLModel, table=True):
+    """The mechanic accountable for an order, stored additively for safe upgrades."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True, unique=True)
+    technician_user_id: int = Field(foreign_key="user.id", index=True)
+    assigned_by_email: Optional[str] = Field(default=None, max_length=254)
+    assigned_at: datetime = Field(default_factory=now_utc)
+
+
 class Inspection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     work_order_id: int = Field(foreign_key="workorder.id", index=True)

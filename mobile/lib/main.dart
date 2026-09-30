@@ -477,9 +477,11 @@ class _HomePageState extends State<HomePage> {
     }
     if (widget.role == 'mechanic') {
       return const [
+        _Module('Mis trabajos', '/api/v1/work-orders/mine'),
         _Module('Órdenes de trabajo', '/api/v1/work-orders'),
         _Module('Inventario', '/api/v1/products'),
         _Module('Agenda', '/api/v1/appointments'),
+        _Module('Scanner LAUNCH', '/api/v1/scanner-reports'),
       ];
     }
     return const [
@@ -487,6 +489,7 @@ class _HomePageState extends State<HomePage> {
       _Module('Clientes', '/api/v1/customers'),
       _Module('Inventario', '/api/v1/products'),
       _Module('Agenda', '/api/v1/appointments'),
+      _Module('Scanner LAUNCH', '/api/v1/scanner-reports'),
       _Module('POS', '/api/v1/sales'),
     ];
   }
@@ -524,7 +527,13 @@ class _HomePageState extends State<HomePage> {
                     ? _PosScreen(api: api)
                     : modules[selected].path == '/api/v1/products'
                         ? _InventoryScreen(api: api, canManage: widget.role == 'admin')
-                    : {'/api/v1/work-orders', '/api/v1/customers'}.contains(modules[selected].path)
+                    : modules[selected].path == '/api/v1/appointments'
+                        ? _AgendaScreen(api: api, role: widget.role)
+                    : modules[selected].path == '/api/v1/portal/appointments'
+                        ? _CustomerAppointmentsScreen(api: api)
+                    : modules[selected].path == '/api/v1/scanner-reports'
+                        ? _ScannerScreen(api: api, role: widget.role)
+                    : {'/api/v1/work-orders', '/api/v1/work-orders/mine', '/api/v1/customers'}.contains(modules[selected].path)
                         ? _WorkshopScreen(api: api, module: modules[selected], role: widget.role)
                         : _ModuleList(api: api, module: modules[selected], role: widget.role),
               ),
@@ -962,6 +971,8 @@ class _ModuleListState extends State<_ModuleList> {
                   onReject: canApprove ? () => _answerQuote(data['id'] as int, false) : null,
                   onOpen: widget.module.path == '/api/v1/portal/work-orders' && data['id'] is int
                       ? () => _showInspectionReport(data['id'] as int)
+                      : widget.module.path == '/api/v1/portal/profile' && data['id'] is int
+                          ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: data['id'] as int, portal: true)))
                       : null,
                 );
               },
@@ -1312,7 +1323,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
   bool _saving = false;
   String? _error;
 
-  bool get _isOrders => widget.module.path == '/api/v1/work-orders';
+  bool get _isOrders => widget.module.path.startsWith('/api/v1/work-orders');
   bool get _canCreate => widget.role == 'admin';
 
   @override
@@ -1327,7 +1338,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     try {
       if (_isOrders) {
         final values = await Future.wait([
-          widget.api.get('/api/v1/work-orders'),
+          widget.api.get(widget.module.path),
           widget.api.get('/api/v1/customers'),
           widget.api.get('/api/v1/vehicles'),
         ]);
@@ -1548,7 +1559,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => _WorkOrderDetails(api: widget.api, order: order, onChanged: _refresh),
+      builder: (context) => _WorkOrderDetails(api: widget.api, order: order, role: widget.role, onChanged: _refresh),
     );
     await _refresh();
   }
@@ -1615,6 +1626,8 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
       leading: const CircleAvatar(child: Icon(Icons.directions_car_outlined)),
       title: Text('${item['plate']} · ${item['make']} ${item['model']}'),
       subtitle: Text('$customerName${item['year'] == null ? '' : ' · ${item['year']}'}${item['current_mileage_km'] == null ? '' : ' · ${item['current_mileage_km']} km'}'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false))),
     ));
   }
 
@@ -1626,7 +1639,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     return Card(child: ListTile(
       leading: const CircleAvatar(child: Icon(Icons.build_outlined)),
       title: Text('${item['code'] ?? 'Orden'} · $vehicleLabel'),
-      subtitle: Text('$customerLabel\nEstado: ${'${item['status'] ?? 'received'}'.replaceAll('_', ' ')}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
+      subtitle: Text('$customerLabel\nEstado: ${'${item['status'] ?? 'received'}'.replaceAll('_', ' ')}${item['technician_name'] == null ? '' : ' · ${item['technician_name']}'}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
       isThreeLine: true,
       trailing: const Icon(Icons.chevron_right),
       onTap: () => _openOrder(item),
@@ -1635,9 +1648,10 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
 }
 
 class _WorkOrderDetails extends StatefulWidget {
-  const _WorkOrderDetails({required this.api, required this.order, required this.onChanged});
+  const _WorkOrderDetails({required this.api, required this.order, required this.role, required this.onChanged});
   final ApiClient api;
   final Map<String, dynamic> order;
+  final String role;
   final Future<void> Function() onChanged;
 
   @override
@@ -2045,6 +2059,35 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     }
   }
 
+  Future<void> _assignTechnician() async {
+    try {
+      final raw = await widget.api.get('/api/v1/team/mechanics');
+      final mechanics = raw is List ? raw.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : <Map<String, dynamic>>[];
+      if (mechanics.isEmpty) throw Exception('No hay mecánicos activos para asignar');
+      int? selected;
+      for (final mechanic in mechanics) {
+        if ('${mechanic['full_name']}' == '${widget.order['technician_name'] ?? ''}') selected = mechanic['id'] as int?;
+      }
+      final decision = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Asignar mecánico'),
+        content: StatefulBuilder(builder: (context, update) => DropdownButtonFormField<int?>(
+          value: selected,
+          decoration: const InputDecoration(labelText: 'Responsable'),
+          items: [const DropdownMenuItem<int?>(value: null, child: Text('Sin asignar')), ...mechanics.map((item) => DropdownMenuItem<int?>(value: item['id'] as int, child: Text('${item['full_name']}')))],
+          onChanged: (value) => update(() => selected = value),
+        )),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, {'technician_user_id': selected}), child: const Text('Guardar'))],
+      ));
+      if (decision == null) return;
+      final updated = await widget.api.putJson('/api/v1/work-orders/${widget.order['id']}/assignment', decision);
+      if (updated is Map) widget.order.addAll(Map<String, dynamic>.from(updated));
+      await widget.onChanged();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    }
+  }
+
   Future<void> _createQuote() async {
     final form = GlobalKey<FormState>();
     final description = TextEditingController();
@@ -2137,6 +2180,10 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
           Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.outlineVariant, borderRadius: BorderRadius.circular(4)))),
           const SizedBox(height: 18),
           Text('${widget.order['code'] ?? 'Orden de trabajo'}', style: Theme.of(context).textTheme.headlineSmall),
+          if (widget.role == 'admin') ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(onPressed: _saving ? null : _assignTechnician, icon: const Icon(Icons.person_add_alt_1), label: Text(widget.order['technician_name'] == null ? 'Asignar mecánico' : 'Responsable: ${widget.order['technician_name']}')),
+          ],
           const SizedBox(height: 8),
           Text('Síntomas informados: ${widget.order['reported_symptoms'] ?? 'Sin síntomas registrados'}'),
           if (widget.order['initial_notes'] != null) ...[
@@ -2672,4 +2719,301 @@ class _RecordCard extends StatelessWidget {
     }
     return (const Color(0xFFE5F2F4), GudexColors.primary);
   }
+}
+
+class _VehicleHistoryScreen extends StatefulWidget {
+  const _VehicleHistoryScreen({required this.api, required this.vehicleId, required this.portal});
+  final ApiClient api;
+  final int vehicleId;
+  final bool portal;
+  @override
+  State<_VehicleHistoryScreen> createState() => _VehicleHistoryScreenState();
+}
+
+class _VehicleHistoryScreenState extends State<_VehicleHistoryScreen> {
+  late Future<Map<String, dynamic>> _history;
+  @override
+  void initState() { super.initState(); _history = _load(); }
+  Future<Map<String, dynamic>> _load() async {
+    final prefix = widget.portal ? '/api/v1/portal' : '/api/v1';
+    final raw = await widget.api.get(prefix + '/vehicles/' + widget.vehicleId.toString() + '/history');
+    return Map<String, dynamic>.from(raw as Map);
+  }
+  List<Map<String, dynamic>> _maps(dynamic raw) => raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+  String _date(dynamic value) {
+    final text = value.toString().replaceFirst('T', ' ');
+    return text.length > 16 ? text.substring(0, 16) : text;
+  }
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Ficha e historial')),
+    body: FutureBuilder<Map<String, dynamic>>(
+      future: _history,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
+        final data = snapshot.data!;
+        final vehicle = Map<String, dynamic>.from(data['vehicle'] as Map);
+        final customer = data['customer'] is Map ? Map<String, dynamic>.from(data['customer'] as Map) : <String, dynamic>{};
+        final orders = _maps(data['work_orders']);
+        final reports = _maps(data['scanner_reports']);
+        final appointments = _maps(data['appointments']);
+        return RefreshIndicator(
+          onRefresh: () async => setState(() => _history = _load()),
+          child: ListView(padding: const EdgeInsets.all(16), children: [
+            Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(vehicle['plate'].toString() + ' · ' + vehicle['make'].toString() + ' ' + vehicle['model'].toString(), style: Theme.of(context).textTheme.titleLarge),
+              Text('Año ' + (vehicle['year'] ?? 'sin registro').toString() + ' · ' + (vehicle['current_mileage_km'] ?? '—').toString() + ' km'),
+              if (vehicle['vin'] != null) Text('VIN: ' + vehicle['vin'].toString()),
+              if (customer.isNotEmpty) Text('Cliente: ' + customer['full_name'].toString() + (customer['phone'] == null ? '' : ' · ' + customer['phone'].toString())),
+            ]))),
+            const SizedBox(height: 12),
+            Text('Órdenes de trabajo', style: Theme.of(context).textTheme.titleMedium),
+            if (orders.isEmpty) const ListTile(title: Text('Sin trabajos registrados')),
+            ...orders.map((order) => Card(child: ListTile(
+              leading: const Icon(Icons.build_outlined),
+              title: Text(order['code'].toString() + ' · ' + order['status'].toString().replaceAll('_', ' ')),
+              subtitle: Text(_date(order['opened_at']) + (order['diagnosis'] == null ? '' : '\n' + order['diagnosis'].toString())),
+              isThreeLine: order['diagnosis'] != null,
+            ))),
+            const SizedBox(height: 12),
+            Text('Informes scanner LAUNCH', style: Theme.of(context).textTheme.titleMedium),
+            if (reports.isEmpty) const ListTile(title: Text('Sin informes scanner adjuntos')),
+            ...reports.map((report) => Card(child: ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: Text(report['filename'].toString()),
+              subtitle: Text(_date(report['scanned_at']) + (report['mileage_km'] == null ? '' : ' · ' + report['mileage_km'].toString() + ' km')),
+              trailing: IconButton(icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: () async {
+                try { await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes(report['download_url'].toString())); } catch (_) {}
+              }),
+            ))),
+            const SizedBox(height: 12),
+            Text('Citas', style: Theme.of(context).textTheme.titleMedium),
+            ...appointments.map((appointment) => ListTile(
+              leading: const Icon(Icons.event_outlined),
+              title: Text(appointment['service_type'].toString()),
+              subtitle: Text(_date(appointment['starts_at']) + ' · ' + appointment['status'].toString()),
+            )),
+          ]),
+        );
+      },
+    ),
+  );
+}
+
+class _CustomerAppointmentsScreen extends StatefulWidget {
+  const _CustomerAppointmentsScreen({required this.api});
+  final ApiClient api;
+  @override
+  State<_CustomerAppointmentsScreen> createState() => _CustomerAppointmentsScreenState();
+}
+
+class _CustomerAppointmentsScreenState extends State<_CustomerAppointmentsScreen> {
+  late Future<List<Map<String, dynamic>>> _appointments;
+  late Future<List<Map<String, dynamic>>> _vehicles;
+  @override
+  void initState() { super.initState(); _appointments = _loadAppointments(); _vehicles = _loadVehicles(); }
+  Future<List<Map<String, dynamic>>> _maps(String path) async {
+    final raw = await widget.api.get(path);
+    return raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+  }
+  Future<List<Map<String, dynamic>>> _loadAppointments() => _maps('/api/v1/portal/appointments');
+  Future<List<Map<String, dynamic>>> _loadVehicles() async {
+    final raw = await widget.api.get('/api/v1/portal/profile');
+    final rows = raw is Map ? raw['vehicles'] : null;
+    return rows is List ? rows.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+  }
+  Future<void> _request() async {
+    final vehicles = await _vehicles;
+    if (!mounted) return;
+    if (vehicles.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Primero registra un vehículo con el taller.'))); return; }
+    int vehicleId = vehicles.first['id'] as int;
+    final service = TextEditingController(text: 'Mantención preventiva');
+    final notes = TextEditingController();
+    final date = await showDatePicker(context: context, initialDate: DateTime.now().add(const Duration(days: 1)), firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)));
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 9, minute: 0));
+    if (time == null || !mounted) return;
+    final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Solicitar cita'),
+      content: StatefulBuilder(builder: (context, update) => SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        DropdownButtonFormField<int>(value: vehicleId, decoration: const InputDecoration(labelText: 'Vehículo'), items: vehicles.map((v) => DropdownMenuItem(value: v['id'] as int, child: Text(v['plate'].toString() + ' · ' + v['make'].toString()))).toList(), onChanged: (value) { if (value != null) update(() => vehicleId = value); }),
+        const SizedBox(height: 10), TextField(controller: service, decoration: const InputDecoration(labelText: 'Servicio solicitado')),
+        const SizedBox(height: 10), TextField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Observaciones')),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar solicitud'))],
+    ));
+    if (accepted != true) { service.dispose(); notes.dispose(); return; }
+    try {
+      final start = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      await widget.api.postJson('/api/v1/portal/appointments', {'vehicle_id': vehicleId, 'starts_at': start.toUtc().toIso8601String(), 'ends_at': start.add(const Duration(hours: 1)).toUtc().toIso8601String(), 'service_type': service.text.trim(), if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim()});
+      if (mounted) { setState(() => _appointments = _loadAppointments()); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Solicitud enviada al taller.'))); }
+    } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
+    service.dispose(); notes.dispose();
+  }
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(future: _appointments, builder: (context, snapshot) {
+    if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+    if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
+    final appointments = snapshot.data ?? [];
+    return Stack(children: [RefreshIndicator(onRefresh: () async => setState(() => _appointments = _loadAppointments()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 90), children: [
+      if (appointments.isEmpty) const Padding(padding: EdgeInsets.only(top: 80), child: Center(child: Text('Aún no tienes citas solicitadas.'))),
+      ...appointments.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: Text(item['status'].toString().replaceAll('_', ' '))))),
+    ])), Positioned(right: 18, bottom: 18, child: FloatingActionButton.extended(onPressed: _request, icon: const Icon(Icons.add), label: const Text('Solicitar cita')))]);
+  });
+}
+
+class _AgendaScreen extends StatefulWidget {
+  const _AgendaScreen({required this.api, required this.role});
+  final ApiClient api;
+  final String role;
+  @override
+  State<_AgendaScreen> createState() => _AgendaScreenState();
+}
+
+class _AgendaScreenState extends State<_AgendaScreen> {
+  DateTime _week = DateTime.now();
+  late Future<List<Map<String, dynamic>>> _appointments;
+  @override
+  void initState() { super.initState(); _appointments = _load(); }
+  Future<List<Map<String, dynamic>>> _load() async {
+    final raw = await widget.api.get('/api/v1/appointments');
+    return raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+  }
+  DateTime _at(dynamic value) => DateTime.tryParse(value.toString())?.toLocal() ?? DateTime(2000);
+  String _date(DateTime date) => date.day.toString().padLeft(2, '0') + '/' + date.month.toString().padLeft(2, '0');
+  Future<void> _changeStatus(int id, String status) async {
+    await widget.api.patchJson('/api/v1/appointments/' + id.toString() + '/status?status=' + status, {});
+    if (mounted) setState(() => _appointments = _load());
+  }
+  Future<void> _createAppointment() async {
+    final raw = await widget.api.get('/api/v1/customers');
+    final customers = raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : <Map<String, dynamic>>[];
+    if (customers.isEmpty || !mounted) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registra un cliente antes de agendar.'))); return; }
+    int customerId = customers.first['id'] as int;
+    final service = TextEditingController(text: 'Mantención preventiva');
+    final date = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime.now().add(const Duration(days: 365)));
+    if (date == null || !mounted) { service.dispose(); return; }
+    final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 9, minute: 0));
+    if (time == null || !mounted) { service.dispose(); return; }
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Agendar cita'), content: StatefulBuilder(builder: (context, update) => Column(mainAxisSize: MainAxisSize.min, children: [
+        DropdownButtonFormField<int>(value: customerId, decoration: const InputDecoration(labelText: 'Cliente'), items: customers.map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['full_name'].toString()))).toList(), onChanged: (value) { if (value != null) update(() => customerId = value); }),
+        const SizedBox(height: 10), TextField(controller: service, decoration: const InputDecoration(labelText: 'Servicio')),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Agendar'))],
+    ));
+    if (confirmed == true) {
+      try {
+        final start = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+        await widget.api.postJson('/api/v1/appointments', {'customer_id': customerId, 'starts_at': start.toUtc().toIso8601String(), 'ends_at': start.add(const Duration(hours: 1)).toUtc().toIso8601String(), 'service_type': service.text.trim()});
+        if (mounted) setState(() => _appointments = _load());
+      } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
+    }
+    service.dispose();
+  }
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(future: _appointments, builder: (context, snapshot) {
+    if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+    if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
+    final rows = snapshot.data ?? [];
+    final start = DateTime(_week.year, _week.month, _week.day).subtract(Duration(days: _week.weekday - 1));
+    return Column(children: [
+      Padding(padding: const EdgeInsets.fromLTRB(10, 4, 10, 8), child: Row(children: [
+        IconButton(onPressed: () => setState(() => _week = _week.subtract(const Duration(days: 7))), icon: const Icon(Icons.chevron_left)),
+        Expanded(child: Text('Agenda · semana del ' + _date(start), textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium)),
+        IconButton(onPressed: () => setState(() => _week = _week.add(const Duration(days: 7))), icon: const Icon(Icons.chevron_right)),
+        if (widget.role == 'admin') IconButton(onPressed: _createAppointment, icon: const Icon(Icons.add_circle_outline), tooltip: 'Agendar cita'),
+      ])),
+      Expanded(child: RefreshIndicator(onRefresh: () async => setState(() => _appointments = _load()), child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 20), itemCount: 7,
+        itemBuilder: (context, index) {
+          final day = start.add(Duration(days: index));
+          final records = rows.where((row) { final date = _at(row['starts_at']); return date.year == day.year && date.month == day.month && date.day == day.day; }).toList();
+          return Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_date(day) + ' · ' + const ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][index], style: Theme.of(context).textTheme.titleSmall),
+            if (records.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Sin citas')),
+            ...records.map((item) { final at = _at(item['starts_at']); return ListTile(
+              contentPadding: EdgeInsets.zero, leading: const Icon(Icons.event_available_outlined),
+              title: Text(at.hour.toString().padLeft(2, '0') + ':' + at.minute.toString().padLeft(2, '0') + ' · ' + item['service_type'].toString()),
+              subtitle: Text('Cliente #' + item['customer_id'].toString() + ' · ' + item['status'].toString()),
+              trailing: widget.role == 'admin' && item['status'] == 'requested' ? FilledButton(onPressed: () => _changeStatus(item['id'] as int, 'confirmed'), child: const Text('Confirmar')) : null,
+            ); }),
+          ]));
+        },
+      ))),
+    ]);
+  });
+}
+
+class _ScannerScreen extends StatefulWidget {
+  const _ScannerScreen({required this.api, required this.role});
+  final ApiClient api;
+  final String role;
+  @override
+  State<_ScannerScreen> createState() => _ScannerScreenState();
+}
+
+class _ScannerScreenState extends State<_ScannerScreen> {
+  late Future<List<Map<String, dynamic>>> _vehicles;
+  late Future<List<Map<String, dynamic>>> _orders;
+  int? _vehicleId;
+  int? _orderId;
+  late Future<List<Map<String, dynamic>>> _reports;
+  @override
+  void initState() {
+    super.initState();
+    _vehicles = _list('/api/v1/vehicles');
+    _orders = _list('/api/v1/work-orders');
+    _reports = Future.value(<Map<String, dynamic>>[]);
+  }
+  Future<List<Map<String, dynamic>>> _list(String path) async {
+    final raw = await widget.api.get(path);
+    return raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+  }
+  Future<void> _selectVehicle(int? value) async {
+    setState(() { _vehicleId = value; _orderId = null; _reports = value == null ? Future.value(<Map<String, dynamic>>[]) : _list('/api/v1/vehicles/' + value.toString() + '/scanner-reports'); });
+  }
+  Future<void> _upload() async {
+    if (_vehicleId == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecciona un vehículo antes de adjuntar el informe.'))); return; }
+    final picked = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+    if (picked == null || picked.files.single.bytes == null) return;
+    try {
+      var path = '/api/v1/scanner-reports?vehicle_id=' + _vehicleId.toString();
+      if (_orderId != null) path += '&work_order_id=' + _orderId.toString();
+      await widget.api.uploadBytes(path, picked.files.single.bytes!, picked.files.single.name, contentType: 'application/pdf');
+      if (mounted) { setState(() => _reports = _list('/api/v1/vehicles/' + _vehicleId.toString() + '/scanner-reports')); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Informe LAUNCH adjuntado.'))); }
+    } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
+  }
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(
+    future: _vehicles,
+    builder: (context, vehiclesSnapshot) {
+      if (vehiclesSnapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+      if (vehiclesSnapshot.hasError) return Center(child: Text(vehiclesSnapshot.error.toString()));
+      final vehicles = vehiclesSnapshot.data ?? [];
+      return FutureBuilder<List<Map<String, dynamic>>>(future: _orders, builder: (context, ordersSnapshot) {
+        final orders = ordersSnapshot.data ?? [];
+        final availableOrders = orders.where((order) => order['vehicle_id'] == _vehicleId).toList();
+        return ListView(padding: const EdgeInsets.all(16), children: [
+          Text('Scanner automotriz LAUNCH X-431 PRO', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6), const Text('Vincula el informe PDF al vehículo y, cuando corresponda, a su orden de trabajo.'),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<int>(value: _vehicleId, decoration: const InputDecoration(labelText: 'Vehículo'), items: vehicles.map((v) => DropdownMenuItem(value: v['id'] as int, child: Text(v['plate'].toString() + ' · ' + v['make'].toString() + ' ' + v['model'].toString()))).toList(), onChanged: _selectVehicle),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<int?>(value: _orderId, decoration: const InputDecoration(labelText: 'Orden de trabajo (opcional)'), items: [const DropdownMenuItem<int?>(value: null, child: Text('Solo historial del vehículo')), ...availableOrders.map((o) => DropdownMenuItem<int?>(value: o['id'] as int, child: Text(o['code'].toString())))], onChanged: (value) => setState(() => _orderId = value)),
+          const SizedBox(height: 12),
+          FilledButton.icon(onPressed: _upload, icon: const Icon(Icons.upload_file_outlined), label: const Text('Adjuntar informe PDF')),
+          const SizedBox(height: 20), Text('Informes asociados', style: Theme.of(context).textTheme.titleMedium),
+          FutureBuilder<List<Map<String, dynamic>>>(future: _reports, builder: (context, reportsSnapshot) {
+            if (reportsSnapshot.connectionState != ConnectionState.done) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+            final reports = reportsSnapshot.data ?? [];
+            if (_vehicleId == null) return const Padding(padding: EdgeInsets.only(top: 12), child: Text('Selecciona un vehículo para ver sus informes.'));
+            if (reports.isEmpty) return const Padding(padding: EdgeInsets.only(top: 12), child: Text('No hay informes para este vehículo.'));
+            return Column(children: reports.map((report) => Card(child: ListTile(leading: const Icon(Icons.picture_as_pdf_outlined), title: Text(report['filename'].toString()), subtitle: Text(report['scanned_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: IconButton(onPressed: () async { try { await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/scanner-reports/' + report['id'].toString() + '/file')); } catch (_) {} }, icon: const Icon(Icons.open_in_new))))).toList());
+          }),
+        ]);
+      });
+    },
+  );
 }

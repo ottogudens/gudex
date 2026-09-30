@@ -145,6 +145,10 @@ class WorkOrderUpdate(SQLModel):
     total_clp: Optional[int] = None
 
 
+class WorkOrderAssignmentUpdate(SQLModel):
+    technician_user_id: Optional[int] = None
+
+
 class InspectionCreate(SQLModel):
     category: str
     item: str
