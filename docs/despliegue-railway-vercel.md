@@ -209,7 +209,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 1. Abre el dominio Vercel en HTTPS.
 2. En el inicio de sesión confirma que **Dirección de la API** sea la URL HTTPS Railway.
 3. Ingresa con el correo y contraseña del administrador configurados en Railway.
-4. Comprueba que carguen las vistas de órdenes, clientes, inventario y agenda. Si no hay datos, una lista vacía es válida.
+4. Comprueba que carguen las vistas de órdenes, clientes, inventario y agenda. En Inventario, administración debe poder crear un producto, ajustar stock con motivo y consultar el historial; intenta la misma operación con el perfil mecánico y confirma que el servidor la rechace. Si no hay datos, una lista vacía es válida.
 5. Inicia sesión con las cuentas de mecánico y cliente para comprobar que el menú y el portal corresponden al perfil.
 6. Abre una orden como administración o mecánico, crea una cotización con mano de obra y repuestos, y publícala confirmando el envío. Como cliente, abre Cotizaciones y comprueba que aparezca con sus importes; usa Aprobar/Rechazar y verifica el cambio de estado.
 7. Revisa la consola del navegador si la pantalla indica error de conexión; un error CORS suele señalar un origen ausente en `CORS_ORIGINS`.

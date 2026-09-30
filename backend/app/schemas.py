@@ -1,6 +1,8 @@
+import math
 from datetime import datetime
 from typing import Optional
 
+from pydantic import field_validator
 from sqlmodel import SQLModel
 
 from app.models import UserRole, WorkStatus
@@ -102,11 +104,32 @@ class ProductCreate(SQLModel):
     cost_clp: int = 0
     price_clp: int = 0
 
+    @field_validator("stock_quantity", "minimum_quantity")
+    @classmethod
+    def validate_quantities(cls, value: float) -> float:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("La cantidad debe ser finita y no negativa")
+        return value
+
 
 class StockAdjustment(SQLModel):
     quantity_change: float
     reason: str
     reference: Optional[str] = None
+
+    @field_validator("quantity_change")
+    @classmethod
+    def validate_quantity_change(cls, value: float) -> float:
+        if not math.isfinite(value) or value == 0:
+            raise ValueError("El movimiento debe ser finito y distinto de cero")
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        if len(value.strip()) < 3:
+            raise ValueError("Describe el motivo del movimiento")
+        return value.strip()
 
 
 class SaleLine(SQLModel):

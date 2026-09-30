@@ -417,7 +417,7 @@ def customer_portal_approve_quote(quote_id: int, approved: bool, request: Reques
     return quote
 
 
-@app.post("/api/v1/products", response_model=Product, status_code=201)
+@app.post("/api/v1/products", response_model=Product, status_code=201, dependencies=[Depends(require_admin)])
 def create_product(data: ProductCreate, session: Session = Depends(get_session)):
     product = Product.model_validate(data)
     session.add(product)
@@ -436,7 +436,15 @@ def list_products(low_stock: bool = False, session: Session = Depends(get_sessio
     return [p for p in products if p.stock_quantity <= p.minimum_quantity] if low_stock else products
 
 
-@app.post("/api/v1/products/{product_id}/stock-movements", response_model=StockMovement, status_code=201)
+@app.get("/api/v1/products/{product_id}/stock-movements", response_model=list[StockMovement])
+def list_stock_movements(product_id: int, session: Session = Depends(get_session)):
+    if not session.get(Product, product_id):
+        raise HTTPException(404, "Producto no encontrado")
+    return session.exec(select(StockMovement).where(StockMovement.product_id == product_id)
+                        .order_by(StockMovement.created_at.desc()).limit(100)).all()
+
+
+@app.post("/api/v1/products/{product_id}/stock-movements", response_model=StockMovement, status_code=201, dependencies=[Depends(require_admin)])
 def adjust_stock(product_id: int, data: StockAdjustment, session: Session = Depends(get_session)):
     product = session.get(Product, product_id)
     if not product:
