@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -111,6 +112,15 @@ class ApiClient {
       throw Exception(message?.toString() ?? 'Error HTTP ${response.statusCode}');
     }
     return body;
+  }
+}
+
+Future<void> openGudexPdf(ApiClient api, String path, String filename) async {
+  final bytes = await api.getBytes(path);
+  if (kIsWeb) {
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  } else {
+    await Printing.sharePdf(bytes: bytes, filename: filename);
   }
 }
 
@@ -1050,7 +1060,7 @@ class _ModuleListState extends State<_ModuleList> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar')),
           FilledButton.icon(onPressed: () async {
             try {
-              await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/portal/work-orders/$orderId/inspection-report.pdf'));
+              await openGudexPdf(widget.api, '/api/v1/portal/work-orders/$orderId/inspection-report.pdf', 'Gudex-inspeccion-$orderId.pdf');
             } catch (error) {
               if (mounted) ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('No se pudo abrir el informe: $error')));
             }
@@ -1792,7 +1802,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
 
   Future<void> _printInspectionReport() async {
     try {
-      await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/work-orders/${widget.order['id']}/inspection-report.pdf'));
+      await openGudexPdf(widget.api, '/api/v1/work-orders/${widget.order['id']}/inspection-report.pdf', 'Gudex-inspeccion-${widget.order['id']}.pdf');
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir el informe: $error')));
     }
@@ -2450,7 +2460,7 @@ class _PosScreenState extends State<_PosScreen> {
 
   Future<void> _printSaleReceipt(Map<String, dynamic> sale) async {
     try {
-      await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/sales/${sale['id']}/receipt.pdf'));
+      await openGudexPdf(widget.api, '/api/v1/sales/${sale['id']}/receipt.pdf', 'Gudex-comprobante-${sale['id']}.pdf');
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir el comprobante: $error')));
     }
@@ -2933,7 +2943,7 @@ class _VehicleHistoryScreenState extends State<_VehicleHistoryScreen> {
               title: Text(report['filename'].toString()),
               subtitle: Text(_date(report['scanned_at']) + (report['mileage_km'] == null ? '' : ' · ' + report['mileage_km'].toString() + ' km')),
               trailing: IconButton(icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: () async {
-                try { await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes(report['download_url'].toString())); } catch (_) {}
+                try { await openGudexPdf(widget.api, report['download_url'].toString(), report['filename'].toString()); } catch (_) {}
               }),
             ))),
             const SizedBox(height: 12),
@@ -3159,7 +3169,7 @@ class _ScannerScreenState extends State<_ScannerScreen> {
             final reports = reportsSnapshot.data ?? [];
             if (_vehicleId == null) return const Padding(padding: EdgeInsets.only(top: 12), child: Text('Selecciona un vehículo para ver sus informes.'));
             if (reports.isEmpty) return const Padding(padding: EdgeInsets.only(top: 12), child: Text('No hay informes para este vehículo.'));
-            return Column(children: reports.map((report) => Card(child: ListTile(leading: const Icon(Icons.picture_as_pdf_outlined), title: Text(report['filename'].toString()), subtitle: Text(report['scanned_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: IconButton(onPressed: () async { try { await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/scanner-reports/' + report['id'].toString() + '/file')); } catch (_) {} }, icon: const Icon(Icons.open_in_new))))).toList());
+            return Column(children: reports.map((report) => Card(child: ListTile(leading: const Icon(Icons.picture_as_pdf_outlined), title: Text(report['filename'].toString()), subtitle: Text(report['scanned_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: IconButton(onPressed: () async { try { await openGudexPdf(widget.api, '/api/v1/scanner-reports/' + report['id'].toString() + '/file', report['filename'].toString()); } catch (_) {} }, icon: const Icon(Icons.open_in_new))))).toList());
           }),
         ]);
       });
