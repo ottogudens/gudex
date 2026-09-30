@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     google_drive_folder_id: str | None = None
     google_calendar_id: str = "primary"
     google_gmail_query: str = "has:attachment filename:pdf newer_than:30d"
+    customer_portal_url: str | None = None
+    customer_access_token_hours: int = 24
     integration_encryption_key: str | None = None
     ai_provider: str | None = None
     ai_api_key: str | None = None

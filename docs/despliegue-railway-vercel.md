@@ -37,6 +37,8 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciales OAuth tipo Web de Google Cloud |
    | `GOOGLE_REDIRECT_URI` | `https://<dominio-api-railway>/auth/google/callback` (debe coincidir exactamente en Google Cloud) |
    | `GOOGLE_DRIVE_FOLDER_ID` | Opcional, ID de carpeta Drive que recibe PDFs LAUNCH |
+   | `CUSTOMER_PORTAL_URL` | URL HTTPS pública de Vercel para los enlaces de invitación y recuperación, sin `/` final |
+   | `CUSTOMER_ACCESS_TOKEN_HOURS` | Opcional; duración de invitaciones y recuperación. Predeterminado: `24` |
    | `AI_PROVIDER` / `AI_API_KEY` | Opcional; usa `openai` y la clave del proveedor para habilitar el asistente |
    | `AI_MODEL` | Opcional; modelo permitido por tu cuenta, por defecto `gpt-5-mini` |
 | `MERCADOPAGO_ACCESS_TOKEN` | Opcional; token de prueba o producción de la aplicación Mercado Pago. Se usa solo en backend |
@@ -59,6 +61,10 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 En un despliegue que ya contiene datos, crea primero un respaldo de PostgreSQL. Las migraciones conservan las tablas existentes y agregan las faltantes. Después del despliegue puedes comprobar la revisión desde el shell Railway con `alembic -c alembic.ini current`; debe indicar `20260930_0002 (head)`.
 
 Para completar la configuración OAuth de Google y probar las integraciones y el asistente, sigue [la guía de fases 3 y 4](fases-3-y-4.md). Las credenciales se guardan únicamente en Railway; no agregues secretos en Vercel.
+
+### Invitaciones de acceso para clientes
+
+Al registrar un cliente desde la app, administración puede marcar **Crear acceso al portal**. La API crea una cuenta inactiva y un enlace de un solo uso; el correo solo se envía cuando la cuenta Google del taller se vuelve a autorizar con el permiso `gmail.send`. Define `CUSTOMER_PORTAL_URL` con el dominio HTTPS de Vercel antes de enviar invitaciones. El cliente elige su contraseña desde el enlace; Gudex no envía ni muestra contraseñas temporales.
 
 Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(secrets.token_urlsafe(48))'` y guarda el resultado directamente en las variables de Railway. No lo agregues a GitHub.
 

@@ -68,6 +68,24 @@ class CustomerCreate(SQLModel):
         return value.strip().lower() if value and value.strip() else None
 
 
+class CustomerPortalAccessCreate(CustomerCreate):
+    create_portal_access: bool = False
+
+
+class CustomerAccessTokenConfirm(SQLModel):
+    token: str = Field(min_length=20, max_length=512)
+    password: str = Field(min_length=12, max_length=200)
+
+
+class CustomerPasswordResetRequest(SQLModel):
+    email: str = Field(min_length=3, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def clean_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
 class VehicleCreate(SQLModel):
     customer_id: int
     plate: str

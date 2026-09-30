@@ -253,11 +253,15 @@ class _SessionGateState extends State<SessionGate> {
   String? _role;
   String? _name;
   String? _baseUrl;
+  late final String? _accessToken;
+  late final bool _isPasswordReset;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    _accessToken = Uri.base.queryParameters['invite'] ?? Uri.base.queryParameters['reset'];
+    _isPasswordReset = Uri.base.queryParameters.containsKey('reset');
     _restore();
   }
 
@@ -304,11 +308,49 @@ class _SessionGateState extends State<SessionGate> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_accessToken != null) return CustomerAccessPage(token: _accessToken!, passwordReset: _isPasswordReset, apiBaseUrl: _baseUrl ?? _defaultApiBaseUrl);
     if (_token == null || _role == null) return LoginPage(onSignedIn: _signedIn);
     return HomePage(
       token: _token!, baseUrl: _baseUrl ?? 'http://10.0.2.2:8000', role: _role!, name: _name ?? 'Usuario', onSignOut: _signOut,
     );
   }
+}
+
+class CustomerAccessPage extends StatefulWidget {
+  const CustomerAccessPage({required this.token, required this.passwordReset, required this.apiBaseUrl, super.key});
+  final String token;
+  final bool passwordReset;
+  final String apiBaseUrl;
+  @override
+  State<CustomerAccessPage> createState() => _CustomerAccessPageState();
+}
+
+class _CustomerAccessPageState extends State<CustomerAccessPage> {
+  final _password = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _busy = false;
+  String? _error;
+  @override
+  void dispose() { _password.dispose(); _confirm.dispose(); super.dispose(); }
+  Future<void> _submit() async {
+    if (_password.text.length < 12) { setState(() => _error = 'La contraseña debe tener al menos 12 caracteres.'); return; }
+    if (_password.text != _confirm.text) { setState(() => _error = 'Las contraseñas no coinciden.'); return; }
+    setState(() { _busy = true; _error = null; });
+    try {
+      final path = widget.passwordReset ? '/auth/customer/password-reset/confirm' : '/auth/customer/activate';
+      await ApiClient(widget.apiBaseUrl).postJson(path, {'token': widget.token, 'password': _password.text});
+      if (mounted) setState(() => _error = 'Listo. Ya puedes cerrar esta página e iniciar sesión.');
+    } catch (error) { if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(widget.passwordReset ? 'Nueva contraseña' : 'Activar acceso')), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 460), child: ListView(padding: const EdgeInsets.all(24), children: [
+    Text(widget.passwordReset ? 'Crea una nueva contraseña para tu portal.' : 'Crea una contraseña para acceder a tu portal Gudex.'), const SizedBox(height: 18),
+    TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña (12 caracteres mínimo)')),
+    const SizedBox(height: 12), TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña')),
+    if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+    const SizedBox(height: 18), FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'Guardando…' : 'Guardar')),
+  ]))));
 }
 
 class LoginPage extends StatefulWidget {
@@ -1337,10 +1379,11 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     final email = TextEditingController();
     final phone = TextEditingController();
     final rut = TextEditingController();
+    bool createPortalAccess = false;
     try {
       final data = await showDialog<Map<String, dynamic>>(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
           title: const Text('Registrar cliente'),
           content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo *'), validator: (v) => (v == null || v.trim().length < 2) ? 'Ingresa el nombre' : null),
@@ -1349,7 +1392,9 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
             const SizedBox(height: 10),
             TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono')),
             const SizedBox(height: 10),
-            TextFormField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
+            TextFormField(controller: email, keyboardType: TextInputType.emailAddress, decoration: InputDecoration(labelText: createPortalAccess ? 'Correo para acceso al portal *' : 'Correo'), validator: (v) => createPortalAccess && (v == null || !v.contains('@')) ? 'Ingresa un correo válido' : null),
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(contentPadding: EdgeInsets.zero, value: createPortalAccess, onChanged: (value) => update(() => createPortalAccess = value), title: const Text('Crear acceso al portal'), subtitle: const Text('Se enviará una invitación para que el cliente cree su contraseña.')),
           ]))),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
@@ -1360,12 +1405,13 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
                 if (rut.text.trim().isNotEmpty) 'rut': rut.text.trim(),
                 if (phone.text.trim().isNotEmpty) 'phone': phone.text.trim(),
                 if (email.text.trim().isNotEmpty) 'email': email.text.trim(),
+                'create_portal_access': createPortalAccess,
               });
             }, child: const Text('Guardar')),
           ],
-        ),
+        )),
       );
-      if (data != null) await _save('/api/v1/customers', data, 'Cliente registrado');
+      if (data != null) await _save(data['create_portal_access'] == true ? '/api/v1/customers/with-portal-access' : '/api/v1/customers', data, data['create_portal_access'] == true ? 'Cliente registrado; invitación preparada para envío.' : 'Cliente registrado');
     } finally {
       name.dispose(); email.dispose(); phone.dispose(); rut.dispose();
     }

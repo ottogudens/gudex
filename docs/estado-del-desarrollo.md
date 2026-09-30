@@ -37,6 +37,7 @@
 - **Gmail y Drive:** OAuth y la importación por acción de administrador ya están implementados. Se requiere configurar Google Cloud, scopes y variables en Railway; no hay lectura automática en segundo plano.
 - **Google Calendar:** ya se sincronizan citas pendientes tras confirmación administrativa. Requiere credenciales Google y permisos Calendar.
 - **Asistente IA:** la integración con OpenAI está implementada, apagada hasta configurar `AI_PROVIDER` y `AI_API_KEY`. Actualmente propone y ejecuta, tras confirmación, cambios de estado de órdenes como única acción mutante.
+- **Portal de clientes:** administración puede crear una cuenta de portal al registrar el cliente. Gudex genera una invitación de un solo uso, con vencimiento, y puede enviarla desde Gmail cuando la cuenta Google autorice `gmail.send`; las contraseñas nunca se envían por correo. Incluye recuperación por enlace temporal.
 - **Móvil:** ya incluye recepción, listas guiadas, edición de resultados, cámara/archivos, resumen para el cliente e impresión/guardado del informe de inspección PDF. El detalle de orden conserva localmente borradores de estado, diagnóstico, recepción y resultados de inspección existentes, y los recupera tras una conexión fallida. Faltan una cola de sincronización, resolución de conflictos y ampliar los formularios operativos restantes.
 
 ## Secuencia recomendada

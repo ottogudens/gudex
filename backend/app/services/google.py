@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 import base64
 import hashlib
 import secrets
+from email.mime.text import MIMEText
 
 import httpx
 from fastapi import HTTPException
@@ -17,6 +18,7 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 GOOGLE_SCOPES = (
     "openid", "email",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/calendar.events",
 )
@@ -138,6 +140,18 @@ async def gmail_candidates(session: Session) -> list[dict]:
                            "attachment_id": attachment_id, "filename": filename,
                            "subject": headers.get("subject", "(sin asunto)"), "date": headers.get("date")})
     return result
+
+
+async def send_customer_access_email(session: Session, recipient: str, subject: str, html: str) -> None:
+    """Envía una invitación o recuperación desde la cuenta Gmail autorizada del taller."""
+    credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
+    if not credential or "https://www.googleapis.com/auth/gmail.send" not in credential.granted_scopes.split():
+        raise HTTPException(503, "Conecta nuevamente Google y autoriza el permiso para enviar correos")
+    message = MIMEText(html, "html", "utf-8")
+    message["To"] = recipient
+    message["Subject"] = subject
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    await google_request(session, "POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", json={"raw": raw})
 
 
 def _gmail_attachments(part: dict):

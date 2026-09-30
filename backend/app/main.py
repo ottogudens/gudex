@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from html import escape
 from pathlib import Path
 import secrets
 import hashlib
 import hmac
 from uuid import uuid4
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -17,11 +19,11 @@ from app.config import settings
 from app.database import create_db_and_tables, engine, get_session
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, Inspection, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
+    Appointment, Customer, CustomerAccessToken, Inspection, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
     StockMovement, User, UserRole, Vehicle, WorkOrder, WorkStatus,
 )
 from app.schemas import (
-    AppointmentCreate, CustomerCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
+    AppointmentCreate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
     PasswordChange, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderCreate, WorkOrderUpdate,
 )
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -30,6 +32,7 @@ from app.routers.integrations import router as integrations_router
 from app.routers.assistant import router as assistant_router
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 from app.services.documents import sale_receipt_pdf
+from app.services import google
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
 app.add_middleware(AuthenticationMiddleware)
@@ -151,6 +154,133 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(user)
     return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "active": user.active}
+
+
+def _issue_customer_access_token(session: Session, user: User, customer: Customer, purpose: str,
+                                 requested_by_email: str | None = None) -> tuple[str, CustomerAccessToken]:
+    now = datetime.now(timezone.utc)
+    for previous in session.exec(select(CustomerAccessToken).where(
+        CustomerAccessToken.user_id == user.id, CustomerAccessToken.purpose == purpose,
+        CustomerAccessToken.used_at == None,  # noqa: E711
+    )).all():
+        previous.used_at = now
+        session.add(previous)
+    token = secrets.token_urlsafe(32)
+    record = CustomerAccessToken(
+        user_id=user.id, customer_id=customer.id, purpose=purpose,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=now + timedelta(hours=max(1, settings.customer_access_token_hours)),
+        requested_by_email=requested_by_email,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return token, record
+
+
+def _customer_access_link(request: Request, token: str, purpose: str) -> str:
+    base = (settings.customer_portal_url or str(request.base_url)).rstrip("/")
+    parameter = "invite" if purpose == "activation" else "reset"
+    return f"{base}/?{urlencode({parameter: token})}"
+
+
+async def _send_customer_access_email(session: Session, request: Request, user: User, customer: Customer,
+                                      purpose: str, requested_by_email: str | None = None) -> str:
+    token, record = _issue_customer_access_token(session, user, customer, purpose, requested_by_email)
+    link = _customer_access_link(request, token, purpose)
+    greeting = escape(customer.full_name)
+    if purpose == "activation":
+        subject = "Activa tu acceso al portal Gudex"
+        body = f"<p>Hola {greeting},</p><p>Activa tu acceso al portal Gudex y crea tu contraseña desde este enlace:</p><p><a href=\"{escape(link, quote=True)}\">Activar acceso</a></p><p>El enlace vence en {settings.customer_access_token_hours} horas y solo puede usarse una vez.</p>"
+    else:
+        subject = "Restablece tu contraseña de Gudex"
+        body = f"<p>Hola {greeting},</p><p>Solicitaste restablecer tu contraseña. Usa este enlace para crear una nueva:</p><p><a href=\"{escape(link, quote=True)}\">Restablecer contraseña</a></p><p>El enlace vence en {settings.customer_access_token_hours} horas y solo puede usarse una vez.</p>"
+    try:
+        await google.send_customer_access_email(session, user.email, subject, body)
+    except HTTPException:
+        return "pending"
+    record.sent_at = datetime.now(timezone.utc)
+    session.add(record)
+    session.commit()
+    return "sent"
+
+
+@app.post("/api/v1/customers/with-portal-access", status_code=201, dependencies=[Depends(require_admin)])
+async def create_customer_with_portal_access(data: CustomerPortalAccessCreate, request: Request,
+                                             session: Session = Depends(get_session)):
+    if not data.email:
+        raise HTTPException(422, "El correo es obligatorio para crear acceso al portal")
+    if data.rut and session.exec(select(Customer).where(Customer.rut == data.rut)).first():
+        raise HTTPException(409, "Ya existe un cliente con ese RUT")
+    if session.exec(select(Customer).where(Customer.email == data.email)).first() or session.exec(select(User).where(User.email == data.email)).first():
+        raise HTTPException(409, "Ya existe un cliente o usuario con ese correo")
+    customer = Customer(full_name=data.full_name, rut=data.rut, email=data.email, phone=data.phone, notes=data.notes)
+    session.add(customer)
+    session.commit()
+    session.refresh(customer)
+    user = User(email=data.email, full_name=data.full_name, password_hash=hash_password(secrets.token_urlsafe(32)),
+                role=UserRole.customer, customer_id=customer.id, active=False)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    delivery = await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)
+    return {"customer": customer, "user": {"id": user.id, "email": user.email, "active": user.active}, "invitation_delivery": delivery}
+
+
+@app.post("/api/v1/customers/{customer_id}/portal-access/invitation", dependencies=[Depends(require_admin)])
+async def resend_customer_invitation(customer_id: int, request: Request, session: Session = Depends(get_session)):
+    customer = session.get(Customer, customer_id)
+    user = session.exec(select(User).where(User.customer_id == customer_id, User.role == UserRole.customer)).first()
+    if not customer or not user:
+        raise HTTPException(404, "Cliente con acceso al portal no encontrado")
+    return {"invitation_delivery": await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)}
+
+
+@app.post("/auth/customer/activate")
+def activate_customer_access(data: CustomerAccessTokenConfirm, session: Session = Depends(get_session)):
+    token_hash = hashlib.sha256(data.token.encode()).hexdigest()
+    record = session.exec(select(CustomerAccessToken).where(CustomerAccessToken.token_hash == token_hash)).first()
+    now = datetime.now(timezone.utc)
+    expires_at = record.expires_at if record and record.expires_at.tzinfo else (record.expires_at.replace(tzinfo=timezone.utc) if record else now)
+    if not record or record.purpose != "activation" or record.used_at or expires_at <= now:
+        raise HTTPException(400, "El enlace de activación es inválido o venció")
+    user = session.get(User, record.user_id)
+    if not user:
+        raise HTTPException(400, "El enlace de activación es inválido o venció")
+    user.password_hash = hash_password(data.password)
+    user.active = True
+    user.token_version += 1
+    record.used_at = now
+    session.add(user); session.add(record); session.commit()
+    return {"message": "Acceso activado. Ya puedes iniciar sesión."}
+
+
+@app.post("/auth/customer/password-reset")
+async def request_customer_password_reset(data: CustomerPasswordResetRequest, request: Request, session: Session = Depends(get_session)):
+    user = session.exec(select(User).where(User.email == data.email, User.role == UserRole.customer, User.active == True)).first()  # noqa: E712
+    if user and user.customer_id:
+        customer = session.get(Customer, user.customer_id)
+        if customer:
+            await _send_customer_access_email(session, request, user, customer, "reset")
+    return {"message": "Si existe una cuenta asociada, enviamos instrucciones al correo registrado."}
+
+
+@app.post("/auth/customer/password-reset/confirm")
+def confirm_customer_password_reset(data: CustomerAccessTokenConfirm, session: Session = Depends(get_session)):
+    token_hash = hashlib.sha256(data.token.encode()).hexdigest()
+    record = session.exec(select(CustomerAccessToken).where(CustomerAccessToken.token_hash == token_hash)).first()
+    now = datetime.now(timezone.utc)
+    expires_at = record.expires_at if record and record.expires_at.tzinfo else (record.expires_at.replace(tzinfo=timezone.utc) if record else now)
+    if not record or record.purpose != "reset" or record.used_at or expires_at <= now:
+        raise HTTPException(400, "El enlace de recuperación es inválido o venció")
+    user = session.get(User, record.user_id)
+    if not user or not user.active:
+        raise HTTPException(400, "El enlace de recuperación es inválido o venció")
+    user.password_hash = hash_password(data.password)
+    user.token_version += 1
+    record.used_at = now
+    session.add(user); session.add(record); session.commit()
+    return {"message": "Contraseña actualizada. Ya puedes iniciar sesión."}
 
 
 @app.get("/health")

@@ -41,6 +41,19 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class CustomerAccessToken(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    customer_id: int = Field(foreign_key="customer.id", index=True)
+    purpose: str = Field(max_length=24, index=True)
+    token_hash: str = Field(index=True, unique=True, max_length=64)
+    expires_at: datetime = Field(index=True)
+    used_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
+    requested_by_email: Optional[str] = Field(default=None, max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class Appointment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     customer_id: int = Field(foreign_key="customer.id", index=True)
