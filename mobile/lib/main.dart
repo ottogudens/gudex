@@ -746,6 +746,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
   late final TextEditingController _diagnosis;
   late String _status;
   late Future<List<Map<String, dynamic>>> _inspections;
+  late Future<List<Map<String, dynamic>>> _quotes;
   bool _saving = false;
   String? _error;
 
@@ -760,6 +761,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     _diagnosis = TextEditingController(text: '${widget.order['diagnosis'] ?? ''}');
     _status = '${widget.order['status'] ?? 'received'}';
     _inspections = _loadInspections();
+    _quotes = _loadQuotes();
   }
 
   @override
@@ -770,6 +772,11 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
 
   Future<List<Map<String, dynamic>>> _loadInspections() async {
     final result = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/inspections');
+    return result is List ? result.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : [];
+  }
+
+  Future<List<Map<String, dynamic>>> _loadQuotes() async {
+    final result = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/quotes');
     return result is List ? result.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : [];
   }
 
@@ -850,6 +857,91 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     }
   }
 
+  Future<void> _createQuote() async {
+    final form = GlobalKey<FormState>();
+    final description = TextEditingController();
+    final labor = TextEditingController(text: '0');
+    final parts = TextEditingController(text: '0');
+    final notes = TextEditingController();
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Preparar cotización'),
+          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: description, maxLines: 2, decoration: const InputDecoration(labelText: 'Trabajo propuesto *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Describe el trabajo' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: labor, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Mano de obra (CLP)', prefixText: '\$'), validator: _nonNegativeInteger),
+            const SizedBox(height: 10),
+            TextFormField(controller: parts, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Repuestos (CLP)', prefixText: '\$'), validator: _nonNegativeInteger),
+            const SizedBox(height: 10),
+            TextFormField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Observaciones / alcance')),
+          ]))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(context, {
+                'description': description.text.trim(),
+                'labor_clp': int.parse(labor.text.trim()),
+                'parts_clp': int.parse(parts.text.trim()),
+                if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim(),
+              });
+            }, child: const Text('Guardar borrador')),
+          ],
+        ),
+      );
+      if (data == null) return;
+      setState(() { _saving = true; _error = null; });
+      await widget.api.postJson('/api/v1/work-orders/${widget.order['id']}/quotes', data);
+      if (!mounted) return;
+      setState(() => _quotes = _loadQuotes());
+      await widget.onChanged();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cotización guardada como borrador')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      description.dispose(); labor.dispose(); parts.dispose(); notes.dispose();
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  String? _nonNegativeInteger(String? value) {
+    final amount = int.tryParse((value ?? '').trim());
+    return amount == null || amount < 0 ? 'Ingresa un monto válido en CLP' : null;
+  }
+
+  Future<void> _publishQuote(Map<String, dynamic> quote) async {
+    final total = (_asInt(quote['labor_clp']) + _asInt(quote['parts_clp']));
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Publicar cotización'),
+        content: Text('Se enviará al portal del cliente la propuesta “${quote['description']}” por ${_currency(total)}. Confirma que el alcance y los valores estén revisados.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Seguir revisando')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Publicar')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() { _saving = true; _error = null; });
+    try {
+      await widget.api.post('/api/v1/quotes/${quote['id']}/publish');
+      if (!mounted) return;
+      setState(() => _quotes = _loadQuotes());
+      await widget.onChanged();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cotización publicada para el cliente')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  int _asInt(dynamic value) => value is num ? value.round() : int.tryParse('$value') ?? 0;
+  String _currency(int amount) => '\$${amount.toString()} CLP';
+
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
@@ -893,6 +985,31 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
                 subtitle: Text('${inspection['result']}${inspection['measured_value'] == null ? '' : ' · ${inspection['measured_value']}'}${inspection['notes'] == null ? '' : '\n${inspection['notes']}'}'),
                 isThreeLine: inspection['notes'] != null,
               ))).toList());
+            },
+          ),
+          const Divider(height: 28),
+          Row(children: [
+            Expanded(child: Text('Cotizaciones', style: Theme.of(context).textTheme.titleLarge)),
+            IconButton(onPressed: _saving ? null : _createQuote, icon: const Icon(Icons.add_circle_outline), tooltip: 'Preparar cotización'),
+          ]),
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: _quotes,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+              if (snapshot.hasError) return Text('No se pudieron cargar las cotizaciones: ${snapshot.error}');
+              final records = snapshot.data ?? [];
+              if (records.isEmpty) return const Text('Todavía no hay cotizaciones para esta orden.');
+              return Column(children: records.map((quote) {
+                final amount = _asInt(quote['labor_clp']) + _asInt(quote['parts_clp']);
+                final isDraft = quote['status'] == 'draft';
+                return Card(child: ListTile(
+                  leading: Icon(isDraft ? Icons.edit_note : Icons.request_quote_outlined),
+                  title: Text('${quote['description']}'),
+                  subtitle: Text('${_currency(amount)} · ${'${quote['status'] ?? 'draft'}'.replaceAll('_', ' ')}${quote['notes'] == null ? '' : '\n${quote['notes']}'}'),
+                  isThreeLine: quote['notes'] != null,
+                  trailing: isDraft ? IconButton(onPressed: _saving ? null : () => _publishQuote(quote), icon: const Icon(Icons.send_outlined), tooltip: 'Publicar para cliente') : null,
+                ));
+              }).toList());
             },
           ),
         ]),

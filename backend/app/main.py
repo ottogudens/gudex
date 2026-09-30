@@ -254,6 +254,13 @@ def create_quote(order_id: int, data: QuoteCreate, session: Session = Depends(ge
     return quote
 
 
+@app.get("/api/v1/work-orders/{order_id}/quotes", response_model=list[Quote])
+def list_work_order_quotes(order_id: int, session: Session = Depends(get_session)):
+    if not session.get(WorkOrder, order_id):
+        raise HTTPException(404, "Orden de trabajo no encontrada")
+    return session.exec(select(Quote).where(Quote.work_order_id == order_id).order_by(Quote.created_at.desc())).all()
+
+
 @app.post("/api/v1/quotes/{quote_id}/customer-approval", response_model=Quote)
 def approve_quote(quote_id: int, approved: bool, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
@@ -282,6 +289,10 @@ def publish_quote(quote_id: int, session: Session = Depends(get_session)):
         raise HTTPException(409, "La cotización ya fue publicada o respondida")
     quote.status = "sent"
     session.add(quote)
+    order = session.get(WorkOrder, quote.work_order_id)
+    if order:
+        order.status = WorkStatus.awaiting_approval
+        session.add(order)
     session.commit()
     session.refresh(quote)
     return quote

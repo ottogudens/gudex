@@ -211,7 +211,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 3. Ingresa con el correo y contraseña del administrador configurados en Railway.
 4. Comprueba que carguen las vistas de órdenes, clientes, inventario y agenda. Si no hay datos, una lista vacía es válida.
 5. Inicia sesión con las cuentas de mecánico y cliente para comprobar que el menú y el portal corresponden al perfil.
-6. Como cliente, abre una cotización publicada y usa Aprobar/Rechazar. La respuesta debe quedar reflejada en la orden.
+6. Abre una orden como administración o mecánico, crea una cotización con mano de obra y repuestos, y publícala confirmando el envío. Como cliente, abre Cotizaciones y comprueba que aparezca con sus importes; usa Aprobar/Rechazar y verifica el cambio de estado.
 7. Revisa la consola del navegador si la pantalla indica error de conexión; un error CORS suele señalar un origen ausente en `CORS_ORIGINS`.
 
 ## 5. Prueba de persistencia y scanner

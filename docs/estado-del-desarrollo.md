@@ -8,9 +8,10 @@
 - Roles de administración, mecánico y cliente. La cuenta cliente queda acotada a rutas del portal y sus recursos.
 - Clientes, vehículos, órdenes, inspecciones, diagnósticos en órdenes, cotizaciones, aprobación del cliente, citas, catálogo y movimientos de stock.
 - En Flutter, administración puede registrar clientes y vehículos, abrir órdenes de trabajo, actualizar su estado y diagnóstico, y agregar puntos de inspección con resultados y mediciones; mecánicos pueden revisar y completar las órdenes.
+- Desde el detalle de una orden, el equipo puede preparar cotizaciones con descripción, mano de obra, repuestos y observaciones, y publicarlas para aprobación del cliente con confirmación explícita. El cliente ve los importes en su portal y puede aprobar o rechazar.
 - POS API y pantalla inicial para administración, con carrito, descuento, cliente opcional, selección de medio de pago, confirmación de venta, historial reciente y descuento de stock. El cobro Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
 - Recepción de informe PDF LAUNCH, asociado a vehículo y opcionalmente a una orden; el original se conserva en almacenamiento local privado.
-- App Flutter para autenticación y módulos por rol. Clientes pueden responder cotizaciones; administración dispone de formularios de recepción, registro de clientes/vehículos, inspecciones y un POS inicial.
+- App Flutter para autenticación y módulos por rol. Clientes pueden revisar y responder cotizaciones; administración dispone de formularios de recepción, registro de clientes/vehículos, inspecciones, cotizaciones y un POS inicial.
 - Preparación de despliegue: PostgreSQL/psycopg, CORS configurable, bootstrap admin para producción y compilación Flutter Web para Vercel.
 
 ## Integraciones aún por conectar
@@ -25,7 +26,7 @@
 ## Secuencia recomendada
 
 1. Acordar el flujo tributario y el tipo de integración de Mercado Pago.
-2. Completar la publicación de cotizaciones, listas de inspección predefinidas, edición de inventario y el resto de formularios operativos; ampliar el POS con servicios y documentos tributarios.
+2. Agregar listas de inspección predefinidas, edición de inventario, adjuntos de fotografías desde móvil y el resto de formularios operativos; ampliar el POS con servicios y documentos tributarios.
 3. Autorizar Google por OAuth con permisos mínimos; importar reportes del scanner y sincronizar calendario/correos.
 4. Agregar el asistente IA con herramientas de solo lectura primero y confirmación explícita para acciones.
 5. Migrar a PostgreSQL, configurar almacenamiento protegido y desplegar; agregar migraciones antes de producción.
