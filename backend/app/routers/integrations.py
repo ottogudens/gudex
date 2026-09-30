@@ -7,6 +7,7 @@ import secrets
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -22,6 +23,11 @@ router = APIRouter()
 
 
 def selected_ai_model(session: Session) -> str:
+    # Una instalación anterior puede arrancar antes de que Railway ejecute la
+    # migración. Mantener el valor de entorno evita que Integraciones o IA
+    # fallen durante esa ventana.
+    if not inspect(session.get_bind()).has_table(AIConfiguration.__table__.name):
+        return settings.ai_model
     configuration = session.get(AIConfiguration, 1)
     return configuration.selected_model if configuration else settings.ai_model
 
@@ -84,6 +90,9 @@ async def update_ai_model(data: AIModelUpdate, request: Request, session: Sessio
     models = await _available_ai_models()
     if data.model not in models:
         raise HTTPException(422, "El modelo no está disponible o no es compatible con el asistente Gudex")
+    # Es una creación aditiva y acotada a esta tabla; protege despliegues donde
+    # el predeploy de Alembic se haya omitido o haya quedado pendiente.
+    AIConfiguration.__table__.create(bind=session.get_bind(), checkfirst=True)
     configuration = session.get(AIConfiguration, 1)
     if configuration:
         configuration.selected_model = data.model
