@@ -21,10 +21,9 @@ abstract final class GudexColors {
 }
 
 const _storage = FlutterSecureStorage();
-const _defaultApiBaseUrl = String.fromEnvironment(
-  'API_BASE_URL',
-  defaultValue: 'http://10.0.2.2:8000',
-);
+// La aplicación usa exclusivamente la API pública de Gudex. Las credenciales
+// de PostgreSQL pertenecen solo al backend y nunca deben llegar al cliente.
+const _apiBaseUrl = 'https://bknd.gudex.cl';
 
 class ApiClient {
   ApiClient(this.baseUrl, {this.token});
@@ -252,7 +251,6 @@ class _SessionGateState extends State<SessionGate> {
   String? _token;
   String? _role;
   String? _name;
-  String? _baseUrl;
   late final String? _accessToken;
   late final bool _isPasswordReset;
   bool _loading = true;
@@ -269,13 +267,11 @@ class _SessionGateState extends State<SessionGate> {
     final token = await _storage.read(key: 'access_token');
     final role = await _storage.read(key: 'role');
     final name = await _storage.read(key: 'full_name');
-    final baseUrl = await _storage.read(key: 'api_base_url');
     if (!mounted) return;
     setState(() {
       _token = token;
       _role = role;
       _name = name;
-      _baseUrl = baseUrl;
       _loading = false;
     });
   }
@@ -284,13 +280,11 @@ class _SessionGateState extends State<SessionGate> {
     await _storage.write(key: 'access_token', value: session['access_token'] as String);
     await _storage.write(key: 'role', value: session['role'] as String);
     await _storage.write(key: 'full_name', value: session['full_name'] as String);
-    await _storage.write(key: 'api_base_url', value: session['api_base_url'] as String);
     if (!mounted) return;
     setState(() {
       _token = session['access_token'] as String;
       _role = session['role'] as String;
       _name = session['full_name'] as String;
-      _baseUrl = session['api_base_url'] as String;
     });
   }
 
@@ -301,17 +295,16 @@ class _SessionGateState extends State<SessionGate> {
       _token = null;
       _role = null;
       _name = null;
-      _baseUrl = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_accessToken != null) return CustomerAccessPage(token: _accessToken!, passwordReset: _isPasswordReset, apiBaseUrl: _baseUrl ?? _defaultApiBaseUrl);
+    if (_accessToken != null) return CustomerAccessPage(token: _accessToken!, passwordReset: _isPasswordReset, apiBaseUrl: _apiBaseUrl);
     if (_token == null || _role == null) return LoginPage(onSignedIn: _signedIn);
     return HomePage(
-      token: _token!, baseUrl: _baseUrl ?? 'http://10.0.2.2:8000', role: _role!, name: _name ?? 'Usuario', onSignOut: _signOut,
+      token: _token!, baseUrl: _apiBaseUrl, role: _role!, name: _name ?? 'Usuario', onSignOut: _signOut,
     );
   }
 }
@@ -364,16 +357,13 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final _baseUrl = TextEditingController(text: _defaultApiBaseUrl);
   bool _busy = false;
   String? _error;
 
   Future<void> _submit() async {
     setState(() { _busy = true; _error = null; });
     try {
-      final base = _baseUrl.text.trim().replaceAll(RegExp(r'/$'), '');
-      final session = await ApiClient(base).login(_email.text.trim(), _password.text);
-      session['api_base_url'] = base;
+      final session = await ApiClient(_apiBaseUrl).login(_email.text.trim(), _password.text);
       widget.onSignedIn(session);
     } catch (error) {
       setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
@@ -386,7 +376,6 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _baseUrl.dispose();
     super.dispose();
   }
 
@@ -443,14 +432,6 @@ class _LoginPageState extends State<LoginPage> {
                           child: _busy
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                               : const Text('Ingresar'),
-                        ),
-                        const SizedBox(height: 8),
-                        ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          childrenPadding: EdgeInsets.zero,
-                          title: const Text('Configuración de conexión', style: TextStyle(fontSize: 13)),
-                          children: [TextField(controller: _baseUrl, keyboardType: TextInputType.url,
-                            decoration: const InputDecoration(labelText: 'Dirección de la API', prefixIcon: Icon(Icons.dns_outlined)))],
                         ),
                       ]),
                     ),

@@ -48,7 +48,7 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    Railway proporciona `DATABASE_URL` para que los servicios del mismo proyecto se conecten a PostgreSQL. No copies ni expongas la contraseña de la base de datos en el frontend.
 
 8. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
-9. Pulsa Deploy. Railway debe mostrar las migraciones `20260930_0001` y `20260930_0002` antes de iniciar Uvicorn. Como recuperación de instalaciones anteriores, el arranque puede crear únicamente tablas faltantes; los cambios posteriores deben seguir pasando por Alembic.
+9. Pulsa Deploy. Railway debe mostrar las migraciones `20260930_0001`, `20260930_0002` y `20260930_0003` antes de iniciar Uvicorn. Como recuperación de instalaciones anteriores, el arranque puede crear únicamente tablas faltantes; los cambios posteriores deben seguir pasando por Alembic.
 10. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
 11. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
 
@@ -58,13 +58,24 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 
    Debe responder con JSON y `"status":"ok"`.
 
-En un despliegue que ya contiene datos, crea primero un respaldo de PostgreSQL. Las migraciones conservan las tablas existentes y agregan las faltantes. Después del despliegue puedes comprobar la revisión desde el shell Railway con `alembic -c alembic.ini current`; debe indicar `20260930_0002 (head)`.
+En un despliegue que ya contiene datos, crea primero un respaldo de PostgreSQL. Las migraciones conservan las tablas existentes y agregan las faltantes. Después del despliegue puedes comprobar la revisión desde el shell Railway con `alembic -c alembic.ini current`; debe indicar `20260930_0003 (head)`.
 
 Para completar la configuración OAuth de Google y probar las integraciones y el asistente, sigue [la guía de fases 3 y 4](fases-3-y-4.md). Las credenciales se guardan únicamente en Railway; no agregues secretos en Vercel.
 
 ### Invitaciones de acceso para clientes
 
 Al registrar un cliente desde la app, administración puede marcar **Crear acceso al portal**. La API crea una cuenta inactiva y un enlace de un solo uso; el correo solo se envía cuando la cuenta Google del taller se vuelve a autorizar con el permiso `gmail.send`. Define `CUSTOMER_PORTAL_URL` con el dominio HTTPS de Vercel antes de enviar invitaciones. El cliente elige su contraseña desde el enlace; Gudex no envía ni muestra contraseñas temporales.
+
+#### Variables nuevas para el acceso al portal
+
+Estas son las únicas variables nuevas introducidas para invitaciones y recuperación de contraseña; se agregan en el servicio **API** de Railway, nunca en Vercel ni en Flutter:
+
+| Variable | Valor de producción para Gudex | Propósito |
+|---|---|---|
+| `CUSTOMER_PORTAL_URL` | `https://gudex-mobile-1q1l.vercel.app` (o el dominio HTTPS definitivo del portal) | Construye los enlaces de activación y recuperación que recibe el cliente. Sin `/` final. |
+| `CUSTOMER_ACCESS_TOKEN_HOURS` | `24` | Vigencia en horas de los enlaces de un solo uso. Puede reducirse, por ejemplo, a `12`. |
+
+Para enviar correos también debes reconectar la cuenta Google del taller desde Integraciones después de desplegar: la autorización debe conceder `gmail.send`. No se agrega una clave Gmail nueva; se usan `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` e `INTEGRATION_ENCRYPTION_KEY`, que ya estaban definidos para la integración Google.
 
 Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(secrets.token_urlsafe(48))'` y guarda el resultado directamente en las variables de Railway. No lo agregues a GitHub.
 
@@ -80,10 +91,9 @@ Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(se
 
    | Variable | Valor |
    |---|---|
-   | `API_BASE_URL` | URL HTTPS pública de Railway, sin `/` al final |
    | `FLUTTER_VERSION` | `3.47.3` (opcional; es el valor predeterminado del script) |
 
-   `API_BASE_URL` es pública y queda incorporada al cliente web durante la compilación. No pongas credenciales de Railway, Google, IA o Mercado Pago en Vercel.
+   La aplicación se compila con la API fija `https://bknd.gudex.cl`; no necesitas ni debes definir `API_BASE_URL` en Vercel. No pongas credenciales de Railway, Google, IA o Mercado Pago en Vercel.
 
 5. Despliega desde `main` y copia el dominio HTTPS asignado por Vercel, por ejemplo `https://<proyecto>.vercel.app`.
 6. Vuelve a Railway y cambia `CORS_ORIGINS` a ese origen exacto. Para permitir más de un origen, sepáralos con comas, sin comodines, por ejemplo:
@@ -243,7 +253,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 ## 4. Probar desde la interfaz web
 
 1. Abre el dominio Vercel en HTTPS.
-2. En el inicio de sesión confirma que **Dirección de la API** sea la URL HTTPS Railway.
+2. El inicio de sesión usa automáticamente `https://bknd.gudex.cl`; no solicita ni permite editar una dirección de API.
 3. Ingresa con el correo y contraseña del administrador configurados en Railway.
 4. Comprueba que carguen las vistas de órdenes, clientes, inventario y agenda. En Inventario, administración debe poder crear un producto, ajustar stock con motivo y consultar el historial; intenta la misma operación con el perfil mecánico y confirma que el servidor la rechace. Si no hay datos, una lista vacía es válida.
 5. Inicia sesión con las cuentas de mecánico y cliente para comprobar que el menú y el portal corresponden al perfil.
@@ -276,7 +286,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 | El servicio termina al arrancar en producción | Define `JWT_SECRET` aleatorio de 32+ caracteres, `SEED_DEFAULT_USERS=false` y una clave admin de 12+ caracteres. |
 | Falla el comando previo de Alembic | Confirma Root Directory `/backend`, `DATABASE_URL` y que `alembic` aparezca instalado. No cambies el start command para saltar la migración. |
 | API funciona con curl pero falla desde Vercel | Añade el origen HTTPS exacto del frontend a `CORS_ORIGINS` y espera el redeploy de Railway. |
-| Vercel no encuentra Flutter o tarda demasiado | Revisa logs del build, el archivo `mobile/vercel.json`, `API_BASE_URL` y espacio/tiempo de compilación. El build instala Flutter 3.47.3 cada vez que no hay caché. |
+| Vercel no encuentra Flutter o tarda demasiado | Revisa logs del build, el archivo `mobile/vercel.json` y espacio/tiempo de compilación. El build instala Flutter 3.47.3 cada vez que no hay caché. |
 | PDF o fotografía desaparece tras desplegar de nuevo | Confirma que el volumen de Railway esté conectado al backend en `/app/uploads` y que `UPLOAD_DIR` use esa ruta. |
 | Login cliente da 403 en rutas internas | Es el comportamiento esperado: las cuentas cliente solo usan `/api/v1/portal/*` y `/api/v1/account/password`. |
 
