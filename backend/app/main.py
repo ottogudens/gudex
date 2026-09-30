@@ -12,7 +12,6 @@ import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import inspect
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -55,14 +54,11 @@ def on_startup() -> None:
             raise RuntimeError("En producción JWT_SECRET debe ser una clave aleatoria de al menos 32 caracteres")
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
-    if settings.app_env.lower() != "production":
-        create_db_and_tables()
-    elif not inspect(engine).has_table("inspectiontemplate") or not inspect(engine).has_table("aiinteraction"):
-        # Recupera instalaciones anteriores cuyo servicio Railway aún no tenía
-        # configurado el predeploy de Alembic. create_all solo agrega tablas
-        # faltantes; la migración posterior adopta el esquema sin borrar datos.
-        print("ADVERTENCIA: falta la línea base de inspecciones; creando tablas faltantes antes del sembrado.")
-        create_db_and_tables()
+    # Las migraciones Alembic son el mecanismo principal. Este segundo control
+    # es deliberadamente aditivo: Railway puede omitir un predeploy en un
+    # servicio ya creado y create_all(checkfirst) agrega solo tablas faltantes,
+    # sin alterar ni borrar datos existentes.
+    create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     seed_default_inspection_templates()
     if settings.app_env.lower() == "production" and settings.bootstrap_admin_email and settings.bootstrap_admin_password:
