@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -16,6 +17,7 @@ from app.schemas import (
     InspectionTemplateCreate, InspectionUpdate, WorkOrderEvidenceRead, WorkOrderReceptionUpdate,
 )
 from app.security import require_admin, require_staff
+from app.services.documents import inspection_report_pdf
 
 router = APIRouter(prefix="/api/v1", tags=["inspecciones"], dependencies=[Depends(require_staff)])
 portal_router = APIRouter(prefix="/api/v1/portal", tags=["portal de inspecciones"])
@@ -204,12 +206,33 @@ def inspection_report(order_id: int, session: Session = Depends(get_session)):
     return _report(session, _order(session, order_id))
 
 
+@router.get("/work-orders/{order_id}/inspection-report.pdf")
+def download_inspection_report(order_id: int, session: Session = Depends(get_session)):
+    report = _report(session, _order(session, order_id))
+    return Response(inspection_report_pdf(report), media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="Gudex-inspeccion-{report["order"].code}.pdf"',
+        "Cache-Control": "private, no-store",
+    })
+
+
 @portal_router.get("/work-orders/{order_id}/inspection-report")
 def portal_inspection_report(order_id: int, request: Request, session: Session = Depends(get_session)):
     order = _order(session, order_id)
     if order.customer_id != request.state.customer_id:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
     return _report(session, order, portal=True)
+
+
+@portal_router.get("/work-orders/{order_id}/inspection-report.pdf")
+def portal_download_inspection_report(order_id: int, request: Request, session: Session = Depends(get_session)):
+    order = _order(session, order_id)
+    if order.customer_id != request.state.customer_id:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    report = _report(session, order, portal=True)
+    return Response(inspection_report_pdf(report), media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="Gudex-inspeccion-{order.code}.pdf"',
+        "Cache-Control": "private, no-store",
+    })
 
 
 @portal_router.get("/evidence/{evidence_id}/file")

@@ -37,13 +37,14 @@ Para desplegar backend y PostgreSQL en Railway, y Flutter Web en Vercel, sigue e
 - Órdenes de trabajo, inspecciones, diagnósticos y cotizaciones.
 - Informes PDF del scanner, vinculados a vehículo y orden.
 - Catálogo y movimientos de inventario.
-- POS con registro de pagos y separación del estado del pago externo.
+- POS de productos y servicios, con descuento de stock, Checkout Pro opcional y comprobante PDF interno.
+- PDFs de inspección con marca Gudex para el equipo y el portal del cliente.
 - Citas locales con campos para vincular eventos de Google Calendar.
 - App Flutter inicial y portal de cliente restringido por cuenta.
 
 ## Integraciones externas
 
-Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace (Gmail, Drive y Calendar) y el asistente IA tienen integración de backend configurable con secretos en Railway. El POS puede registrar pagos, pero todavía no confirma cobros Mercado Pago ni emite boletas electrónicas.
+Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace (Gmail, Drive y Calendar), el asistente IA y Mercado Pago usan integraciones de backend configurables en Railway. Checkout Pro confirma pagos mediante webhook verificado. La aplicación no emite aún boletas electrónicas: sus PDFs se rotulan como comprobantes internos y no sustituyen un DTE.
 
 ## Próximas etapas
 

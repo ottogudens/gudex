@@ -39,7 +39,9 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    | `GOOGLE_DRIVE_FOLDER_ID` | Opcional, ID de carpeta Drive que recibe PDFs LAUNCH |
    | `AI_PROVIDER` / `AI_API_KEY` | Opcional; usa `openai` y la clave del proveedor para habilitar el asistente |
    | `AI_MODEL` | Opcional; modelo permitido por tu cuenta, por defecto `gpt-5-mini` |
-   | `CORS_ORIGINS` | `http://localhost:8000` inicialmente; se cambia al dominio Vercel en el paso 2 |
+| `MERCADOPAGO_ACCESS_TOKEN` | Opcional; token de prueba o producción de la aplicación Mercado Pago. Se usa solo en backend |
+   | `MERCADOPAGO_WEBHOOK_SECRET` | Clave secreta de Webhooks de la aplicación de Mercado Pago; se usa para validar pagos recibidos |
+   | `CORS_ORIGINS` | `http://localhost:8000` inicialmente; se cambia al dominio Vercel en el paso 2. También se utiliza para construir las URLs de retorno del checkout |
 
    Railway proporciona `DATABASE_URL` para que los servicios del mismo proyecto se conecten a PostgreSQL. No copies ni expongas la contraseña de la base de datos en el frontend.
 
@@ -203,7 +205,23 @@ curl -sS -X POST "$API_URL/api/v1/sales" \
   -d '{"customer_id":<CUSTOMER_ID>,"vehicle_id":<VEHICLE_ID>,"lines":[{"product_id":<PRODUCT_ID>,"description":"Aceite 5W-30","quantity":2,"unit_price_clp":5000}]}'
 ```
 
-La respuesta debe incluir total `10000` CLP; `/api/v1/products` debe mostrar 8 litros. Registra una prueba de pago en efectivo con `POST /api/v1/sales/<SALE_ID>/payments` y el JSON `{"method":"cash","amount_clp":10000}`. Un pago enviado como `mercado_pago` queda pendiente y esta versión no verifica el cobro remoto.
+La respuesta debe incluir total `10000` CLP; `/api/v1/products` debe mostrar 8 litros. Registra una prueba de pago en efectivo con `POST /api/v1/sales/<SALE_ID>/payments` y el JSON `{"method":"cash","amount_clp":10000}`. En el POS también puedes agregar líneas manuales de servicio, además de productos inventariados.
+
+Cada venta tiene un PDF descargable en `GET /api/v1/sales/<SALE_ID>/receipt.pdf`. Está identificado como **comprobante interno; no es documento tributario**. El equipo puede imprimirlo o guardarlo desde la pantalla POS. El informe de inspección en PDF está disponible para el equipo en `GET /api/v1/work-orders/<WORK_ORDER_ID>/inspection-report.pdf` y para el cliente en `GET /api/v1/portal/work-orders/<WORK_ORDER_ID>/inspection-report.pdf` (usa el token del rol correspondiente). Ambos contienen el logo del taller; los PDF originales del scanner LAUNCH se guardan sin alteraciones.
+
+#### Checkout Pro de Mercado Pago
+
+1. En Mercado Pago Developers crea/selecciona la aplicación y copia su Access Token de prueba (prefijo `TEST-`). Añade `MERCADOPAGO_ACCESS_TOKEN` en Variables de Railway; Gudex abrirá el `sandbox_init_point`. En producción usa el token productivo y la URL productiva. Nunca pongas este secreto en Vercel ni Flutter.
+2. Publica primero el dominio HTTPS de Railway. Configura en Mercado Pago Developers un webhook para pagos con URL `https://<dominio-api-railway>/api/v1/integrations/mercado-pago/webhook`, copia la clave secreta generada y guárdala en `MERCADOPAGO_WEBHOOK_SECRET` en Railway.
+3. Confirma que `CORS_ORIGINS` contenga el origen HTTPS de producción de Vercel. Redepliega Railway.
+4. En la app, crea una venta, selecciona **Mercado Pago Checkout Pro (en línea)** y confirma. Gudex abre el checkout de Mercado Pago. El retorno del navegador no confirma el pago: el backend valida la firma del webhook y consulta el pago directamente a Mercado Pago antes de cambiar la venta a pagada.
+5. Usa primero credenciales y usuarios de prueba de Mercado Pago. Comprueba que una aprobación actualice el estado de venta; un pago pendiente o rechazado no debe aparecer como pagado.
+
+Mercado Pago documenta la creación de preferencias en [Checkout Pro](https://www.mercadopago.cl/developers/es/docs/checkout-pro-preferences/create-payment-preference) y recomienda Webhooks con verificación de origen mediante `x-signature` ([notificaciones](https://www.mercadopago.cl/developers/es/docs/links-and-debts/additional-content/your-integrations/notifications/webhooks)). Para Point presencial, el operador selecciona **Tarjeta / Mercado Pago Point (terminal externa)** y confirma el pago observado en el terminal; Gudex no consulta el estado de ese dispositivo.
+
+#### Boleta electrónica
+
+La impresión Gudex no es una boleta fiscal. El taller debe optar por el sistema gratuito del SII o por un único software propio/de mercado y declarar en SII su modelo de emisión para pagos electrónicos. El sistema gratuito requiere inicio de actividades de primera categoría vigente; la FAQ del SII actualizada en julio de 2026 indica que no requiere certificado digital. Si se desarrolla emisión propia por API, aplican los requisitos técnicos de folios, firma, envío y resumen diario. Revisa [Sistema de emisión de boletas SII](https://www.sii.cl/servicios_online/3532-.html), [requisitos de uso](https://www.sii.cl/preguntas_frecuentes/bol_electr_vtas_serv/001_380_7799.htm), [certificado digital en sistema gratuito](https://www.sii.cl/preguntas_frecuentes/bol_electr_vtas_serv/001_380_7800.htm), [uso de un único sistema de emisión](https://www.sii.cl/preguntas_frecuentes/bol_electr_vtas_serv/001_380_7803.htm), [declaración de modelo para pagos electrónicos](https://www.sii.cl/servicios_online/3532-.html), [Resolución SII sobre boletas electrónicas](https://www.sii.cl/normativa_legislacion/resoluciones/2020/reso74.pdf) y [API de emisión de boletas](https://www.sii.cl/factura_electronica/factura_mercado/Instructivo_Emision_Boleta_Elect.pdf). La integración fiscal de Gudex sigue pendiente; los comprobantes internos no sustituyen el documento oficial.
 
 ### Verificar CORS
 
@@ -258,7 +276,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 
 ## Límites actuales
 
-El despliegue incluye gestión base, POS de productos, importación de PDF desde Google bajo acción administrativa, sincronización de citas confirmada y el asistente IA (este último requiere credenciales). Todavía no emite boletas electrónicas ni inicia cobros directos de Mercado Pago. No registres pagos como cobrados hasta confirmar el pago por el medio externo correspondiente.
+El despliegue incluye POS de productos y servicios, PDFs internos con el logo, importación de PDF desde Google bajo acción administrativa, sincronización de citas confirmada y el asistente IA (este último requiere credenciales). Checkout Pro inicia cobros si las credenciales/webhook están configurados; el estado pagado solo se asigna después de verificarlo en el backend. La terminal Point se registra manualmente tras confirmar su resultado. La emisión de boletas electrónicas sigue pendiente de habilitación y proveedor/modalidad tributaria.
 
 ## Referencias oficiales
 

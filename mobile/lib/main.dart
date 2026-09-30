@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -6,15 +7,16 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:printing/printing.dart';
 
 void main() => runApp(const LubricentroApp());
 
 abstract final class GudexColors {
-  static const ink = Color(0xFF163247);
-  static const primary = Color(0xFF0B7285);
-  static const secondary = Color(0xFF159A9C);
-  static const canvas = Color(0xFFF3F7F9);
-  static const line = Color(0xFFDCE6EA);
+  static const ink = Color(0xFF242424);
+  static const primary = Color(0xFFED0606);
+  static const secondary = Color(0xFFFFE600);
+  static const canvas = Color(0xFFF7F7F7);
+  static const line = Color(0xFFE3E3E3);
   static const success = Color(0xFF237A57);
 }
 
@@ -47,6 +49,14 @@ class ApiClient {
   Future<dynamic> get(String path) async {
     final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
     return _decode(response);
+  }
+
+  Future<Uint8List> getBytes(String path) async {
+    final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Error HTTP ${response.statusCode}');
+    }
+    return response.bodyBytes;
   }
 
   Future<dynamic> post(String path) async {
@@ -170,7 +180,7 @@ class LubricentroApp extends StatelessWidget {
           ),
           navigationBarTheme: NavigationBarThemeData(
             backgroundColor: Colors.white,
-            indicatorColor: const Color(0xFFD9F0EF),
+            indicatorColor: const Color(0xFFFFF3A8),
             elevation: 2,
             labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
               fontSize: 11,
@@ -312,15 +322,12 @@ class _LoginPageState extends State<LoginPage> {
                       padding: EdgeInsets.all(constraints.maxWidth < 380 ? 22 : 30),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                         Align(alignment: Alignment.centerLeft, child: Container(
-                          width: 58, height: 58,
-                          decoration: BoxDecoration(color: const Color(0xFFE0F2F1), borderRadius: BorderRadius.circular(18)),
-                          child: const Icon(Icons.build_rounded, size: 31, color: GudexColors.primary),
+                          width: 250, height: 70,
+                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                          padding: const EdgeInsets.all(8),
+                          child: Image.asset('assets/gudex-logo.png', fit: BoxFit.contain),
                         )),
                         const SizedBox(height: 22),
-                        Text('Gudex', style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          color: GudexColors.ink, fontWeight: FontWeight.w800, letterSpacing: -0.6,
-                        )),
-                        const SizedBox(height: 5),
                         Text('Gestión simple para tu lubricentro', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: const Color(0xFF5B6F7A))),
                         const SizedBox(height: 28),
                         TextField(controller: _email, keyboardType: TextInputType.emailAddress,
@@ -425,7 +432,7 @@ class _HomePageState extends State<HomePage> {
           Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 12), child: Row(children: [
             CircleAvatar(
               radius: 23,
-              backgroundColor: const Color(0xFFD9F0EF),
+              backgroundColor: const Color(0xFFFFF3A8),
               child: Icon(widget.role == 'customer' ? Icons.person_outline : Icons.handyman_outlined,
                   color: GudexColors.primary),
             ),
@@ -455,7 +462,7 @@ class _HomePageState extends State<HomePage> {
       ),
     )));
     return Scaffold(
-      appBar: AppBar(title: const Text('Gudex'), actions: [
+      appBar: AppBar(title: Image.asset('assets/gudex-logo.png', height: 34, width: 126, fit: BoxFit.contain, semanticLabel: 'Gudex Lubricentro Serviteca'), actions: [
         IconButton(tooltip: 'Asistente IA', icon: const Icon(Icons.auto_awesome), onPressed: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => _AssistantScreen(api: api, role: widget.role)))),
         if (widget.role == 'admin') IconButton(tooltip: 'Integraciones', icon: const Icon(Icons.link), onPressed: () => Navigator.push(context,
@@ -767,8 +774,15 @@ class _IntegrationSettingsScreenState extends State<_IntegrationSettingsScreen> 
   Widget build(BuildContext context) {
     final google = Map<String, dynamic>.from(_status?['google'] as Map? ?? {});
     final ai = Map<String, dynamic>.from(_status?['ai'] as Map? ?? {});
+    final mercadoPago = Map<String, dynamic>.from(_status?['mercado_pago'] as Map? ?? {});
     return Scaffold(appBar: AppBar(title: const Text('Integraciones'), actions: [IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh))]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet_outlined, color: GudexColors.primary),
+          title: const Text('Mercado Pago Checkout Pro'),
+          subtitle: Text(mercadoPago['connected'] == true
+              ? 'Checkout ${mercadoPago['mode'] == 'test' ? 'de prueba' : 'productivo'} configurado en Railway'
+              : 'Falta configurar Access Token y secreto de Webhook en Railway. Point se registra como terminal externa.'),
+        )),
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Google Workspace', style: Theme.of(context).textTheme.titleLarge),
           Text(google['connected'] == true ? 'Conectado: ${google['account_email'] ?? 'cuenta Google'}' : 'Sin conectar'),
@@ -916,7 +930,16 @@ class _ModuleListState extends State<_ModuleList> {
               title: Text('${rawItem['category']}: ${rawItem['item']}'),
               subtitle: Text('${rawItem['result']}${rawItem['notes'] == null ? '' : ' · ${rawItem['notes']}'}')),
         ]))),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar')),
+          FilledButton.icon(onPressed: () async {
+            try {
+              await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/portal/work-orders/$orderId/inspection-report.pdf'));
+            } catch (error) {
+              if (mounted) ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('No se pudo abrir el informe: $error')));
+            }
+          }, icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('PDF')),
+        ],
       ));
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
@@ -1599,6 +1622,14 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     return result is Map ? Map<String, dynamic>.from(result) : <String, dynamic>{};
   }
 
+  Future<void> _printInspectionReport() async {
+    try {
+      await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/work-orders/${widget.order['id']}/inspection-report.pdf'));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir el informe: $error')));
+    }
+  }
+
   Future<void> _saveOrder() async {
     setState(() { _saving = true; _error = null; });
     try {
@@ -1987,7 +2018,11 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
             )).toList());
           }),
           const Divider(height: 28),
-          Text('Resumen para el cliente', style: Theme.of(context).textTheme.titleLarge),
+          Row(children: [
+            Expanded(child: Text('Resumen para el cliente', style: Theme.of(context).textTheme.titleLarge)),
+            IconButton(tooltip: 'Imprimir / guardar informe PDF', onPressed: _printInspectionReport,
+              icon: const Icon(Icons.picture_as_pdf_outlined)),
+          ]),
           FutureBuilder<Map<String, dynamic>>(future: _report, builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
             if (snapshot.hasError) return Text('No se pudo generar el resumen: ${snapshot.error}');
@@ -2041,6 +2076,7 @@ class _PosScreenState extends State<_PosScreen> {
   List<Map<String, dynamic>> _customers = [];
   List<Map<String, dynamic>> _sales = [];
   final Map<int, double> _cart = {};
+  final List<Map<String, dynamic>> _serviceItems = [];
   int? _customerId;
   String _paymentMethod = 'cash';
   bool _loading = true;
@@ -2102,7 +2138,7 @@ class _PosScreenState extends State<_PosScreen> {
         final product = _findProduct(entry.key);
         if (product == null) return total;
         return total + (entry.value * _money(product['price_clp'])).round();
-      });
+      }) + _serviceItems.fold<int>(0, (total, item) => total + _money(item['line_total_clp']));
 
   int get _discount => int.tryParse(_discountController.text.trim()) ?? 0;
   int get _total => (_subtotal - _discount).clamp(0, _subtotal).toInt();
@@ -2120,9 +2156,48 @@ class _PosScreenState extends State<_PosScreen> {
     }
   }
 
+  Future<void> _addServiceLine() async {
+    final description = TextEditingController();
+    final quantity = TextEditingController(text: '1');
+    final price = TextEditingController();
+    try {
+      final line = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Agregar servicio o trabajo'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: description, autofocus: true, decoration: const InputDecoration(labelText: 'Descripción *')),
+          const SizedBox(height: 10),
+          TextField(controller: quantity, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad / horas')),
+          const SizedBox(height: 10),
+          TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Precio unitario (CLP)', prefixText: '\$')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          FilledButton(onPressed: () {
+            final qty = double.tryParse(quantity.text.trim().replaceAll(',', '.'));
+            final unitPrice = int.tryParse(price.text.trim().replaceAll('.', '').replaceAll(',', ''));
+            if (description.text.trim().isEmpty || qty == null || qty <= 0 || unitPrice == null || unitPrice < 0) return;
+            Navigator.pop(context, {'description': description.text.trim(), 'quantity': qty,
+              'unit_price_clp': unitPrice, 'line_total_clp': (qty * unitPrice).round()});
+          }, child: const Text('Agregar')),
+        ],
+      ));
+      if (line != null && mounted) setState(() => _serviceItems.add(line));
+    } finally {
+      description.dispose(); quantity.dispose(); price.dispose();
+    }
+  }
+
+  Future<void> _printSaleReceipt(Map<String, dynamic> sale) async {
+    try {
+      await Printing.layoutPdf(onLayout: (_) => widget.api.getBytes('/api/v1/sales/${sale['id']}/receipt.pdf'));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir el comprobante: $error')));
+    }
+  }
+
   Future<void> _checkout() async {
-    if (_cart.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agrega al menos un producto a la venta.')));
+    if (_cart.isEmpty && _serviceItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agrega al menos un producto o servicio a la venta.')));
       return;
     }
     if (_discount < 0 || _discount > _subtotal) {
@@ -2135,8 +2210,8 @@ class _PosScreenState extends State<_PosScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirmar venta'),
-        content: Text(method == 'mercado_pago'
-            ? 'Se registrará la venta por ${_formatMoney(total)}. Mercado Pago quedará pendiente; esta versión no inicia el cobro.'
+        content: Text(method == 'mercado_pago_checkout'
+            ? 'Se creará un checkout de Mercado Pago por ${_formatMoney(total)}. La venta se marcará pagada solo cuando el backend verifique la notificación.'
             : 'Se registrará la venta por ${_formatMoney(total)} y se descontarán los productos del inventario.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
@@ -2152,7 +2227,8 @@ class _PosScreenState extends State<_PosScreen> {
       final result = await widget.api.postJson('/api/v1/sales', {
         if (_customerId != null) 'customer_id': _customerId,
         'discount_clp': _discount,
-        'lines': _cart.entries.map((entry) {
+        'lines': [
+          ..._cart.entries.map((entry) {
           final product = _products.firstWhere((item) => item['id'] == entry.key);
           return {
             'product_id': entry.key,
@@ -2160,11 +2236,18 @@ class _PosScreenState extends State<_PosScreen> {
             'quantity': entry.value,
             'unit_price_clp': _money(product['price_clp']),
           };
-        }).toList(),
+          }),
+          ..._serviceItems.map((item) => {
+            'description': item['description'],
+            'quantity': item['quantity'],
+            'unit_price_clp': item['unit_price_clp'],
+          }),
+        ],
       });
       sale = Map<String, dynamic>.from(result as Map);
       setState(() {
         _cart.clear();
+        _serviceItems.clear();
         _discountController.text = '0';
       });
 
@@ -2173,11 +2256,18 @@ class _PosScreenState extends State<_PosScreen> {
           'method': method,
           'amount_clp': total,
         });
+        if (method == 'mercado_pago_checkout') {
+          final checkout = await widget.api.post('/api/v1/sales/${sale['id']}/mercado-pago/checkout');
+          final checkoutUrl = '${checkout['checkout_url'] ?? ''}';
+          if (!checkoutUrl.startsWith('https://') || !await launchUrl(Uri.parse(checkoutUrl), mode: LaunchMode.platformDefault)) {
+            throw Exception('Venta ${sale['receipt_code']} creada. No se pudo abrir el checkout de Mercado Pago.');
+          }
+        }
       }
       await _refresh();
       if (!mounted) return;
-      final message = method == 'mercado_pago' && total > 0
-          ? 'Venta ${sale['receipt_code']} registrada; pago Mercado Pago pendiente.'
+      final message = method == 'mercado_pago_checkout' && total > 0
+          ? 'Checkout de Mercado Pago iniciado para la venta ${sale['receipt_code']}; espera la confirmación del pago.'
           : 'Venta ${sale['receipt_code']} registrada correctamente.';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } catch (error) {
@@ -2227,8 +2317,20 @@ class _PosScreenState extends State<_PosScreen> {
             const Divider(height: 28),
             Text('Detalle', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            if (_cart.isEmpty) const Text('Agrega productos para comenzar.')
+            if (_cart.isEmpty && _serviceItems.isEmpty) const Text('Agrega productos o servicios para comenzar.')
             else ..._cart.entries.map(_cartTile),
+            ..._serviceItems.asMap().entries.map((entry) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(entry.value['description'] as String),
+              subtitle: Text('Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(_formatMoney(_money(entry.value['line_total_clp']))),
+                IconButton(tooltip: 'Quitar servicio', onPressed: () => setState(() => _serviceItems.removeAt(entry.key)), icon: const Icon(Icons.close)),
+              ]),
+            )),
+            Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+              onPressed: _addServiceLine, icon: const Icon(Icons.build_outlined), label: const Text('Agregar servicio / trabajo'),
+            )),
             const SizedBox(height: 12),
             DropdownButtonFormField<int?>(
               value: _customerId,
@@ -2254,9 +2356,9 @@ class _PosScreenState extends State<_PosScreen> {
               decoration: const InputDecoration(labelText: 'Medio de pago'),
               items: const [
                 DropdownMenuItem(value: 'cash', child: Text('Efectivo')),
-                DropdownMenuItem(value: 'card', child: Text('Tarjeta / terminal externa')),
+                DropdownMenuItem(value: 'card', child: Text('Tarjeta / Mercado Pago Point (terminal externa)')),
                 DropdownMenuItem(value: 'transfer', child: Text('Transferencia')),
-                DropdownMenuItem(value: 'mercado_pago', child: Text('Mercado Pago (pendiente)')),
+                DropdownMenuItem(value: 'mercado_pago_checkout', child: Text('Mercado Pago Checkout Pro (en línea)')),
               ],
               onChanged: (value) { if (value != null) setState(() => _paymentMethod = value); },
             ),
@@ -2280,7 +2382,13 @@ class _PosScreenState extends State<_PosScreen> {
         if (_sales.isEmpty)
           const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Todavía no hay ventas.')))
         else
-          ..._sales.take(10).map((sale) => _RecordCard(data: sale)),
+          ..._sales.take(10).map((sale) => Card(child: ListTile(
+            leading: const Icon(Icons.receipt_long_outlined, color: GudexColors.primary),
+            title: Text('${sale['receipt_code']} · ${_formatMoney(_money(sale['total_clp']))}'),
+            subtitle: Text('Estado: ${sale['status']} · ${sale['created_at'] ?? ''}'),
+            trailing: IconButton(tooltip: 'Imprimir / guardar comprobante PDF', icon: const Icon(Icons.picture_as_pdf_outlined),
+              onPressed: () => _printSaleReceipt(sale)),
+          ))),
       ]),
     );
   }

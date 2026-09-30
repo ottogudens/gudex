@@ -11,6 +11,8 @@
 - Desde el detalle de una orden, el equipo puede preparar cotizaciones con descripción, mano de obra, repuestos y observaciones, y publicarlas para aprobación del cliente con confirmación explícita. El cliente ve los importes en su portal y puede aprobar o rechazar.
 - Inventario móvil: el equipo consulta y filtra productos por nombre/código y stock bajo; administración puede dar de alta productos y registrar ingresos o salidas con motivo. Los movimientos quedan consultables como historial y la API rechaza ajustes de stock hechos por otros roles.
 - POS API y pantalla inicial para administración, con carrito, descuento, cliente opcional, selección de medio de pago, confirmación de venta, historial reciente y descuento de stock. El cobro Mercado Pago queda pendiente y no se marca como cobrado por la aplicación.
+- Fase 5: paleta y cabecera alineadas al logo oficial Gudex; el logo se usa en Flutter Web/móvil y en PDFs generados por la app. El cliente puede imprimir/guardar informes consolidados de inspección y comprobantes internos de venta desde la app.
+- Fase 6 (primera integración): POS permite líneas manuales de servicio y productos de inventario. Checkout Pro crea preferencias desde el backend y confirma pagos solo al recibir webhook verificado y consultar el estado en Mercado Pago. La terminal Point se registra como pago externo confirmado por el operador.
 - Recepción de informe PDF LAUNCH, asociado a vehículo y opcionalmente a una orden; el original se conserva en almacenamiento local privado.
 - App Flutter para autenticación y módulos por rol. Clientes pueden revisar y responder cotizaciones; administración dispone de formularios de recepción, registro de clientes/vehículos, inspecciones, cotizaciones y un POS inicial.
 - Preparación de despliegue: PostgreSQL/psycopg, CORS configurable, bootstrap admin para producción y compilación Flutter Web para Vercel.
@@ -30,8 +32,8 @@
 
 ## Integraciones aún por conectar
 
-- **Mercado Pago:** el taller no ha indicado si el cobro se realiza con una terminal Point física, un link/checkout o una API de pagos. La implementación actual registra la referencia y conserva el estado como pendiente; todavía no inicia ni confirma cargos.
-- **Boleta electrónica:** el POS aún no emite DTE ni se conecta al SII o a un proveedor tributario. Debe definirse si se usará el portal/API del SII o un proveedor autorizado y configurarse el RUT, certificado y credenciales requeridos.
+- **Mercado Pago:** Checkout Pro está integrado como opción en línea. Falta configurar credenciales de prueba/producción y webhook en Railway y completar una transacción de prueba en la cuenta del taller. Point/terminal física se ingresa como tarjeta externa; la aplicación no recibe confirmación automática de ese terminal.
+- **Boleta electrónica:** pendiente definir proveedor/modalidad, emisor y habilitación tributaria. El PDF Gudex es un comprobante interno claramente rotulado como no tributario; no sustituye ni se presenta como boleta electrónica. La emisión fiscal requiere el proceso/habilitación aplicable al contribuyente en SII o integrar un proveedor autorizado.
 - **Gmail y Drive:** OAuth y la importación por acción de administrador ya están implementados. Se requiere configurar Google Cloud, scopes y variables en Railway; no hay lectura automática en segundo plano.
 - **Google Calendar:** ya se sincronizan citas pendientes tras confirmación administrativa. Requiere credenciales Google y permisos Calendar.
 - **Asistente IA:** la integración con OpenAI está implementada, apagada hasta configurar `AI_PROVIDER` y `AI_API_KEY`. Actualmente propone y ejecuta, tras confirmación, cambios de estado de órdenes como única acción mutante.
@@ -41,7 +43,7 @@
 
 Las fases 1 a 4 están implementadas. Las siguientes etapas propuestas son:
 
-5. **Auditoría visual y de experiencia de usuario:** revisar pantallas y flujos de administración, mecánicos y clientes; establecer paleta de color, tipografía, jerarquía visual, componentes comunes, estados vacíos/errores/carga, contraste y accesibilidad; comprobar adaptación a móvil, tablet y web; documentar hallazgos priorizados y aplicar las mejoras acordadas. Entregables: inventario de pantallas, lista de problemas priorizada, guía visual/tokens y cambios de interfaz revisables.
-6. **POS, pagos y documentos tributarios:** acordar terminal/flujo de Mercado Pago y proveedor o modalidad de boleta electrónica; ampliar venta para productos y servicios, y generar documentos fiscales según la integración definida.
+5. **Auditoría visual y de experiencia de usuario:** primera pasada aplicada con marca Gudex; pendiente revisión visual real en Android/iOS/Web y verificación de contraste/tamaños en dispositivos.
+6. **POS, pagos y documentos tributarios:** POS de productos y servicios, comprobante PDF interno y Checkout Pro implementados; pendiente probar credenciales/webhook reales o sandbox. Falta definir e integrar boleta electrónica mediante la opción tributaria habilitada para el taller.
 7. **Operación móvil:** generar informe de inspección descargable, completar formularios restantes y agregar borradores/sincronización offline con resolución de conflictos.
 8. **Operación y continuidad:** mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir respaldo, retención y recuperación.

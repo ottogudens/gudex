@@ -46,7 +46,7 @@ class AuthenticationMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
-        if path in {"/health", "/docs", "/openapi.json", "/redoc", "/auth/token"} or not path.startswith("/api/"):
+        if path in {"/health", "/docs", "/openapi.json", "/redoc", "/auth/token", "/api/v1/integrations/mercado-pago/webhook"} or not path.startswith("/api/"):
             return await self.app(scope, receive, send)
         from fastapi.responses import JSONResponse
 

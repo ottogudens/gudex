@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str | None = None
     cors_origins: str = "http://localhost:8000,http://localhost:5000"
     mercadopago_access_token: str | None = None
+    mercadopago_webhook_secret: str | None = None
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None

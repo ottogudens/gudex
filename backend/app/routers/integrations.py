@@ -24,8 +24,12 @@ router = APIRouter()
 @router.get("/api/v1/integrations/status", dependencies=[Depends(require_admin)])
 def integration_status(session: Session = Depends(get_session)):
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
+    mp_token = settings.mercadopago_access_token
     return {
-        "mercado_pago": {"credentials_present": bool(settings.mercadopago_access_token), "connected": False, "mode": "not_connected"},
+        "mercado_pago": {"credentials_present": bool(mp_token), "webhook_secret_present": bool(settings.mercadopago_webhook_secret),
+                          "connected": bool(mp_token and settings.mercadopago_webhook_secret),
+                          "mode": "test" if mp_token and mp_token.startswith("TEST-") else ("production" if mp_token else "not_configured"),
+                          "checkout": "pro" if mp_token else None},
         "google": {"credentials_present": bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri),
                    "connected": bool(credential), "account_email": credential.account_email if credential else None,
                    "granted_scopes": credential.granted_scopes.split() if credential else [],

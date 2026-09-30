@@ -2,10 +2,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import secrets
+import hashlib
+import hmac
 from uuid import uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 from sqlmodel import Session, select
@@ -26,6 +29,7 @@ from app.routers.inspections import router as inspection_router
 from app.routers.integrations import router as integrations_router
 from app.routers.assistant import router as assistant_router
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
+from app.services.documents import sale_receipt_pdf
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
 app.add_middleware(AuthenticationMiddleware)
@@ -614,14 +618,16 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
         raise HTTPException(404, "Venta no encontrada")
     if data.amount_clp <= 0:
         raise HTTPException(422, "El monto debe ser mayor que cero")
+    if data.method not in {"cash", "card", "transfer", "mercado_pago", "mercado_pago_checkout"}:
+        raise HTTPException(422, "Medio de pago no admitido")
     paid = sum(p.amount_clp for p in session.exec(select(Payment).where(Payment.sale_id == sale_id, Payment.status == "recorded")).all())
     if paid + data.amount_clp > sale.total_clp:
         raise HTTPException(409, "El pago supera el saldo de la venta")
     payment = Payment(sale_id=sale_id, method=data.method, amount_clp=data.amount_clp,
                       provider_reference=data.provider_reference,
-                      status="pending_external" if data.method == "mercado_pago" else "recorded")
+                      status="pending_external" if data.method in {"mercado_pago", "mercado_pago_checkout"} else "recorded")
     session.add(payment)
-    if data.method != "mercado_pago" and paid + data.amount_clp == sale.total_clp:
+    if data.method not in {"mercado_pago", "mercado_pago_checkout"} and paid + data.amount_clp == sale.total_clp:
         sale.status = "paid"
         session.add(sale)
     session.commit()
@@ -640,3 +646,147 @@ def list_sales(session: Session = Depends(get_session)):
         "items": session.exec(select(SaleItem).where(SaleItem.sale_id == sale.id)).all(),
         "payments": session.exec(select(Payment).where(Payment.sale_id == sale.id)).all(),
     } for sale in sales]
+
+
+@app.get("/api/v1/sales/{sale_id}/receipt.pdf", dependencies=[Depends(require_admin)])
+def download_sale_receipt(sale_id: int, session: Session = Depends(get_session)):
+    sale = session.get(Sale, sale_id)
+    if not sale:
+        raise HTTPException(404, "Venta no encontrada")
+    customer = session.get(Customer, sale.customer_id) if sale.customer_id else None
+    vehicle = session.get(Vehicle, sale.vehicle_id) if sale.vehicle_id else None
+    items = session.exec(select(SaleItem).where(SaleItem.sale_id == sale_id)).all()
+    payments = session.exec(select(Payment).where(Payment.sale_id == sale_id)).all()
+    content = sale_receipt_pdf(sale, items, customer, vehicle, payments)
+    return Response(content, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="Gudex-{sale.receipt_code}.pdf"',
+        "Cache-Control": "private, no-store",
+    })
+
+
+@app.post("/api/v1/sales/{sale_id}/mercado-pago/checkout", dependencies=[Depends(require_admin)])
+async def create_mercado_pago_checkout(sale_id: int, request: Request, session: Session = Depends(get_session)):
+    if not settings.mercadopago_access_token or not settings.mercadopago_webhook_secret:
+        raise HTTPException(503, "Checkout Mercado Pago requiere Access Token y secreto de Webhook en Railway")
+    sale = session.get(Sale, sale_id)
+    if not sale:
+        raise HTTPException(404, "Venta no encontrada")
+    if sale.total_clp <= 0 or sale.status == "paid":
+        raise HTTPException(409, "La venta no tiene un saldo pendiente")
+    recorded = session.exec(select(Payment).where(Payment.sale_id == sale_id, Payment.status == "recorded")).all()
+    if recorded:
+        raise HTTPException(409, "La venta ya tiene pagos confirmados")
+    pending = session.exec(select(Payment).where(Payment.sale_id == sale_id,
+                          Payment.method == "mercado_pago_checkout", Payment.status == "pending_external")).first()
+    if pending and pending.provider_reference:
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                existing_response = await client.get(
+                    f"https://api.mercadopago.com/checkout/preferences/{pending.provider_reference}",
+                    headers={"Authorization": f"Bearer {settings.mercadopago_access_token}"},
+                )
+            except httpx.HTTPError as exc:
+                raise HTTPException(502, "No fue posible recuperar el checkout existente") from exc
+        if existing_response.status_code < 400:
+            existing_preference = existing_response.json()
+            test_mode = settings.mercadopago_access_token.startswith("TEST-")
+            checkout_url = existing_preference.get("sandbox_init_point" if test_mode else "init_point")
+            if isinstance(checkout_url, str) and checkout_url.startswith("https://"):
+                return {"checkout_url": checkout_url, "preference_id": pending.provider_reference, "sale_id": sale.id}
+        raise HTTPException(502, "No fue posible recuperar el checkout pendiente; no se creó otro para evitar un doble cobro")
+    items = session.exec(select(SaleItem).where(SaleItem.sale_id == sale_id)).all()
+    api_origin = str(request.base_url).rstrip("/")
+    if settings.app_env.lower() == "production" and api_origin.startswith("http://"):
+        api_origin = "https://" + api_origin.removeprefix("http://")
+    frontend_origin = next((origin.strip().rstrip("/") for origin in settings.cors_origins.split(",")
+                            if origin.strip().startswith("https://")), None)
+    back_url = frontend_origin or api_origin
+    body = {
+        "items": [{"id": sale.receipt_code, "title": f"Venta {sale.receipt_code}",
+                   "description": ", ".join(item.description for item in items)[:250],
+                   "quantity": 1, "currency_id": "CLP", "unit_price": float(sale.total_clp)}],
+        "external_reference": str(sale.id),
+        "notification_url": f"{api_origin}/api/v1/integrations/mercado-pago/webhook",
+        "back_urls": {"success": back_url, "pending": back_url, "failure": back_url},
+        "auto_return": "approved",
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            response = await client.post("https://api.mercadopago.com/checkout/preferences",
+                                         headers={"Authorization": f"Bearer {settings.mercadopago_access_token}",
+                                                  "Content-Type": "application/json"}, json=body)
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "No fue posible conectar con Mercado Pago") from exc
+    if response.status_code >= 400:
+        raise HTTPException(502, "Mercado Pago rechazó la creación del checkout")
+    preference = response.json()
+    test_mode = settings.mercadopago_access_token.startswith("TEST-")
+    checkout_url = preference.get("sandbox_init_point" if test_mode else "init_point")
+    if not isinstance(checkout_url, str) or not checkout_url.startswith("https://"):
+        raise HTTPException(502, "Mercado Pago devolvió una URL de checkout inválida")
+    if not pending:
+        pending = Payment(sale_id=sale.id, method="mercado_pago_checkout", amount_clp=sale.total_clp,
+                          status="pending_external")
+    pending.provider_reference = str(preference.get("id") or "")[:100] or None
+    session.add(pending)
+    session.commit()
+    return {"checkout_url": checkout_url, "preference_id": preference.get("id"), "sale_id": sale.id}
+
+
+@app.post("/api/v1/integrations/mercado-pago/webhook")
+async def mercado_pago_webhook(request: Request, session: Session = Depends(get_session)):
+    secret = settings.mercadopago_webhook_secret
+    signature = request.headers.get("x-signature", "")
+    request_id = request.headers.get("x-request-id", "")
+    data_id = request.query_params.get("data.id", "").lower()
+    parts = dict(part.strip().split("=", 1) for part in signature.split(",") if "=" in part)
+    timestamp, received = parts.get("ts"), parts.get("v1")
+    if not secret or not timestamp or not received or not request_id or not data_id:
+        raise HTTPException(401, "Firma de notificación inválida")
+    manifest = f"id:{data_id};request-id:{request_id};ts:{timestamp};"
+    expected = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, received):
+        raise HTTPException(401, "Firma de notificación inválida")
+    event = await request.json()
+    if event.get("type") != "payment" and event.get("topic") != "payment":
+        return {"received": True}
+    if not settings.mercadopago_access_token:
+        raise HTTPException(503, "Mercado Pago no está configurado")
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            response = await client.get(f"https://api.mercadopago.com/v1/payments/{data_id}",
+                                        headers={"Authorization": f"Bearer {settings.mercadopago_access_token}"})
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "No fue posible verificar el pago con Mercado Pago") from exc
+    if response.status_code >= 400:
+        raise HTTPException(502, "Mercado Pago no pudo verificar el pago")
+    payment_data = response.json()
+    try:
+        sale_id = int(payment_data.get("external_reference", ""))
+    except (TypeError, ValueError):
+        return {"received": True}
+    sale = session.get(Sale, sale_id)
+    amount = round(float(payment_data.get("transaction_amount") or 0))
+    if not sale or payment_data.get("currency_id") != "CLP" or amount != sale.total_clp:
+        raise HTTPException(409, "El pago no coincide con el monto o la moneda de la venta")
+    existing = session.exec(select(Payment).where(Payment.provider_reference == str(payment_data.get("id")),
+                               Payment.method == "mercado_pago_checkout")).first()
+    if existing:
+        return {"received": True}
+    pending = session.exec(select(Payment).where(Payment.sale_id == sale_id,
+                          Payment.method == "mercado_pago_checkout", Payment.status == "pending_external")).first()
+    if payment_data.get("status") == "approved":
+        if pending:
+            pending.status = "recorded"
+            pending.provider_reference = str(payment_data.get("id"))[:100]
+            session.add(pending)
+        else:
+            session.add(Payment(sale_id=sale_id, method="mercado_pago_checkout", amount_clp=amount,
+                                status="recorded", provider_reference=str(payment_data.get("id"))[:100]))
+        sale.status = "paid"
+        session.add(sale)
+    elif pending and payment_data.get("status") in {"rejected", "cancelled", "refunded", "charged_back"}:
+        pending.status = "failed"
+        session.add(pending)
+    session.commit()
+    return {"received": True}
