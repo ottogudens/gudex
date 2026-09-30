@@ -33,12 +33,18 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    | `JWT_SECRET` | Secreto aleatorio de al menos 32 caracteres |
    | `BOOTSTRAP_ADMIN_EMAIL` | Correo que usarás para el primer administrador |
    | `BOOTSTRAP_ADMIN_PASSWORD` | Contraseña de al menos 12 caracteres |
+   | `INTEGRATION_ENCRYPTION_KEY` | Clave Fernet para tokens Google; necesaria antes de conectar la cuenta |
+   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciales OAuth tipo Web de Google Cloud |
+   | `GOOGLE_REDIRECT_URI` | `https://<dominio-api-railway>/auth/google/callback` (debe coincidir exactamente en Google Cloud) |
+   | `GOOGLE_DRIVE_FOLDER_ID` | Opcional, ID de carpeta Drive que recibe PDFs LAUNCH |
+   | `AI_PROVIDER` / `AI_API_KEY` | Opcional; usa `openai` y la clave del proveedor para habilitar el asistente |
+   | `AI_MODEL` | Opcional; modelo permitido por tu cuenta, por defecto `gpt-5-mini` |
    | `CORS_ORIGINS` | `http://localhost:8000` inicialmente; se cambia al dominio Vercel en el paso 2 |
 
    Railway proporciona `DATABASE_URL` para que los servicios del mismo proyecto se conecten a PostgreSQL. No copies ni expongas la contraseña de la base de datos en el frontend.
 
 8. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
-9. Pulsa Deploy. Railway debe mostrar la migración `20260930_0001` antes de iniciar Uvicorn. Como recuperación de instalaciones anteriores, el arranque puede crear únicamente tablas faltantes de esta línea base; los cambios posteriores deben seguir pasando por Alembic.
+9. Pulsa Deploy. Railway debe mostrar las migraciones `20260930_0001` y `20260930_0002` antes de iniciar Uvicorn. Como recuperación de instalaciones anteriores, el arranque puede crear únicamente tablas faltantes; los cambios posteriores deben seguir pasando por Alembic.
 10. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
 11. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
 
@@ -48,7 +54,9 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 
    Debe responder con JSON y `"status":"ok"`.
 
-En un despliegue que ya contiene datos, crea primero un respaldo de PostgreSQL. La línea base conserva las tablas existentes y agrega las faltantes. Después del despliegue puedes comprobar la revisión desde el shell Railway con `alembic -c alembic.ini current`; debe indicar `20260930_0001 (head)`.
+En un despliegue que ya contiene datos, crea primero un respaldo de PostgreSQL. Las migraciones conservan las tablas existentes y agregan las faltantes. Después del despliegue puedes comprobar la revisión desde el shell Railway con `alembic -c alembic.ini current`; debe indicar `20260930_0002 (head)`.
+
+Para completar la configuración OAuth de Google y probar las integraciones y el asistente, sigue [la guía de fases 3 y 4](fases-3-y-4.md). Las credenciales se guardan únicamente en Railway; no agregues secretos en Vercel.
 
 Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(secrets.token_urlsafe(48))'` y guarda el resultado directamente en las variables de Railway. No lo agregues a GitHub.
 
@@ -250,7 +258,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 
 ## Límites actuales
 
-El despliegue deja disponible la base funcional, no completa todos los módulos previstos. Administración puede registrar clientes, vehículos, órdenes, diagnósticos e inspecciones desde Flutter, además de usar el POS inicial para venta de productos. La app todavía no emite boletas electrónicas ni inicia cobros directos de Mercado Pago. Importación automática de Gmail/Drive, sincronización de Calendar y asistente de IA requieren desarrollo/configuración. No registres pagos como cobrados hasta confirmar el pago por el medio externo correspondiente.
+El despliegue incluye gestión base, POS de productos, importación de PDF desde Google bajo acción administrativa, sincronización de citas confirmada y el asistente IA (este último requiere credenciales). Todavía no emite boletas electrónicas ni inicia cobros directos de Mercado Pago. No registres pagos como cobrados hasta confirmar el pago por el medio externo correspondiente.
 
 ## Referencias oficiales
 

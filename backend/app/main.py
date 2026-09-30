@@ -23,6 +23,8 @@ from app.schemas import (
 )
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
+from app.routers.integrations import router as integrations_router
+from app.routers.assistant import router as assistant_router
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
@@ -31,11 +33,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(inspection_router)
 app.include_router(inspection_portal_router)
+app.include_router(integrations_router)
+app.include_router(assistant_router)
 
 
 def on_startup() -> None:
@@ -46,7 +50,7 @@ def on_startup() -> None:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
     if settings.app_env.lower() != "production":
         create_db_and_tables()
-    elif not inspect(engine).has_table("inspectiontemplate"):
+    elif not inspect(engine).has_table("inspectiontemplate") or not inspect(engine).has_table("aiinteraction"):
         # Recupera instalaciones anteriores cuyo servicio Railway aún no tenía
         # configurado el predeploy de Alembic. create_all solo agrega tablas
         # faltantes; la migración posterior adopta el esquema sin borrar datos.
@@ -148,16 +152,6 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": settings.app_name}
-
-
-@app.get("/api/v1/integrations/status", dependencies=[Depends(require_admin)])
-def integrations_status():
-    return {
-        "mercado_pago": {"credentials_present": bool(settings.mercadopago_access_token), "connected": False, "mode": "not_connected"},
-        "google": {"credentials_present": bool(settings.google_client_id and settings.google_client_secret), "connected": False, "services": ["gmail", "drive", "calendar"]},
-        "ai": {"credentials_present": bool(settings.ai_provider and settings.ai_api_key), "connected": False},
-        "scanner": {"brand": "LAUNCH", "model": "X-431 PRO", "ingest": ["pdf_upload", "gmail", "drive"]},
-    }
 
 
 @app.post("/api/v1/customers", response_model=Customer, status_code=201, dependencies=[Depends(require_admin)])

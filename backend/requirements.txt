@@ -7,3 +7,5 @@ PyJWT>=2.9,<3
 pwdlib[argon2]>=0.2,<1
 psycopg[binary]>=3.2,<4
 alembic>=1.14,<2
+httpx>=0.28,<1
+cryptography>=44,<47

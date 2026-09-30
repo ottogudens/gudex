@@ -23,14 +23,17 @@
 - Fotografías, imágenes y PDF asociados a una orden, capturables desde cámara, galería o selector de archivos en Flutter.
 - Informe consolidado de inspección para el equipo y el cliente, con recepción, resumen de resultados, evidencias e informes LAUNCH asociados.
 - Pruebas automatizadas del backend para validaciones, permisos y el flujo completo de inspección.
+- Fase 3: autorización OAuth Google de backend, almacenamiento cifrado de tokens, listado/importación manual de informes PDF desde Gmail/Drive y sincronización explícita de citas a Calendar.
+- Fase 4: asistente Responses API con salida estructurada, contextos acotados por rol, portal de cliente aislado, registro de propuestas/confirmaciones y ejecución confirmada de cambios de estado permitidos.
+- Flutter: pantalla de integraciones para administración y acceso al asistente para cada rol; Google OAuth abre en navegador externo.
 
 ## Integraciones aún por conectar
 
 - **Mercado Pago:** el taller no ha indicado si el cobro se realiza con una terminal Point física, un link/checkout o una API de pagos. La implementación actual registra la referencia y conserva el estado como pendiente; todavía no inicia ni confirma cargos.
 - **Boleta electrónica:** el POS aún no emite DTE ni se conecta al SII o a un proveedor tributario. Debe definirse si se usará el portal/API del SII o un proveedor autorizado y configurarse el RUT, certificado y credenciales requeridos.
-- **Gmail y Drive:** aún no hay autorización OAuth ni importador automático. El flujo manual de carga PDF ya funciona; la automatización podrá leer una etiqueta Gmail dedicada o una carpeta Drive elegida.
-- **Google Calendar:** las citas se guardan en la aplicación; `sync_status` queda pendiente. Todavía no se sincronizan eventos con la agenda real.
-- **Asistente IA:** la estructura conserva configuración de proveedor, pero no se envían datos a un modelo. Falta elegir proveedor y definir las herramientas por rol.
+- **Gmail y Drive:** OAuth y la importación por acción de administrador ya están implementados. Se requiere configurar Google Cloud, scopes y variables en Railway; no hay lectura automática en segundo plano.
+- **Google Calendar:** ya se sincronizan citas pendientes tras confirmación administrativa. Requiere credenciales Google y permisos Calendar.
+- **Asistente IA:** la integración con OpenAI está implementada, apagada hasta configurar `AI_PROVIDER` y `AI_API_KEY`. Actualmente propone y ejecuta, tras confirmación, cambios de estado de órdenes como única acción mutante.
 - **Móvil:** ya incluye recepción, listas guiadas, edición de resultados, cámara/archivos y resumen para el cliente. Falta generar un documento PDF final descargable, trabajo sin conexión y ampliar los formularios operativos restantes.
 
 ## Secuencia recomendada
@@ -38,5 +41,6 @@
 1. Acordar el flujo tributario y el tipo de integración de Mercado Pago.
 2. Generar el documento final de inspección, agregar firma avanzada si el taller la requiere, edición de productos y ampliar el POS con servicios y documentos tributarios.
 3. Autorizar Google por OAuth con permisos mínimos; importar reportes del scanner y sincronizar calendario/correos.
-4. Agregar el asistente IA con herramientas de solo lectura primero y confirmación explícita para acciones.
-5. Mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir copia de seguridad y retención.
+4. Completar la revisión de Google OAuth, scopes y credenciales del proyecto Gudex.
+5. Elegir un proveedor de boleta electrónica y completar integración con Mercado Pago según el dispositivo de cobro usado.
+6. Mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir copia de seguridad y retención.

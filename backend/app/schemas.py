@@ -285,3 +285,28 @@ class PaymentCreate(SQLModel):
     method: str
     amount_clp: int
     provider_reference: Optional[str] = None
+
+
+class GoogleImportRequest(SQLModel):
+    source: str
+    external_id: str
+    filename: Optional[str] = None
+    vehicle_id: int
+    work_order_id: Optional[int] = None
+
+
+class AssistantQuery(SQLModel):
+    message: str = Field(min_length=2, max_length=2000)
+    context_type: str = "general"
+    context_id: Optional[int] = None
+
+    @field_validator("context_type")
+    @classmethod
+    def valid_context(cls, value: str) -> str:
+        if value not in {"general", "work_order", "vehicle", "inventory", "agenda"}:
+            raise ValueError("Contexto del asistente no permitido")
+        return value
+
+
+class AssistantConfirmation(SQLModel):
+    approved: bool

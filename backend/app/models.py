@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -239,3 +240,53 @@ class Payment(SQLModel, table=True):
     status: str = Field(default="recorded", max_length=24)
     provider_reference: Optional[str] = Field(default=None, index=True, max_length=100)
     created_at: datetime = Field(default_factory=now_utc)
+
+
+class IntegrationCredential(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str = Field(index=True, unique=True, max_length=32)
+    encrypted_refresh_token: str
+    encrypted_access_token: Optional[str] = None
+    access_token_expires_at: Optional[datetime] = None
+    granted_scopes: str = ""
+    account_email: Optional[str] = Field(default=None, max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+class OAuthState(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str = Field(index=True, max_length=32)
+    state_hash: str = Field(index=True, unique=True, max_length=64)
+    requested_by_email: str = Field(max_length=254)
+    expires_at: datetime = Field(index=True)
+    used_at: Optional[datetime] = None
+
+
+class ExternalImport(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("provider", "external_id", name="uq_external_import_provider_id"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str = Field(index=True, max_length=32)
+    external_id: str = Field(index=True, max_length=500)
+    filename: str = Field(max_length=255)
+    status: str = Field(default="imported", max_length=24)
+    scanner_report_id: Optional[int] = Field(default=None, foreign_key="scannerreport.id", index=True)
+    imported_by_email: str = Field(max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class AIInteraction(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    requested_by_email: str = Field(index=True, max_length=254)
+    user_role: str = Field(max_length=24)
+    question: str
+    context_type: str = Field(default="general", max_length=32)
+    context_id: Optional[int] = Field(default=None, index=True)
+    response_payload: str
+    proposed_action_type: Optional[str] = Field(default=None, max_length=60)
+    proposed_action_payload: Optional[str] = None
+    status: str = Field(default="answered", max_length=24)
+    confirmed_by_email: Optional[str] = Field(default=None, max_length=254)
+    confirmed_at: Optional[datetime] = None
+    result_summary: Optional[str] = None
+    created_at: datetime = Field(default_factory=now_utc, index=True)
