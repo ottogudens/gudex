@@ -36,41 +36,49 @@ def authenticate(email: str, password: str) -> User | None:
         return user
 
 
-async def require_authenticated_request(request: Request, call_next):
-    if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc", "/auth/token"}:
-        return await call_next(request)
-    if request.url.path.startswith("/api/"):
+class AuthenticationMiddleware:
+    """Middleware ASGI puro para autenticar sin consumir ni recrear el cuerpo HTTP."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        path = scope.get("path", "")
+        if path in {"/health", "/docs", "/openapi.json", "/redoc", "/auth/token"} or not path.startswith("/api/"):
+            return await self.app(scope, receive, send)
         from fastapi.responses import JSONResponse
 
-        header = request.headers.get("authorization", "")
-        scheme, _, token = header.partition(" ")
+        headers = {key.decode("latin1").lower(): value.decode("latin1") for key, value in scope.get("headers", [])}
+        scheme, _, token = headers.get("authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not token:
-            return _unauthorized()
+            return await _unauthorized()(scope, receive, send)
         try:
             payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
             role = UserRole(payload.get("role"))
             email = payload.get("sub")
             if not email:
-                return _unauthorized()
+                return await _unauthorized()(scope, receive, send)
             with Session(engine) as session:
                 user = session.exec(select(User).where(User.email == email, User.active == True)).first()  # noqa: E712
-                if not user or user.role != role:
-                    return _unauthorized()
+                if not user or user.role != role or payload.get("ver", 0) != user.token_version:
+                    return await _unauthorized()(scope, receive, send)
+                state = scope.setdefault("state", {})
                 if role == UserRole.customer:
-                    allowed_customer_path = request.url.path.startswith("/api/v1/portal/") or request.url.path == "/api/v1/account/password"
-                    if not allowed_customer_path or (request.url.path.startswith("/api/v1/portal/") and not user.customer_id):
-                        return JSONResponse(status_code=403, content={"detail": "Este recurso no está disponible para clientes"})
-                    if user.customer_id:
-                        request.state.customer_id = user.customer_id
-                elif request.url.path.startswith("/api/v1/portal/"):
-                    return JSONResponse(status_code=403, content={"detail": "El portal requiere una cuenta de cliente"})
-                if payload.get("ver", 0) != user.token_version:
-                    return _unauthorized()
-                request.state.user_role = role.value
-                request.state.user_email = email
+                    allowed = path.startswith("/api/v1/portal/") or path == "/api/v1/account/password"
+                    if not allowed or (path.startswith("/api/v1/portal/") and not user.customer_id):
+                        response = JSONResponse(status_code=403, content={"detail": "Este recurso no está disponible para clientes"})
+                        return await response(scope, receive, send)
+                    state["customer_id"] = user.customer_id
+                elif path.startswith("/api/v1/portal/"):
+                    response = JSONResponse(status_code=403, content={"detail": "El portal requiere una cuenta de cliente"})
+                    return await response(scope, receive, send)
+                state["user_role"] = role.value
+                state["user_email"] = email
         except (jwt.PyJWTError, ValueError):
-            return _unauthorized()
-    return await call_next(request)
+            return await _unauthorized()(scope, receive, send)
+        return await self.app(scope, receive, send)
 
 
 def _unauthorized():
@@ -82,3 +90,8 @@ def _unauthorized():
 def require_admin(request: Request) -> None:
     if getattr(request.state, "user_role", None) != UserRole.admin.value:
         raise HTTPException(status_code=403, detail="Se requiere el rol de administrador")
+
+
+def require_staff(request: Request) -> None:
+    if getattr(request.state, "user_role", None) not in {UserRole.admin.value, UserRole.mechanic.value}:
+        raise HTTPException(status_code=403, detail="Se requiere un perfil del equipo del taller")

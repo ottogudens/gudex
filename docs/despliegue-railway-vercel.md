@@ -19,7 +19,7 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
 2. Agrega otro servicio desde el repositorio GitHub `ottogudens/gudex`, rama `main`.
 3. En los ajustes del servicio API configura **Root Directory** como `/backend`. Este repositorio contiene backend y frontend en directorios separados.
 4. Deja que Railway/Railpack instale las dependencias declaradas en `requirements.txt` y `pyproject.toml`. El archivo `requirements.txt` hace explícitas las dependencias de ejecución, incluido Uvicorn.
-5. El archivo `railway.json` en la raíz del repositorio configura el inicio de la API con `python -m uvicorn` y el health check `/health`. En los detalles del despliegue confirma que Railway haya aplicado esos valores.
+5. El archivo `railway.json` en la raíz configura `alembic upgrade head` como comando previo, el inicio con `python -m uvicorn` y el health check `/health`. En los detalles confirma que Railway haya aplicado esos valores.
 6. En Variables del servicio API añade:
 
    | Variable | Valor |
@@ -28,6 +28,7 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    | `SEED_DEFAULT_USERS` | `false` |
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (usa el nombre real del servicio PostgreSQL) |
    | `UPLOAD_DIR` | `/app/uploads` |
+   | `MAX_EVIDENCE_BYTES` | `20000000` (opcional; límite por fotografía o adjunto) |
    | `JWT_SECRET` | Secreto aleatorio de al menos 32 caracteres |
    | `BOOTSTRAP_ADMIN_EMAIL` | Correo que usarás para el primer administrador |
    | `BOOTSTRAP_ADMIN_PASSWORD` | Contraseña de al menos 12 caracteres |
@@ -36,7 +37,7 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    Railway proporciona `DATABASE_URL` para que los servicios del mismo proyecto se conecten a PostgreSQL. No copies ni expongas la contraseña de la base de datos en el frontend.
 
 7. Adjunta un **Volume** al servicio API y establece su mount path en `/app/uploads`. La aplicación guarda allí los PDFs del scanner. Sin volumen, esos archivos no se conservan después de reemplazar el contenedor.
-8. Pulsa Deploy. Al iniciar, la API crea las tablas y el usuario administrador indicado en las variables si todavía no existe.
+8. Pulsa Deploy. Railway debe mostrar la migración `20260930_0001` antes de iniciar Uvicorn. En producción la API no crea tablas durante el arranque; si la migración falla, el contenedor no debe reemplazar la versión activa.
 9. Confirma que puedes iniciar sesión con ese administrador y luego elimina `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` de Railway. La cuenta creada permanece en PostgreSQL.
 10. En Settings → Networking genera un dominio público para la API y guarda la URL HTTPS. Verifica:
 
@@ -45,6 +46,8 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    ```
 
    Debe responder con JSON y `"status":"ok"`.
+
+En un despliegue que ya contiene datos, crea primero un respaldo de PostgreSQL. La línea base conserva las tablas existentes y agrega las faltantes. Después del despliegue puedes comprobar la revisión desde el shell Railway con `alembic -c alembic.ini current`; debe indicar `20260930_0001 (head)`.
 
 Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(secrets.token_urlsafe(48))'` y guarda el resultado directamente en las variables de Railway. No lo agregues a GitHub.
 
@@ -213,6 +216,7 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 5. Inicia sesión con las cuentas de mecánico y cliente para comprobar que el menú y el portal corresponden al perfil.
 6. Abre una orden como administración o mecánico, crea una cotización con mano de obra y repuestos, y publícala confirmando el envío. Como cliente, abre Cotizaciones y comprueba que aparezca con sus importes; usa Aprobar/Rechazar y verifica el cambio de estado.
 7. Revisa la consola del navegador si la pantalla indica error de conexión; un error CORS suele señalar un origen ausente en `CORS_ORIGINS`.
+8. Abre una orden, completa la recepción, aplica una plantilla, edita un resultado y adjunta una foto. Ingresa como cliente vinculado y comprueba que el informe aparezca en **Trabajos anteriores**.
 
 ## 5. Prueba de persistencia y scanner
 
@@ -237,9 +241,10 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 | Railway no encuentra `app.main` | Root Directory debe ser `/backend`; el código de la API vive en `backend/app`. |
 | Error de conexión PostgreSQL | Revisa `DATABASE_URL=${{Postgres.DATABASE_URL}}`, que el nombre de servicio sea correcto y que `psycopg` se instale desde `pyproject.toml`. |
 | El servicio termina al arrancar en producción | Define `JWT_SECRET` aleatorio de 32+ caracteres, `SEED_DEFAULT_USERS=false` y una clave admin de 12+ caracteres. |
+| Falla el comando previo de Alembic | Confirma Root Directory `/backend`, `DATABASE_URL` y que `alembic` aparezca instalado. No cambies el start command para saltar la migración. |
 | API funciona con curl pero falla desde Vercel | Añade el origen HTTPS exacto del frontend a `CORS_ORIGINS` y espera el redeploy de Railway. |
 | Vercel no encuentra Flutter o tarda demasiado | Revisa logs del build, el archivo `mobile/vercel.json`, `API_BASE_URL` y espacio/tiempo de compilación. El build instala Flutter 3.47.3 cada vez que no hay caché. |
-| PDF desaparece tras desplegar de nuevo | Confirma que el volumen de Railway esté conectado al backend en `/app/uploads` y que `UPLOAD_DIR` use esa ruta. |
+| PDF o fotografía desaparece tras desplegar de nuevo | Confirma que el volumen de Railway esté conectado al backend en `/app/uploads` y que `UPLOAD_DIR` use esa ruta. |
 | Login cliente da 403 en rutas internas | Es el comportamiento esperado: las cuentas cliente solo usan `/api/v1/portal/*` y `/api/v1/account/password`. |
 
 ## Límites actuales

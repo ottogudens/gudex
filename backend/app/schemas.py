@@ -2,10 +2,11 @@ import math
 from datetime import datetime
 from typing import Optional
 
-from pydantic import field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlmodel import SQLModel
 
 from app.models import UserRole, WorkStatus
+from app.validators import normalize_plate, normalize_rut, normalize_vin, validate_vehicle_year
 
 
 class UserCreate(SQLModel):
@@ -48,6 +49,24 @@ class CustomerCreate(SQLModel):
     phone: Optional[str] = None
     notes: Optional[str] = None
 
+    @field_validator("full_name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if len(value) < 2:
+            raise ValueError("Ingresa el nombre del cliente")
+        return value
+
+    @field_validator("rut")
+    @classmethod
+    def clean_rut(cls, value: str | None) -> str | None:
+        return normalize_rut(value)
+
+    @field_validator("email")
+    @classmethod
+    def clean_email(cls, value: str | None) -> str | None:
+        return value.strip().lower() if value and value.strip() else None
+
 
 class VehicleCreate(SQLModel):
     customer_id: int
@@ -60,6 +79,28 @@ class VehicleCreate(SQLModel):
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
 
+    @field_validator("plate")
+    @classmethod
+    def clean_plate(cls, value: str) -> str:
+        return normalize_plate(value)
+
+    @field_validator("vin")
+    @classmethod
+    def clean_vin(cls, value: str | None) -> str | None:
+        return normalize_vin(value)
+
+    @field_validator("year")
+    @classmethod
+    def clean_year(cls, value: int | None) -> int | None:
+        return validate_vehicle_year(value)
+
+    @field_validator("current_mileage_km")
+    @classmethod
+    def valid_mileage(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("El kilometraje no puede ser negativo")
+        return value
+
 
 class WorkOrderCreate(SQLModel):
     customer_id: int
@@ -69,6 +110,13 @@ class WorkOrderCreate(SQLModel):
     reported_symptoms: Optional[str] = None
     initial_notes: Optional[str] = None
     technician_name: Optional[str] = None
+
+    @field_validator("mileage_km")
+    @classmethod
+    def valid_mileage(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("El kilometraje no puede ser negativo")
+        return value
 
 
 class WorkOrderUpdate(SQLModel):
@@ -85,6 +133,78 @@ class InspectionCreate(SQLModel):
     result: str
     notes: Optional[str] = None
     measured_value: Optional[str] = None
+
+    @field_validator("result")
+    @classmethod
+    def valid_result(cls, value: str) -> str:
+        value = value.strip().lower()
+        allowed = {"not_inspected", "normal", "observation", "failed", "not_applicable"}
+        if value not in allowed:
+            raise ValueError("Resultado de inspección no permitido")
+        return value
+
+
+class InspectionUpdate(SQLModel):
+    result: Optional[str] = None
+    notes: Optional[str] = None
+    measured_value: Optional[str] = None
+
+    @field_validator("result")
+    @classmethod
+    def valid_result(cls, value: str | None) -> str | None:
+        return InspectionCreate.valid_result(value) if value is not None else None
+
+
+class InspectionTemplateItemCreate(SQLModel):
+    category: str
+    item: str
+    sort_order: int = 0
+    required: bool = True
+
+
+class InspectionTemplateCreate(SQLModel):
+    key: str = Field(min_length=3, max_length=60)
+    name: str = Field(min_length=3, max_length=120)
+    service_type: str = Field(min_length=3, max_length=80)
+    description: Optional[str] = None
+    active: bool = True
+    items: list[InspectionTemplateItemCreate] = Field(min_length=1)
+
+    @field_validator("key")
+    @classmethod
+    def clean_key(cls, value: str) -> str:
+        cleaned = value.strip().lower().replace(" ", "-")
+        if not all(char.isalnum() or char in "-_" for char in cleaned):
+            raise ValueError("La clave solo admite letras, números, guion y guion bajo")
+        return cleaned
+
+
+class WorkOrderReceptionUpdate(SQLModel):
+    fuel_level_percent: Optional[int] = Field(default=None, ge=0, le=100)
+    visible_damage: Optional[str] = None
+    accessories: Optional[str] = None
+    customer_observations: Optional[str] = None
+    terms_accepted: bool = False
+    accepted_by_name: Optional[str] = None
+
+    @model_validator(mode="after")
+    def acceptance_has_name(self):
+        if self.terms_accepted and not (self.accepted_by_name or "").strip():
+            raise ValueError("Indica quién acepta la recepción")
+        return self
+
+
+class WorkOrderEvidenceRead(SQLModel):
+    id: int
+    work_order_id: int
+    inspection_id: Optional[int]
+    filename: str
+    content_type: str
+    kind: str
+    caption: Optional[str]
+    uploaded_by_email: str
+    created_at: datetime
+    download_url: str
 
 
 class QuoteCreate(SQLModel):
@@ -103,6 +223,11 @@ class ProductCreate(SQLModel):
     minimum_quantity: float = 0
     cost_clp: int = 0
     price_clp: int = 0
+
+    @field_validator("sku")
+    @classmethod
+    def clean_sku(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value and value.strip() else None
 
     @field_validator("stock_quantity", "minimum_quantity")
     @classmethod

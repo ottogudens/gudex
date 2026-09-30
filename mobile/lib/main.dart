@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 
 void main() => runApp(const LubricentroApp());
 
@@ -57,6 +59,24 @@ class ApiClient {
       headers: {..._headers, 'Content-Type': 'application/json'},
       body: jsonEncode(data),
     );
+    return _decode(response);
+  }
+
+  Future<dynamic> putJson(String path, Map<String, dynamic> data) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl$path'),
+      headers: {..._headers, 'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+    return _decode(response);
+  }
+
+  Future<dynamic> uploadBytes(String path, List<int> bytes, String filename, {String? contentType}) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
+    request.headers.addAll(_headers);
+    request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
     return _decode(response);
   }
 
@@ -377,6 +397,9 @@ class _ModuleListState extends State<_ModuleList> {
                   data: data,
                   onApprove: canApprove ? () => _answerQuote(data['id'] as int, true) : null,
                   onReject: canApprove ? () => _answerQuote(data['id'] as int, false) : null,
+                  onOpen: widget.module.path == '/api/v1/portal/work-orders' && data['id'] is int
+                      ? () => _showInspectionReport(data['id'] as int)
+                      : null,
                 );
               },
             ),
@@ -393,6 +416,33 @@ class _ModuleListState extends State<_ModuleList> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> _showInspectionReport(int orderId) async {
+    try {
+      final raw = await widget.api.get('/api/v1/portal/work-orders/$orderId/inspection-report');
+      final report = Map<String, dynamic>.from(raw as Map);
+      final summary = Map<String, dynamic>.from(report['summary'] as Map? ?? {});
+      final inspections = report['inspections'] is List ? report['inspections'] as List : const [];
+      final scanner = report['scanner_reports'] is List ? report['scanner_reports'] as List : const [];
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: Text('Informe ${report['order']?['code'] ?? ''}'),
+        content: SizedBox(width: 520, child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Text('Normales: ${summary['normal'] ?? 0} · Observaciones: ${summary['observation'] ?? 0} · Fallas: ${summary['failed'] ?? 0}'),
+          Text('Pendientes: ${summary['not_inspected'] ?? 0} · Informes LAUNCH: ${scanner.length}'),
+          const Divider(),
+          for (final rawItem in inspections)
+            ListTile(contentPadding: EdgeInsets.zero, dense: true,
+              leading: Icon(rawItem['result'] == 'normal' ? Icons.check_circle_outline : Icons.info_outline),
+              title: Text('${rawItem['category']}: ${rawItem['item']}'),
+              subtitle: Text('${rawItem['result']}${rawItem['notes'] == null ? '' : ' · ${rawItem['notes']}'}')),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
+      ));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
 }
@@ -1023,6 +1073,9 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
   late String _status;
   late Future<List<Map<String, dynamic>>> _inspections;
   late Future<List<Map<String, dynamic>>> _quotes;
+  late Future<List<Map<String, dynamic>>> _templates;
+  late Future<List<Map<String, dynamic>>> _evidence;
+  late Future<Map<String, dynamic>> _report;
   bool _saving = false;
   String? _error;
 
@@ -1038,6 +1091,9 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     _status = '${widget.order['status'] ?? 'received'}';
     _inspections = _loadInspections();
     _quotes = _loadQuotes();
+    _templates = _loadList('/api/v1/inspection-templates');
+    _evidence = _loadList('/api/v1/work-orders/${widget.order['id']}/evidence');
+    _report = _loadReport();
   }
 
   @override
@@ -1054,6 +1110,16 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
   Future<List<Map<String, dynamic>>> _loadQuotes() async {
     final result = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/quotes');
     return result is List ? result.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : [];
+  }
+
+  Future<List<Map<String, dynamic>>> _loadList(String path) async {
+    final result = await widget.api.get(path);
+    return result is List ? result.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : [];
+  }
+
+  Future<Map<String, dynamic>> _loadReport() async {
+    final result = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/inspection-report');
+    return result is Map ? Map<String, dynamic>.from(result) : <String, dynamic>{};
   }
 
   Future<void> _saveOrder() async {
@@ -1130,6 +1196,167 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
     } finally {
       category.dispose(); item.dispose(); notes.dispose(); measured.dispose();
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _applyTemplate() async {
+    try {
+      final templates = await _templates;
+      if (!mounted) return;
+      final selected = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: const Text('Aplicar lista de inspección'),
+          children: templates.map((template) => SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, template),
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.checklist_outlined),
+              title: Text('${template['name']}'),
+              subtitle: Text('${template['description'] ?? ''}'),
+            ),
+          )).toList(),
+        ),
+      );
+      if (selected == null) return;
+      setState(() => _saving = true);
+      final response = await widget.api.post('/api/v1/work-orders/${widget.order['id']}/inspection-templates/${selected['id']}/apply');
+      if (!mounted) return;
+      setState(() {
+        _inspections = _loadInspections();
+        _report = _loadReport();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${response['created_count']} puntos agregados')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _editInspection(Map<String, dynamic> inspection) async {
+    final notes = TextEditingController(text: '${inspection['notes'] ?? ''}');
+    final measured = TextEditingController(text: '${inspection['measured_value'] ?? ''}');
+    String result = '${inspection['result'] ?? 'not_inspected'}';
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: Text('${inspection['item']}'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(
+              value: result,
+              decoration: const InputDecoration(labelText: 'Resultado'),
+              items: const [
+                DropdownMenuItem(value: 'not_inspected', child: Text('No inspeccionado')),
+                DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                DropdownMenuItem(value: 'observation', child: Text('Observación')),
+                DropdownMenuItem(value: 'failed', child: Text('Falla')),
+                DropdownMenuItem(value: 'not_applicable', child: Text('No aplica')),
+              ],
+              onChanged: (value) { if (value != null) update(() => result = value); },
+            ),
+            const SizedBox(height: 10),
+            TextField(controller: measured, decoration: const InputDecoration(labelText: 'Medición')),
+            const SizedBox(height: 10),
+            TextField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Observaciones')),
+          ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(context, {
+              'result': result, 'measured_value': measured.text.trim(), 'notes': notes.text.trim(),
+            }), child: const Text('Guardar')),
+          ],
+        )),
+      );
+      if (data == null) return;
+      await widget.api.patchJson('/api/v1/inspections/${inspection['id']}', data);
+      if (!mounted) return;
+      setState(() { _inspections = _loadInspections(); _report = _loadReport(); });
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      notes.dispose(); measured.dispose();
+    }
+  }
+
+  Future<void> _editReception() async {
+    final currentRaw = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/reception');
+    final current = currentRaw is Map ? Map<String, dynamic>.from(currentRaw) : <String, dynamic>{};
+    final damage = TextEditingController(text: '${current['visible_damage'] ?? ''}');
+    final accessories = TextEditingController(text: '${current['accessories'] ?? ''}');
+    final observations = TextEditingController(text: '${current['customer_observations'] ?? ''}');
+    final acceptedBy = TextEditingController(text: '${current['accepted_by_name'] ?? ''}');
+    int? fuel = current['fuel_level_percent'] as int?;
+    bool accepted = current['terms_accepted'] == true;
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: const Text('Recepción del vehículo'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<int>(value: fuel, decoration: const InputDecoration(labelText: 'Combustible'),
+              items: [0, 25, 50, 75, 100].map((v) => DropdownMenuItem(value: v, child: Text('$v%'))).toList(),
+              onChanged: (value) => update(() => fuel = value)),
+            const SizedBox(height: 10),
+            TextField(controller: damage, maxLines: 2, decoration: const InputDecoration(labelText: 'Daños visibles')),
+            const SizedBox(height: 10),
+            TextField(controller: accessories, maxLines: 2, decoration: const InputDecoration(labelText: 'Accesorios entregados')),
+            const SizedBox(height: 10),
+            TextField(controller: observations, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones del cliente')),
+            CheckboxListTile(contentPadding: EdgeInsets.zero, value: accepted, title: const Text('Cliente conforme con el registro'), onChanged: (v) => update(() => accepted = v ?? false)),
+            TextField(controller: acceptedBy, decoration: const InputDecoration(labelText: 'Nombre de quien acepta')),
+          ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(context, {
+              'fuel_level_percent': fuel, 'visible_damage': damage.text.trim(), 'accessories': accessories.text.trim(),
+              'customer_observations': observations.text.trim(), 'terms_accepted': accepted,
+              'accepted_by_name': acceptedBy.text.trim(),
+            }), child: const Text('Guardar recepción')),
+          ],
+        )),
+      );
+      if (data == null) return;
+      await widget.api.putJson('/api/v1/work-orders/${widget.order['id']}/reception', data);
+      if (!mounted) return;
+      setState(() => _report = _loadReport());
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Recepción actualizada')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      damage.dispose(); accessories.dispose(); observations.dispose(); acceptedBy.dispose();
+    }
+  }
+
+  Future<void> _attachEvidence() async {
+    final source = await showModalBottomSheet<String>(context: context, builder: (context) => SafeArea(child: Wrap(children: [
+      ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Tomar fotografía'), onTap: () => Navigator.pop(context, 'camera')),
+      ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Elegir fotografía'), onTap: () => Navigator.pop(context, 'gallery')),
+      ListTile(leading: const Icon(Icons.picture_as_pdf_outlined), title: const Text('Adjuntar archivo o PDF'), onTap: () => Navigator.pop(context, 'file')),
+    ])));
+    if (source == null) return;
+    try {
+      List<int>? bytes;
+      String? name;
+      if (source == 'file') {
+        final picked = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'], withData: true);
+        if (picked == null) return;
+        bytes = picked.files.single.bytes;
+        name = picked.files.single.name;
+      } else {
+        final picked = await ImagePicker().pickImage(source: source == 'camera' ? ImageSource.camera : ImageSource.gallery, imageQuality: 85);
+        if (picked == null) return;
+        bytes = await picked.readAsBytes();
+        name = picked.name;
+      }
+      if (bytes == null || name == null) throw Exception('No fue posible leer el archivo');
+      await widget.api.uploadBytes('/api/v1/work-orders/${widget.order['id']}/evidence', bytes, name);
+      if (!mounted) return;
+      setState(() { _evidence = _loadList('/api/v1/work-orders/${widget.order['id']}/evidence'); _report = _loadReport(); });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidencia adjuntada')));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -1243,9 +1470,12 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
           const SizedBox(height: 12),
           if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
           FilledButton.icon(onPressed: _saving ? null : _saveOrder, icon: const Icon(Icons.save_outlined), label: Text(_saving ? 'Guardando…' : 'Guardar cambios')),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(onPressed: _saving ? null : _editReception, icon: const Icon(Icons.assignment_outlined), label: const Text('Completar recepción')),
           const Divider(height: 28),
           Row(children: [
             Expanded(child: Text('Inspecciones', style: Theme.of(context).textTheme.titleLarge)),
+            IconButton(onPressed: _saving ? null : _applyTemplate, icon: const Icon(Icons.playlist_add_check), tooltip: 'Aplicar plantilla'),
             IconButton(onPressed: _saving ? null : _addInspection, icon: const Icon(Icons.add_circle_outline), tooltip: 'Agregar inspección'),
           ]),
           FutureBuilder<List<Map<String, dynamic>>>(
@@ -1260,9 +1490,37 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
                 title: Text('${inspection['category']}: ${inspection['item']}'),
                 subtitle: Text('${inspection['result']}${inspection['measured_value'] == null ? '' : ' · ${inspection['measured_value']}'}${inspection['notes'] == null ? '' : '\n${inspection['notes']}'}'),
                 isThreeLine: inspection['notes'] != null,
+                trailing: const Icon(Icons.edit_outlined),
+                onTap: () => _editInspection(inspection),
               ))).toList());
             },
           ),
+          const Divider(height: 28),
+          Row(children: [
+            Expanded(child: Text('Evidencias', style: Theme.of(context).textTheme.titleLarge)),
+            IconButton(onPressed: _saving ? null : _attachEvidence, icon: const Icon(Icons.attach_file), tooltip: 'Adjuntar foto o archivo'),
+          ]),
+          FutureBuilder<List<Map<String, dynamic>>>(future: _evidence, builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
+            final records = snapshot.data ?? [];
+            if (records.isEmpty) return const Text('No hay fotografías o archivos adjuntos.');
+            return Column(children: records.map((item) => ListTile(
+              leading: Icon('${item['content_type']}'.startsWith('image/') ? Icons.image_outlined : Icons.picture_as_pdf_outlined),
+              title: Text('${item['filename']}'), subtitle: Text('${item['caption'] ?? 'Evidencia de la orden'}'),
+            )).toList());
+          }),
+          const Divider(height: 28),
+          Text('Resumen para el cliente', style: Theme.of(context).textTheme.titleLarge),
+          FutureBuilder<Map<String, dynamic>>(future: _report, builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
+            if (snapshot.hasError) return Text('No se pudo generar el resumen: ${snapshot.error}');
+            final summary = snapshot.data?['summary'] is Map ? Map<String, dynamic>.from(snapshot.data!['summary'] as Map) : <String, dynamic>{};
+            final scanners = snapshot.data?['scanner_reports'] is List ? snapshot.data!['scanner_reports'] as List : const [];
+            return Card(child: Padding(padding: const EdgeInsets.all(14), child: Text(
+              'Normales: ${summary['normal'] ?? 0} · Observaciones: ${summary['observation'] ?? 0} · Fallas: ${summary['failed'] ?? 0}\n'
+              'Pendientes: ${summary['not_inspected'] ?? 0} · Informes LAUNCH: ${scanners.length}',
+            )));
+          }),
           const Divider(height: 28),
           Row(children: [
             Expanded(child: Text('Cotizaciones', style: Theme.of(context).textTheme.titleLarge)),
@@ -1586,10 +1844,11 @@ class _PosScreenState extends State<_PosScreen> {
 }
 
 class _RecordCard extends StatelessWidget {
-  const _RecordCard({required this.data, this.onApprove, this.onReject});
+  const _RecordCard({required this.data, this.onApprove, this.onReject, this.onOpen});
   final Map<String, dynamic> data;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
+  final VoidCallback? onOpen;
 
   String _displayValue(String key, dynamic value) {
     if (value == null || value is Map || value is List) return '';
@@ -1609,11 +1868,12 @@ class _RecordCard extends StatelessWidget {
         Text(title, style: Theme.of(context).textTheme.titleMedium),
         for (final entry in entries)
           Padding(padding: const EdgeInsets.only(top: 5), child: Text('${entry.key.replaceAll('_', ' ')}: ${_displayValue(entry.key, entry.value)}')),
-        if (onApprove != null || onReject != null) ...[
+        if (onApprove != null || onReject != null || onOpen != null) ...[
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [
-            OutlinedButton(onPressed: onReject, child: const Text('Rechazar')),
-            FilledButton(onPressed: onApprove, child: const Text('Aprobar')),
+            if (onOpen != null) OutlinedButton.icon(onPressed: onOpen, icon: const Icon(Icons.fact_check_outlined), label: const Text('Ver inspección')),
+            if (onReject != null) OutlinedButton(onPressed: onReject, child: const Text('Rechazar')),
+            if (onApprove != null) FilledButton(onPressed: onApprove, child: const Text('Aprobar')),
           ]),
         ],
       ]),

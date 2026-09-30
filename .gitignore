@@ -3,6 +3,8 @@
 __pycache__/
 *.py[cod]
 *.db
+*.egg-info/
+.pytest_cache/
 backend/uploads/
 mobile/.dart_tool/
 mobile/.flutter-plugins*

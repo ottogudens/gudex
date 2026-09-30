@@ -112,6 +112,52 @@ class Inspection(SQLModel, table=True):
     work_order: Optional[WorkOrder] = Relationship(back_populates="inspections")
 
 
+class InspectionTemplate(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(index=True, unique=True, max_length=60)
+    name: str = Field(max_length=120)
+    service_type: str = Field(max_length=80)
+    description: Optional[str] = None
+    active: bool = True
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class InspectionTemplateItem(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    template_id: int = Field(foreign_key="inspectiontemplate.id", index=True)
+    category: str = Field(max_length=80)
+    item: str = Field(max_length=120)
+    sort_order: int = Field(default=0)
+    required: bool = True
+
+
+class WorkOrderReception(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True, unique=True)
+    fuel_level_percent: Optional[int] = Field(default=None, ge=0, le=100)
+    visible_damage: Optional[str] = None
+    accessories: Optional[str] = None
+    customer_observations: Optional[str] = None
+    terms_accepted: bool = False
+    accepted_by_name: Optional[str] = Field(default=None, max_length=120)
+    accepted_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+class WorkOrderEvidence(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    inspection_id: Optional[int] = Field(default=None, foreign_key="inspection.id", index=True)
+    filename: str = Field(max_length=255)
+    storage_path: str = Field(max_length=500)
+    content_type: str = Field(max_length=80)
+    kind: str = Field(default="evidence", max_length=32)
+    caption: Optional[str] = Field(default=None, max_length=250)
+    uploaded_by_email: str = Field(max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class Quote(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     work_order_id: int = Field(foreign_key="workorder.id", index=True)

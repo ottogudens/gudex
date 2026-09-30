@@ -16,7 +16,11 @@ dependencies = [
   "PyJWT>=2.9,<3",
   "pwdlib[argon2]>=0.2,<1",
   "psycopg[binary]>=3.2,<4",
+  "alembic>=1.14,<2",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "httpx>=0.28,<1"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

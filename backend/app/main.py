@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import secrets
@@ -10,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import create_db_and_tables, engine, get_session
+from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, Inspection, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
     StockMovement, User, UserRole, Vehicle, WorkOrder, WorkStatus,
@@ -18,28 +20,33 @@ from app.schemas import (
     AppointmentCreate, CustomerCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
     PasswordChange, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderCreate, WorkOrderUpdate,
 )
-from app.security import authenticate, create_access_token, hash_password, require_admin, require_authenticated_request, verify_password
+from app.routers.inspections import portal_router as inspection_portal_router
+from app.routers.inspections import router as inspection_router
+from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
-app.middleware("http")(require_authenticated_request)
+app.add_middleware(AuthenticationMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.include_router(inspection_router)
+app.include_router(inspection_portal_router)
 
 
-@app.on_event("startup")
 def on_startup() -> None:
     if settings.app_env.lower() == "production":
         if settings.jwt_secret == "development-only-change-me" or len(settings.jwt_secret) < 32:
             raise RuntimeError("En producción JWT_SECRET debe ser una clave aleatoria de al menos 32 caracteres")
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
-    create_db_and_tables()
+    if settings.app_env.lower() != "production":
+        create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    seed_default_inspection_templates()
     if settings.app_env.lower() == "production" and settings.bootstrap_admin_email and settings.bootstrap_admin_password:
         with Session(engine) as session:
             existing = session.exec(select(User).where(User.email == settings.bootstrap_admin_email.lower())).first()
@@ -78,6 +85,15 @@ def on_startup() -> None:
                 for email, role, password in created:
                     print(f"  perfil={role}  correo={email}  contraseña={password}")
                 print("Guarda estas contraseñas ahora y cambia cada una después del primer inicio.\n")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    on_startup()
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 
 @app.post("/auth/token")
@@ -127,7 +143,7 @@ def health():
     return {"status": "ok", "service": settings.app_name}
 
 
-@app.get("/api/v1/integrations/status")
+@app.get("/api/v1/integrations/status", dependencies=[Depends(require_admin)])
 def integrations_status():
     return {
         "mercado_pago": {"credentials_present": bool(settings.mercadopago_access_token), "connected": False, "mode": "not_connected"},
@@ -137,8 +153,12 @@ def integrations_status():
     }
 
 
-@app.post("/api/v1/customers", response_model=Customer, status_code=201)
+@app.post("/api/v1/customers", response_model=Customer, status_code=201, dependencies=[Depends(require_admin)])
 def create_customer(data: CustomerCreate, session: Session = Depends(get_session)):
+    if data.rut and session.exec(select(Customer).where(Customer.rut == data.rut)).first():
+        raise HTTPException(409, "Ya existe un cliente con ese RUT")
+    if data.email and session.exec(select(Customer).where(Customer.email == data.email)).first():
+        raise HTTPException(409, "Ya existe un cliente con ese correo")
     customer = Customer.model_validate(data)
     session.add(customer)
     session.commit()
@@ -146,7 +166,7 @@ def create_customer(data: CustomerCreate, session: Session = Depends(get_session
     return customer
 
 
-@app.get("/api/v1/customers", response_model=list[Customer])
+@app.get("/api/v1/customers", response_model=list[Customer], dependencies=[Depends(require_staff)])
 def list_customers(q: str | None = None, session: Session = Depends(get_session)):
     statement = select(Customer).order_by(Customer.full_name)
     if q:
@@ -154,10 +174,14 @@ def list_customers(q: str | None = None, session: Session = Depends(get_session)
     return session.exec(statement).all()
 
 
-@app.post("/api/v1/vehicles", response_model=Vehicle, status_code=201)
+@app.post("/api/v1/vehicles", response_model=Vehicle, status_code=201, dependencies=[Depends(require_admin)])
 def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session)):
     if not session.get(Customer, data.customer_id):
         raise HTTPException(404, "Cliente no encontrado")
+    if session.exec(select(Vehicle).where(Vehicle.plate == data.plate)).first():
+        raise HTTPException(409, "Ya existe un vehículo con esa patente")
+    if data.vin and session.exec(select(Vehicle).where(Vehicle.vin == data.vin)).first():
+        raise HTTPException(409, "Ya existe un vehículo con ese VIN")
     vehicle = Vehicle.model_validate(data)
     session.add(vehicle)
     session.commit()
@@ -165,7 +189,7 @@ def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session))
     return vehicle
 
 
-@app.get("/api/v1/vehicles", response_model=list[Vehicle])
+@app.get("/api/v1/vehicles", response_model=list[Vehicle], dependencies=[Depends(require_staff)])
 def list_vehicles(customer_id: int | None = None, plate: str | None = None, session: Session = Depends(get_session)):
     statement = select(Vehicle).order_by(Vehicle.plate)
     if customer_id:
@@ -175,7 +199,7 @@ def list_vehicles(customer_id: int | None = None, plate: str | None = None, sess
     return session.exec(statement).all()
 
 
-@app.post("/api/v1/work-orders", response_model=WorkOrder, status_code=201)
+@app.post("/api/v1/work-orders", response_model=WorkOrder, status_code=201, dependencies=[Depends(require_admin)])
 def create_work_order(data: WorkOrderCreate, session: Session = Depends(get_session)):
     vehicle = session.get(Vehicle, data.vehicle_id)
     if not session.get(Customer, data.customer_id) or not vehicle:
@@ -190,7 +214,7 @@ def create_work_order(data: WorkOrderCreate, session: Session = Depends(get_sess
     return order
 
 
-@app.get("/api/v1/work-orders", response_model=list[WorkOrder])
+@app.get("/api/v1/work-orders", response_model=list[WorkOrder], dependencies=[Depends(require_staff)])
 def list_work_orders(status: WorkStatus | None = None, vehicle_id: int | None = None, session: Session = Depends(get_session)):
     statement = select(WorkOrder).order_by(WorkOrder.opened_at.desc())
     if status:
@@ -200,7 +224,7 @@ def list_work_orders(status: WorkStatus | None = None, vehicle_id: int | None = 
     return session.exec(statement).all()
 
 
-@app.get("/api/v1/work-orders/{order_id}", response_model=WorkOrder)
+@app.get("/api/v1/work-orders/{order_id}", response_model=WorkOrder, dependencies=[Depends(require_staff)])
 def get_work_order(order_id: int, session: Session = Depends(get_session)):
     order = session.get(WorkOrder, order_id)
     if not order:
@@ -208,12 +232,15 @@ def get_work_order(order_id: int, session: Session = Depends(get_session)):
     return order
 
 
-@app.patch("/api/v1/work-orders/{order_id}", response_model=WorkOrder)
-def update_work_order(order_id: int, data: WorkOrderUpdate, session: Session = Depends(get_session)):
+@app.patch("/api/v1/work-orders/{order_id}", response_model=WorkOrder, dependencies=[Depends(require_staff)])
+def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, session: Session = Depends(get_session)):
     order = session.get(WorkOrder, order_id)
     if not order:
         raise HTTPException(404, "Orden de trabajo no encontrada")
-    for key, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    if request.state.user_role == UserRole.mechanic.value and "total_clp" in changes:
+        raise HTTPException(403, "Solo administración puede modificar el total de una orden")
+    for key, value in changes.items():
         setattr(order, key, value)
     session.add(order)
     session.commit()
@@ -221,7 +248,7 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, session: Session = D
     return order
 
 
-@app.post("/api/v1/work-orders/{order_id}/inspections", response_model=Inspection, status_code=201)
+@app.post("/api/v1/work-orders/{order_id}/inspections", response_model=Inspection, status_code=201, dependencies=[Depends(require_staff)])
 def add_inspection(order_id: int, data: InspectionCreate, session: Session = Depends(get_session)):
     if not session.get(WorkOrder, order_id):
         raise HTTPException(404, "Orden de trabajo no encontrada")
@@ -232,14 +259,14 @@ def add_inspection(order_id: int, data: InspectionCreate, session: Session = Dep
     return inspection
 
 
-@app.get("/api/v1/work-orders/{order_id}/inspections", response_model=list[Inspection])
+@app.get("/api/v1/work-orders/{order_id}/inspections", response_model=list[Inspection], dependencies=[Depends(require_staff)])
 def list_inspections(order_id: int, session: Session = Depends(get_session)):
     if not session.get(WorkOrder, order_id):
         raise HTTPException(404, "Orden de trabajo no encontrada")
     return session.exec(select(Inspection).where(Inspection.work_order_id == order_id)).all()
 
 
-@app.post("/api/v1/work-orders/{order_id}/quotes", response_model=Quote, status_code=201)
+@app.post("/api/v1/work-orders/{order_id}/quotes", response_model=Quote, status_code=201, dependencies=[Depends(require_admin)])
 def create_quote(order_id: int, data: QuoteCreate, session: Session = Depends(get_session)):
     order = session.get(WorkOrder, order_id)
     if not order:
@@ -261,7 +288,7 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
     return session.exec(select(Quote).where(Quote.work_order_id == order_id).order_by(Quote.created_at.desc())).all()
 
 
-@app.post("/api/v1/quotes/{quote_id}/customer-approval", response_model=Quote)
+@app.post("/api/v1/quotes/{quote_id}/customer-approval", response_model=Quote, dependencies=[Depends(require_admin)])
 def approve_quote(quote_id: int, approved: bool, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
     if not quote:
@@ -280,7 +307,7 @@ def approve_quote(quote_id: int, approved: bool, session: Session = Depends(get_
     return quote
 
 
-@app.post("/api/v1/quotes/{quote_id}/publish", response_model=Quote)
+@app.post("/api/v1/quotes/{quote_id}/publish", response_model=Quote, dependencies=[Depends(require_admin)])
 def publish_quote(quote_id: int, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
     if not quote:
@@ -320,7 +347,7 @@ def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: date
         raise HTTPException(409, "Ese horario ya tiene una cita solicitada o confirmada")
 
 
-@app.post("/api/v1/appointments", response_model=Appointment, status_code=201)
+@app.post("/api/v1/appointments", response_model=Appointment, status_code=201, dependencies=[Depends(require_admin)])
 def create_appointment(data: AppointmentCreate, session: Session = Depends(get_session)):
     ensure_appointment_slot(session, data.starts_at, data.ends_at)
     customer_id = data.customer_id
@@ -345,7 +372,7 @@ def list_appointments(from_date: datetime | None = None, to_date: datetime | Non
     return session.exec(statement).all()
 
 
-@app.patch("/api/v1/appointments/{appointment_id}/status", response_model=Appointment)
+@app.patch("/api/v1/appointments/{appointment_id}/status", response_model=Appointment, dependencies=[Depends(require_admin)])
 def update_appointment_status(appointment_id: int, status: str, session: Session = Depends(get_session)):
     if status not in {"confirmed", "cancelled", "completed"}:
         raise HTTPException(422, "Estado de cita inválido")
@@ -419,6 +446,8 @@ def customer_portal_approve_quote(quote_id: int, approved: bool, request: Reques
 
 @app.post("/api/v1/products", response_model=Product, status_code=201, dependencies=[Depends(require_admin)])
 def create_product(data: ProductCreate, session: Session = Depends(get_session)):
+    if data.sku and session.exec(select(Product).where(Product.sku == data.sku)).first():
+        raise HTTPException(409, "Ya existe un producto con ese SKU")
     product = Product.model_validate(data)
     session.add(product)
     session.commit()
@@ -461,7 +490,7 @@ def adjust_stock(product_id: int, data: StockAdjustment, session: Session = Depe
     return movement
 
 
-@app.post("/api/v1/scanner-reports", status_code=201)
+@app.post("/api/v1/scanner-reports", status_code=201, dependencies=[Depends(require_staff)])
 async def upload_scanner_report(
     vehicle_id: int,
     work_order_id: int | None = None,
@@ -518,7 +547,7 @@ def download_scanner_report(report_id: int, session: Session = Depends(get_sessi
     return FileResponse(report.storage_path, media_type="application/pdf", filename=report.filename)
 
 
-@app.post("/api/v1/sales", status_code=201)
+@app.post("/api/v1/sales", status_code=201, dependencies=[Depends(require_admin)])
 def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
     if not data.lines:
         raise HTTPException(422, "La venta requiere al menos un ítem")
@@ -577,7 +606,7 @@ def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
             "items": [item.model_dump() for item in session.exec(select(SaleItem).where(SaleItem.sale_id == sale.id)).all()]}
 
 
-@app.post("/api/v1/sales/{sale_id}/payments", status_code=201)
+@app.post("/api/v1/sales/{sale_id}/payments", status_code=201, dependencies=[Depends(require_admin)])
 def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends(get_session)):
     sale = session.get(Sale, sale_id)
     if not sale:
@@ -599,7 +628,7 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
     return payment
 
 
-@app.get("/api/v1/sales")
+@app.get("/api/v1/sales", dependencies=[Depends(require_admin)])
 def list_sales(session: Session = Depends(get_session)):
     sales = session.exec(select(Sale).order_by(Sale.created_at.desc())).all()
     return [{

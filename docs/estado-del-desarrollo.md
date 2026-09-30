@@ -14,6 +14,15 @@
 - Recepción de informe PDF LAUNCH, asociado a vehículo y opcionalmente a una orden; el original se conserva en almacenamiento local privado.
 - App Flutter para autenticación y módulos por rol. Clientes pueden revisar y responder cotizaciones; administración dispone de formularios de recepción, registro de clientes/vehículos, inspecciones, cotizaciones y un POS inicial.
 - Preparación de despliegue: PostgreSQL/psycopg, CORS configurable, bootstrap admin para producción y compilación Flutter Web para Vercel.
+- Migraciones Alembic ejecutadas antes de cada despliegue Railway. La primera revisión adopta instalaciones existentes sin borrar sus datos y crea las tablas nuevas.
+- Validación y normalización de RUT chileno, patente y VIN; rechazo de kilometrajes negativos y duplicados de RUT, correo, patente, VIN y SKU.
+- Permisos explícitos para administración y equipo en las operaciones críticas, además del aislamiento del portal del cliente.
+- Recepción digital con combustible, daños visibles, accesorios, observaciones y registro de conformidad.
+- Plantillas configurables de inspección. La instalación incluye mantención preventiva, mecánica rápida y scanner LAUNCH.
+- Resultados de inspección editables: no inspeccionado, normal, observación, falla y no aplica.
+- Fotografías, imágenes y PDF asociados a una orden, capturables desde cámara, galería o selector de archivos en Flutter.
+- Informe consolidado de inspección para el equipo y el cliente, con recepción, resumen de resultados, evidencias e informes LAUNCH asociados.
+- Pruebas automatizadas del backend para validaciones, permisos y el flujo completo de inspección.
 
 ## Integraciones aún por conectar
 
@@ -22,12 +31,12 @@
 - **Gmail y Drive:** aún no hay autorización OAuth ni importador automático. El flujo manual de carga PDF ya funciona; la automatización podrá leer una etiqueta Gmail dedicada o una carpeta Drive elegida.
 - **Google Calendar:** las citas se guardan en la aplicación; `sync_status` queda pendiente. Todavía no se sincronizan eventos con la agenda real.
 - **Asistente IA:** la estructura conserva configuración de proveedor, pero no se envían datos a un modelo. Falta elegir proveedor y definir las herramientas por rol.
-- **Móvil:** la app Flutter es una base de acceso y consulta. Faltan formularios de operación, POS visual, inspección guiada y experiencia móvil completa por perfil.
+- **Móvil:** ya incluye recepción, listas guiadas, edición de resultados, cámara/archivos y resumen para el cliente. Falta generar un documento PDF final descargable, trabajo sin conexión y ampliar los formularios operativos restantes.
 
 ## Secuencia recomendada
 
 1. Acordar el flujo tributario y el tipo de integración de Mercado Pago.
-2. Agregar listas de inspección predefinidas, edición de datos de productos, adjuntos de fotografías desde móvil y el resto de formularios operativos; ampliar el POS con servicios y documentos tributarios.
+2. Generar el documento final de inspección, agregar firma avanzada si el taller la requiere, edición de productos y ampliar el POS con servicios y documentos tributarios.
 3. Autorizar Google por OAuth con permisos mínimos; importar reportes del scanner y sincronizar calendario/correos.
 4. Agregar el asistente IA con herramientas de solo lectura primero y confirmación explícita para acciones.
-5. Migrar a PostgreSQL, configurar almacenamiento protegido y desplegar; agregar migraciones antes de producción.
+5. Mover evidencias a almacenamiento de objetos protegido cuando aumente el volumen y definir copia de seguridad y retención.

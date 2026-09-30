@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lubricentro.db"
     upload_dir: str = "./uploads"
     max_upload_bytes: int = 15_000_000
+    max_evidence_bytes: int = 20_000_000
     jwt_secret: str = "development-only-change-me"
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None
