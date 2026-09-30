@@ -35,6 +35,7 @@
 - Las asignaciones se guardan en una tabla independiente de órdenes para que la migración sea aditiva y mantenga las órdenes ya existentes. La API aplica los permisos: solo administración asigna, mientras cada mecánico solo consulta su propia bandeja.
 - Panel principal de administración con órdenes activas o atrasadas, citas y solicitudes del día, alertas de stock, cotizaciones pendientes y ventas cobradas. Cada indicador abre el módulo operativo correspondiente.
 - Administración puede seleccionar el modelo del asistente desde Integraciones. Gudex consulta los modelos disponibles para la cuenta configurada, filtra los compatibles con Responses y salida JSON estructurada, y conserva la selección sin exponer la clave de API.
+- CRUD administrativo ampliado: usuarios, clientes, vehículos, órdenes, productos, citas, cotizaciones en borrador, inspecciones e informes scanner cuentan con rutas de creación, lectura, modificación y eliminación o archivo según su trazabilidad. Los productos se archivan, las citas y órdenes con historial se cancelan y los registros que tienen dependencias no se borran físicamente.
 
 ## Integraciones aún por conectar
 

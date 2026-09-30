@@ -17,6 +17,13 @@ class UserCreate(SQLModel):
     customer_id: Optional[int] = None
 
 
+class UserUpdate(SQLModel):
+    full_name: Optional[str] = None
+    role: Optional[UserRole] = None
+    active: Optional[bool] = None
+    customer_id: Optional[int] = None
+
+
 class PasswordChange(SQLModel):
     current_password: str
     new_password: str
@@ -40,6 +47,15 @@ class AppointmentCreate(SQLModel):
     ends_at: datetime
     service_type: str
     notes: Optional[str] = None
+
+
+class AppointmentUpdate(SQLModel):
+    vehicle_id: Optional[int] = None
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    service_type: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
 
 
 class CustomerCreate(SQLModel):
@@ -66,6 +82,10 @@ class CustomerCreate(SQLModel):
     @classmethod
     def clean_email(cls, value: str | None) -> str | None:
         return value.strip().lower() if value and value.strip() else None
+
+
+class CustomerUpdate(CustomerCreate):
+    full_name: Optional[str] = None
 
 
 class CustomerPortalAccessCreate(CustomerCreate):
@@ -120,6 +140,18 @@ class VehicleCreate(SQLModel):
         return value
 
 
+class VehicleUpdate(SQLModel):
+    customer_id: Optional[int] = None
+    plate: Optional[str] = None
+    vin: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year: Optional[int] = None
+    engine: Optional[str] = None
+    current_mileage_km: Optional[int] = None
+    notes: Optional[str] = None
+
+
 class WorkOrderCreate(SQLModel):
     customer_id: int
     vehicle_id: int
@@ -143,6 +175,20 @@ class WorkOrderUpdate(SQLModel):
     diagnosis: Optional[str] = None
     technician_name: Optional[str] = None
     total_clp: Optional[int] = None
+    mileage_km: Optional[int] = None
+    reported_symptoms: Optional[str] = None
+    initial_notes: Optional[str] = None
+
+
+class ProductUpdate(SQLModel):
+    sku: Optional[str] = None
+    name: Optional[str] = None
+    category: Optional[str] = None
+    unit: Optional[str] = None
+    minimum_quantity: Optional[float] = None
+    cost_clp: Optional[int] = None
+    price_clp: Optional[int] = None
+    active: Optional[bool] = None
 
 
 class WorkOrderAssignmentUpdate(SQLModel):

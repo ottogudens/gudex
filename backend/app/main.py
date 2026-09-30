@@ -22,8 +22,8 @@ from app.models import (
     StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus,
 )
 from app.schemas import (
-    AppointmentCreate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
-    PasswordChange, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, VehicleCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate,
+    AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
+    PasswordChange, ProductUpdate, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate,
 )
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
@@ -150,6 +150,37 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(user)
     return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "active": user.active}
+
+
+@app.get("/api/v1/users", dependencies=[Depends(require_admin)])
+def list_users(session: Session = Depends(get_session)):
+    return [{"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role,
+             "customer_id": user.customer_id, "active": user.active, "created_at": user.created_at}
+            for user in session.exec(select(User).order_by(User.full_name)).all()]
+
+
+@app.patch("/api/v1/users/{user_id}", dependencies=[Depends(require_admin)])
+def update_user(user_id: int, data: UserUpdate, request: Request, session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+    changes = data.model_dump(exclude_unset=True)
+    if user.email == request.state.user_email and changes.get("active") is False:
+        raise HTTPException(409, "No puedes desactivar tu propia cuenta")
+    if "customer_id" in changes and changes["customer_id"] and not session.get(Customer, changes["customer_id"]):
+        raise HTTPException(422, "Cliente no encontrado")
+    for key, value in changes.items():
+        setattr(user, key, value)
+    if user.role != UserRole.customer:
+        user.customer_id = None
+    user.token_version += 1
+    session.add(user); session.commit(); session.refresh(user)
+    return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "customer_id": user.customer_id, "active": user.active}
+
+
+@app.delete("/api/v1/users/{user_id}", dependencies=[Depends(require_admin)])
+def deactivate_user(user_id: int, request: Request, session: Session = Depends(get_session)):
+    return update_user(user_id, UserUpdate(active=False), request, session)
 
 
 def _issue_customer_access_token(session: Session, user: User, customer: Customer, purpose: str,
@@ -305,6 +336,35 @@ def list_customers(q: str | None = None, session: Session = Depends(get_session)
     return session.exec(statement).all()
 
 
+@app.patch("/api/v1/customers/{customer_id}", response_model=Customer, dependencies=[Depends(require_admin)])
+def update_customer(customer_id: int, data: CustomerUpdate, session: Session = Depends(get_session)):
+    customer = session.get(Customer, customer_id)
+    if not customer:
+        raise HTTPException(404, "Cliente no encontrado")
+    changes = data.model_dump(exclude_unset=True)
+    for field in ("rut", "email"):
+        value = changes.get(field)
+        if value and session.exec(select(Customer).where(getattr(Customer, field) == value, Customer.id != customer_id)).first():
+            raise HTTPException(409, f"Ya existe un cliente con ese {field}")
+    for key, value in changes.items():
+        setattr(customer, key, value)
+    session.add(customer); session.commit(); session.refresh(customer)
+    return customer
+
+
+@app.delete("/api/v1/customers/{customer_id}", dependencies=[Depends(require_admin)])
+def delete_customer(customer_id: int, session: Session = Depends(get_session)):
+    customer = session.get(Customer, customer_id)
+    if not customer:
+        raise HTTPException(404, "Cliente no encontrado")
+    if session.exec(select(Vehicle).where(Vehicle.customer_id == customer_id)).first() or session.exec(select(WorkOrder).where(WorkOrder.customer_id == customer_id)).first():
+        raise HTTPException(409, "No se puede eliminar un cliente que tiene vehículos u órdenes; conserva su historial")
+    for user in session.exec(select(User).where(User.customer_id == customer_id)).all():
+        user.active = False; user.token_version += 1; session.add(user)
+    session.delete(customer); session.commit()
+    return {"deleted": True}
+
+
 @app.post("/api/v1/vehicles", response_model=Vehicle, status_code=201, dependencies=[Depends(require_admin)])
 def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session)):
     if not session.get(Customer, data.customer_id):
@@ -328,6 +388,37 @@ def list_vehicles(customer_id: int | None = None, plate: str | None = None, sess
     if plate:
         statement = statement.where(Vehicle.plate.contains(plate.upper()))
     return session.exec(statement).all()
+
+
+@app.patch("/api/v1/vehicles/{vehicle_id}", response_model=Vehicle, dependencies=[Depends(require_admin)])
+def update_vehicle(vehicle_id: int, data: VehicleUpdate, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(404, "Vehículo no encontrado")
+    changes = data.model_dump(exclude_unset=True)
+    if changes.get("customer_id") and not session.get(Customer, changes["customer_id"]):
+        raise HTTPException(422, "Cliente no encontrado")
+    for field in ("plate", "vin"):
+        value = changes.get(field)
+        if value and session.exec(select(Vehicle).where(getattr(Vehicle, field) == value, Vehicle.id != vehicle_id)).first():
+            raise HTTPException(409, f"Ya existe un vehículo con ese {field}")
+    for key, value in changes.items():
+        setattr(vehicle, key, value)
+    session.add(vehicle); session.commit(); session.refresh(vehicle)
+    return vehicle
+
+
+@app.delete("/api/v1/vehicles/{vehicle_id}", dependencies=[Depends(require_admin)])
+def delete_vehicle(vehicle_id: int, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(404, "Vehículo no encontrado")
+    if (session.exec(select(WorkOrder).where(WorkOrder.vehicle_id == vehicle_id)).first()
+            or session.exec(select(ScannerReport).where(ScannerReport.vehicle_id == vehicle_id)).first()
+            or session.exec(select(Appointment).where(Appointment.vehicle_id == vehicle_id)).first()):
+        raise HTTPException(409, "No se puede eliminar un vehículo con historial de trabajo, scanner o citas")
+    session.delete(vehicle); session.commit()
+    return {"deleted": True}
 
 
 def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
@@ -515,6 +606,26 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, se
     return order
 
 
+@app.delete("/api/v1/work-orders/{order_id}", dependencies=[Depends(require_admin)])
+def delete_work_order(order_id: int, session: Session = Depends(get_session)):
+    order = session.get(WorkOrder, order_id)
+    if not order:
+        raise HTTPException(404, "Orden de trabajo no encontrada")
+    has_history = (session.exec(select(Inspection).where(Inspection.work_order_id == order_id)).first()
+                   or session.exec(select(Quote).where(Quote.work_order_id == order_id)).first()
+                   or session.exec(select(ScannerReport).where(ScannerReport.work_order_id == order_id)).first()
+                   or session.exec(select(Sale).where(Sale.work_order_id == order_id)).first())
+    if has_history:
+        order.status = WorkStatus.cancelled
+        session.add(order); session.commit()
+        return {"deleted": False, "cancelled": True, "message": "La orden tiene historial y fue cancelada para conservar trazabilidad"}
+    assignment = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.work_order_id == order_id)).first()
+    if assignment:
+        session.delete(assignment)
+    session.delete(order); session.commit()
+    return {"deleted": True, "cancelled": False}
+
+
 @app.post("/api/v1/work-orders/{order_id}/inspections", response_model=Inspection, status_code=201, dependencies=[Depends(require_staff)])
 def add_inspection(order_id: int, data: InspectionCreate, session: Session = Depends(get_session)):
     if not session.get(WorkOrder, order_id):
@@ -531,6 +642,15 @@ def list_inspections(order_id: int, session: Session = Depends(get_session)):
     if not session.get(WorkOrder, order_id):
         raise HTTPException(404, "Orden de trabajo no encontrada")
     return session.exec(select(Inspection).where(Inspection.work_order_id == order_id)).all()
+
+
+@app.delete("/api/v1/inspections/{inspection_id}", dependencies=[Depends(require_staff)])
+def delete_inspection(inspection_id: int, session: Session = Depends(get_session)):
+    inspection = session.get(Inspection, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "Inspección no encontrada")
+    session.delete(inspection); session.commit()
+    return {"deleted": True}
 
 
 @app.post("/api/v1/work-orders/{order_id}/quotes", response_model=Quote, status_code=201, dependencies=[Depends(require_admin)])
@@ -553,6 +673,17 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
     if not session.get(WorkOrder, order_id):
         raise HTTPException(404, "Orden de trabajo no encontrada")
     return session.exec(select(Quote).where(Quote.work_order_id == order_id).order_by(Quote.created_at.desc())).all()
+
+
+@app.delete("/api/v1/quotes/{quote_id}", dependencies=[Depends(require_admin)])
+def delete_quote(quote_id: int, session: Session = Depends(get_session)):
+    quote = session.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Cotización no encontrada")
+    if quote.status != "draft":
+        raise HTTPException(409, "Solo se pueden eliminar cotizaciones en borrador")
+    session.delete(quote); session.commit()
+    return {"deleted": True}
 
 
 @app.post("/api/v1/quotes/{quote_id}/customer-approval", response_model=Quote, dependencies=[Depends(require_admin)])
@@ -654,6 +785,36 @@ def update_appointment_status(appointment_id: int, status: str, session: Session
     return appointment
 
 
+@app.patch("/api/v1/appointments/{appointment_id}", response_model=Appointment, dependencies=[Depends(require_admin)])
+def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Session = Depends(get_session)):
+    appointment = session.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(404, "Cita no encontrada")
+    changes = data.model_dump(exclude_unset=True)
+    if changes.get("vehicle_id") and (not session.get(Vehicle, changes["vehicle_id"]) or session.get(Vehicle, changes["vehicle_id"]).customer_id != appointment.customer_id):
+        raise HTTPException(422, "El vehículo no pertenece al cliente de la cita")
+    starts_at, ends_at = changes.get("starts_at", appointment.starts_at), changes.get("ends_at", appointment.ends_at)
+    if starts_at != appointment.starts_at or ends_at != appointment.ends_at:
+        ensure_appointment_slot(session, starts_at, ends_at)
+    if changes.get("status") and changes["status"] not in {"requested", "confirmed", "cancelled", "completed"}:
+        raise HTTPException(422, "Estado de cita inválido")
+    for key, value in changes.items():
+        setattr(appointment, key, value)
+    appointment.sync_status = "pending"
+    session.add(appointment); session.commit(); session.refresh(appointment)
+    return appointment
+
+
+@app.delete("/api/v1/appointments/{appointment_id}", dependencies=[Depends(require_admin)])
+def cancel_appointment(appointment_id: int, session: Session = Depends(get_session)):
+    appointment = session.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(404, "Cita no encontrada")
+    appointment.status = "cancelled"; appointment.sync_status = "pending"
+    session.add(appointment); session.commit()
+    return {"deleted": False, "cancelled": True}
+
+
 @app.post("/api/v1/portal/appointments", response_model=Appointment, status_code=201)
 def request_appointment(data: AppointmentCreate, request: Request, session: Session = Depends(get_session)):
     customer_id = request.state.customer_id
@@ -730,6 +891,31 @@ def list_products(low_stock: bool = False, session: Session = Depends(get_sessio
     statement = select(Product).where(Product.active == True).order_by(Product.name)  # noqa: E712
     products = session.exec(statement).all()
     return [p for p in products if p.stock_quantity <= p.minimum_quantity] if low_stock else products
+
+
+@app.patch("/api/v1/products/{product_id}", response_model=Product, dependencies=[Depends(require_admin)])
+def update_product(product_id: int, data: ProductUpdate, session: Session = Depends(get_session)):
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(404, "Producto no encontrado")
+    changes = data.model_dump(exclude_unset=True)
+    sku = changes.get("sku")
+    if sku and session.exec(select(Product).where(Product.sku == sku, Product.id != product_id)).first():
+        raise HTTPException(409, "Ya existe un producto con ese SKU")
+    for key, value in changes.items():
+        setattr(product, key, value)
+    session.add(product); session.commit(); session.refresh(product)
+    return product
+
+
+@app.delete("/api/v1/products/{product_id}", dependencies=[Depends(require_admin)])
+def archive_product(product_id: int, session: Session = Depends(get_session)):
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(404, "Producto no encontrado")
+    product.active = False
+    session.add(product); session.commit()
+    return {"deleted": False, "archived": True}
 
 
 @app.get("/api/v1/products/{product_id}/stock-movements", response_model=list[StockMovement])
@@ -812,6 +998,16 @@ def download_scanner_report(report_id: int, session: Session = Depends(get_sessi
     if not report or not Path(report.storage_path).is_file():
         raise HTTPException(404, "Informe no encontrado")
     return FileResponse(report.storage_path, media_type="application/pdf", filename=report.filename)
+
+
+@app.delete("/api/v1/scanner-reports/{report_id}", dependencies=[Depends(require_admin)])
+def delete_scanner_report(report_id: int, session: Session = Depends(get_session)):
+    report = session.get(ScannerReport, report_id)
+    if not report:
+        raise HTTPException(404, "Informe no encontrado")
+    Path(report.storage_path).unlink(missing_ok=True)
+    session.delete(report); session.commit()
+    return {"deleted": True}
 
 
 @app.post("/api/v1/sales", status_code=201, dependencies=[Depends(require_admin)])
