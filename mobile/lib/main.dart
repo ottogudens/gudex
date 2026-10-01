@@ -1458,8 +1458,8 @@ class _InventoryScreenState extends State<_InventoryScreen> {
     final category = TextEditingController(text: product['category']?.toString() ?? '');
     final unit = TextEditingController(text: product['unit']?.toString() ?? 'unidad');
     final minimum = TextEditingController(text: _quantity(product['minimum_quantity']).toString());
-    final cost = TextEditingController(text: _money(product['cost_clp']).toString());
-    final price = TextEditingController(text: _money(product['price_clp']).toString());
+    final cost = TextEditingController(text: _amount(product['cost_clp']).toString());
+    final price = TextEditingController(text: _amount(product['price_clp']).toString());
     try {
       final data = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => AlertDialog(
         title: const Text('Editar producto'),
