@@ -36,6 +36,8 @@
 - Panel principal de administración con órdenes activas o atrasadas, citas y solicitudes del día, alertas de stock, cotizaciones pendientes y ventas cobradas. Cada indicador abre el módulo operativo correspondiente.
 - Administración puede seleccionar el modelo del asistente desde Integraciones. Gudex consulta los modelos disponibles para la cuenta configurada, filtra los compatibles con Responses y salida JSON estructurada, y conserva la selección sin exponer la clave de API.
 - CRUD administrativo ampliado: usuarios, clientes, vehículos, órdenes, productos, citas, cotizaciones en borrador, inspecciones e informes scanner cuentan con rutas de creación, lectura, modificación y eliminación o archivo según su trazabilidad. Los productos se archivan, las citas y órdenes con historial se cancelan y los registros que tienen dependencias no se borran físicamente.
+- Flutter: clientes y vehículos ya pueden editarse y eliminarse desde sus menús de acciones; el backend conserva las restricciones de integridad y devuelve un mensaje si existe historial asociado. El inventario permite editar productos y archivarlos sin borrar sus movimientos.
+- Preferencia visual: toda la aplicación usa los textos visibles en español y traduce estados, perfiles y nombres de campos recibidos desde la API. El modo claro/oscuro se aplica globalmente, se guarda en el dispositivo y está disponible desde el inicio de sesión, activación del portal y la aplicación autenticada.
 
 ## Integraciones aún por conectar
 

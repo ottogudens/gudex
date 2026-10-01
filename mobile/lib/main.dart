@@ -10,7 +10,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:printing/printing.dart';
 
-void main() => runApp(const LubricentroApp());
+final _themeMode = ValueNotifier<ThemeMode>(ThemeMode.light);
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  _themeMode.value = await _storage.read(key: 'theme_mode') == 'dark' ? ThemeMode.dark : ThemeMode.light;
+  runApp(const LubricentroApp());
+}
 
 abstract final class GudexColors {
   static const ink = Color(0xFF242424);
@@ -25,6 +31,58 @@ const _storage = FlutterSecureStorage();
 // La aplicación usa exclusivamente la API pública de Gudex. Las credenciales
 // de PostgreSQL pertenecen solo al backend y nunca deben llegar al cliente.
 const _apiBaseUrl = 'https://bknd.gudex.cl';
+
+Future<void> toggleGudexTheme() async {
+  final next = _themeMode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+  _themeMode.value = next;
+  await _storage.write(key: 'theme_mode', value: next == ThemeMode.dark ? 'dark' : 'light');
+}
+
+IconButton gudexThemeButton(BuildContext context) => IconButton(
+      tooltip: Theme.of(context).brightness == Brightness.dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro',
+      icon: Icon(Theme.of(context).brightness == Brightness.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+      onPressed: toggleGudexTheme,
+    );
+
+const _statusLabels = <String, String>{
+  'received': 'Recibida', 'inspecting': 'En inspección', 'quoted': 'Cotizada',
+  'awaiting_approval': 'Esperando autorización', 'quote_rejected': 'Cotización rechazada',
+  'approved': 'Aprobada', 'in_progress': 'En proceso', 'ready': 'Lista',
+  'delivered': 'Entregada', 'cancelled': 'Cancelada', 'draft': 'Borrador',
+  'sent': 'Enviada', 'rejected': 'Rechazada', 'paid': 'Pagada', 'open': 'Abierta',
+  'requested': 'Solicitada', 'confirmed': 'Confirmada', 'completed': 'Completada',
+  'pending': 'Pendiente', 'pending_external': 'Pago externo pendiente',
+  'recorded': 'Registrado', 'normal': 'Normal', 'observation': 'Observación',
+  'failed': 'Falla', 'not_inspected': 'No inspeccionado', 'not_applicable': 'No aplica',
+  'active': 'Activo', 'inactive': 'Inactivo', 'cash': 'Efectivo',
+  'card': 'Tarjeta', 'mercado_pago': 'Mercado Pago',
+};
+
+const _fieldLabels = <String, String>{
+  'service_type': 'Tipo de servicio', 'starts_at': 'Inicio', 'ends_at': 'Fin',
+  'created_at': 'Creado', 'updated_at': 'Actualizado', 'stock_quantity': 'Stock',
+  'price_clp': 'Precio', 'cost_clp': 'Costo', 'payment_method': 'Medio de pago',
+  'full_name': 'Nombre', 'phone': 'Teléfono', 'email': 'Correo', 'plate': 'Patente',
+  'make': 'Marca', 'model': 'Modelo', 'year': 'Año', 'current_mileage_km': 'Kilometraje',
+  'reported_symptoms': 'Síntomas informados', 'diagnosis': 'Diagnóstico', 'notes': 'Notas',
+  'technician_name': 'Técnico', 'status': 'Estado', 'role': 'Perfil',
+};
+
+String spanishStatus(dynamic value) {
+  final status = value?.toString() ?? '';
+  return _statusLabels[status] ?? status.replaceAll('_', ' ');
+}
+
+String spanishField(String key) => _fieldLabels[key] ?? key.replaceAll('_', ' ');
+
+String spanishRole(dynamic value) {
+  switch (value?.toString()) {
+    case 'admin': return 'Administración';
+    case 'mechanic': return 'Mecánico';
+    case 'customer': return 'Cliente';
+    default: return value?.toString() ?? '';
+  }
+}
 
 class ApiClient {
   ApiClient(this.baseUrl, {this.token});
@@ -177,7 +235,9 @@ class LubricentroApp extends StatelessWidget {
   const LubricentroApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => ValueListenableBuilder<ThemeMode>(
+        valueListenable: _themeMode,
+        builder: (context, themeMode, _) => MaterialApp(
         title: 'Gudex',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
@@ -246,8 +306,31 @@ class LubricentroApp extends StatelessWidget {
             )),
           ),
         ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: GudexColors.primary, brightness: Brightness.dark).copyWith(
+            primary: const Color(0xFFFF6B6B),
+            secondary: GudexColors.secondary,
+            surface: const Color(0xFF1D1D1F),
+          ),
+          useMaterial3: true,
+          scaffoldBackgroundColor: const Color(0xFF121212),
+          appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF121212), surfaceTintColor: Colors.transparent, elevation: 0, scrolledUnderElevation: 0),
+          cardTheme: CardThemeData(
+            color: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, elevation: 0,
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF3A3A3C))),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true, fillColor: const Color(0xFF29292C),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          dialogTheme: DialogThemeData(backgroundColor: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+          navigationBarTheme: const NavigationBarThemeData(backgroundColor: Color(0xFF1D1D1F), indicatorColor: Color(0xFF643333)),
+        ),
+        themeMode: themeMode,
         home: const SessionGate(),
-      );
+      ));
 }
 
 class SessionGate extends StatefulWidget {
@@ -299,7 +382,9 @@ class _SessionGateState extends State<SessionGate> {
   }
 
   Future<void> _signOut() async {
+    final themePreference = await _storage.read(key: 'theme_mode');
     await _storage.deleteAll();
+    if (themePreference != null) await _storage.write(key: 'theme_mode', value: themePreference);
     if (!mounted) return;
     setState(() {
       _token = null;
@@ -347,7 +432,7 @@ class _CustomerAccessPageState extends State<CustomerAccessPage> {
     finally { if (mounted) setState(() => _busy = false); }
   }
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(widget.passwordReset ? 'Nueva contraseña' : 'Activar acceso')), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 460), child: ListView(padding: const EdgeInsets.all(24), children: [
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(widget.passwordReset ? 'Nueva contraseña' : 'Activar acceso'), actions: [gudexThemeButton(context)]), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 460), child: ListView(padding: const EdgeInsets.all(24), children: [
     Text(widget.passwordReset ? 'Crea una nueva contraseña para tu portal.' : 'Crea una contraseña para acceder a tu portal Gudex.'), const SizedBox(height: 18),
     TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña (12 caracteres mínimo)')),
     const SizedBox(height: 12), TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña')),
@@ -391,6 +476,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(actions: [gudexThemeButton(context)]),
         body: DecoratedBox(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -526,7 +612,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Hola, ${widget.name}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: GudexColors.ink)),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)),
               Text(_roleName(widget.role), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFF637986))),
             ])),
             if (constraints.maxWidth >= 600) _RoleChip(role: widget.role),
@@ -560,6 +646,15 @@ class _HomePageState extends State<HomePage> {
     )));
     return Scaffold(
       appBar: AppBar(title: Image.asset('assets/gudex-logo.png', height: 34, width: 126, fit: BoxFit.contain, semanticLabel: 'Gudex Lubricentro Serviteca'), actions: [
+        IconButton(
+          tooltip: Theme.of(context).brightness == Brightness.dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro',
+          icon: Icon(Theme.of(context).brightness == Brightness.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+          onPressed: () async {
+            final next = Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark;
+            _themeMode.value = next;
+            await _storage.write(key: 'theme_mode', value: next == ThemeMode.dark ? 'dark' : 'light');
+          },
+        ),
         IconButton(tooltip: 'Asistente IA', icon: const Icon(Icons.auto_awesome), onPressed: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => _AssistantScreen(api: api, role: widget.role)))),
         if (widget.role == 'admin') IconButton(tooltip: 'Integraciones', icon: const Icon(Icons.link), onPressed: () => Navigator.push(context,
@@ -734,7 +829,7 @@ class _AssistantScreenState extends State<_AssistantScreen> {
             for (final raw in (_contextType == 'work_order' ? _orders : _vehicles))
               DropdownMenuItem<int>(value: raw['id'] as int,
                 child: Text(_contextType == 'work_order'
-                    ? '${raw['code'] ?? 'Orden'} · ${raw['status']?.toString().replaceAll('_', ' ') ?? ''}'
+                    ? '${raw['code'] ?? 'Orden'} · ${spanishStatus(raw['status'])}'
                     : '${raw['plate'] ?? ''} · ${raw['make'] ?? ''} ${raw['model'] ?? ''}')),
           ], onChanged: (value) => setState(() => _selectedContextId = value)),
         if ((_contextType == 'work_order' ? _orders : _vehicles).isEmpty)
@@ -1341,9 +1436,64 @@ class _InventoryScreenState extends State<_InventoryScreen> {
       title: Text('${product['name'] ?? 'Producto'}'),
       subtitle: Text('${product['sku'] == null ? '' : '${product['sku']} · '}${product['category'] == null ? '' : '${product['category']} · '}Stock ${_qtyText(stock)} ${product['unit'] ?? 'unidad'} (mín. ${_qtyText(minimum)})\nCosto ${_amount(product['cost_clp'])} · Venta ${_amount(product['price_clp'])} CLP${low ? ' · STOCK BAJO' : ''}'),
       isThreeLine: true,
-      trailing: widget.canManage ? IconButton(onPressed: () => _adjustStock(product), icon: const Icon(Icons.tune), tooltip: 'Ajustar stock') : null,
+      trailing: widget.canManage ? Row(mainAxisSize: MainAxisSize.min, children: [
+        IconButton(onPressed: () => _adjustStock(product), icon: const Icon(Icons.tune), tooltip: 'Ajustar stock'),
+        PopupMenuButton<String>(
+          tooltip: 'Acciones del producto',
+          onSelected: (value) { if (value == 'edit') _editProduct(product); else _archiveProduct(product); },
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+            PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Archivar'))),
+          ],
+        ),
+      ]) : null,
       onTap: () => _showMovements(product),
     ));
+  }
+
+  Future<void> _editProduct(Map<String, dynamic> product) async {
+    final form = GlobalKey<FormState>();
+    final name = TextEditingController(text: product['name']?.toString() ?? '');
+    final sku = TextEditingController(text: product['sku']?.toString() ?? '');
+    final category = TextEditingController(text: product['category']?.toString() ?? '');
+    final unit = TextEditingController(text: product['unit']?.toString() ?? 'unidad');
+    final minimum = TextEditingController(text: _quantity(product['minimum_quantity']).toString());
+    final cost = TextEditingController(text: _money(product['cost_clp']).toString());
+    final price = TextEditingController(text: _money(product['price_clp']).toString());
+    try {
+      final data = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Editar producto'),
+        content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre *'), validator: (v) => v == null || v.trim().isEmpty ? 'Ingresa el nombre' : null),
+          const SizedBox(height: 10), TextFormField(controller: sku, decoration: const InputDecoration(labelText: 'SKU')),
+          const SizedBox(height: 10), TextFormField(controller: category, decoration: const InputDecoration(labelText: 'Categoría')),
+          const SizedBox(height: 10), TextFormField(controller: unit, decoration: const InputDecoration(labelText: 'Unidad *'), validator: (v) => v == null || v.trim().isEmpty ? 'Ingresa la unidad' : null),
+          const SizedBox(height: 10), TextFormField(controller: minimum, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Stock mínimo'), validator: _validQuantity),
+          const SizedBox(height: 10), TextFormField(controller: cost, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Costo unitario (CLP)'), validator: _validMoney),
+          const SizedBox(height: 10), TextFormField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Precio de venta (CLP)'), validator: _validMoney),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () {
+          if (!form.currentState!.validate()) return;
+          Navigator.pop(context, {'name': name.text.trim(), 'sku': sku.text.trim(), 'category': category.text.trim(), 'unit': unit.text.trim(), 'minimum_quantity': double.parse(minimum.text.trim().replaceAll(',', '.')), 'cost_clp': int.parse(cost.text.trim()), 'price_clp': int.parse(price.text.trim())});
+        }, child: const Text('Guardar cambios'))],
+      ));
+      if (data == null) return;
+      await widget.api.patchJson('/api/v1/products/' + product['id'].toString(), data);
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto actualizado')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally { name.dispose(); sku.dispose(); category.dispose(); unit.dispose(); minimum.dispose(); cost.dispose(); price.dispose(); }
+  }
+
+  Future<void> _archiveProduct(Map<String, dynamic> product) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Archivar producto'), content: Text('¿Archivar ${product['name']}? Ya no aparecerá en el inventario activo.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Archivar'))],
+    ));
+    if (confirmed != true) return;
+    try { await widget.api.delete('/api/v1/products/' + product['id'].toString()); await _refresh(); if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto archivado'))); }
+    catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
   }
 }
 
@@ -1519,6 +1669,113 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     }
   }
 
+  Future<void> _editCustomer(Map<String, dynamic> customer) async {
+    final form = GlobalKey<FormState>();
+    final name = TextEditingController(text: customer['full_name']?.toString() ?? '');
+    final rut = TextEditingController(text: customer['rut']?.toString() ?? '');
+    final phone = TextEditingController(text: customer['phone']?.toString() ?? '');
+    final email = TextEditingController(text: customer['email']?.toString() ?? '');
+    final notes = TextEditingController(text: customer['notes']?.toString() ?? '');
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Editar cliente'),
+          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo *'), validator: (value) => value == null || value.trim().length < 2 ? 'Ingresa el nombre' : null),
+            const SizedBox(height: 10), TextFormField(controller: rut, decoration: const InputDecoration(labelText: 'RUT')),
+            const SizedBox(height: 10), TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono')),
+            const SizedBox(height: 10), TextFormField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
+            const SizedBox(height: 10), TextFormField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Notas')),
+          ]))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(context, {'full_name': name.text.trim(), 'rut': rut.text.trim(), 'phone': phone.text.trim(), 'email': email.text.trim(), 'notes': notes.text.trim()});
+            }, child: const Text('Guardar cambios')),
+          ],
+        ),
+      );
+      if (data == null) return;
+      await widget.api.patchJson('/api/v1/customers/' + customer['id'].toString(), data);
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cliente actualizado')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      name.dispose(); rut.dispose(); phone.dispose(); email.dispose(); notes.dispose();
+    }
+  }
+
+  Future<void> _editVehicle(Map<String, dynamic> vehicle) async {
+    final form = GlobalKey<FormState>();
+    final plate = TextEditingController(text: vehicle['plate']?.toString() ?? '');
+    final make = TextEditingController(text: vehicle['make']?.toString() ?? '');
+    final model = TextEditingController(text: vehicle['model']?.toString() ?? '');
+    final year = TextEditingController(text: vehicle['year']?.toString() ?? '');
+    final vin = TextEditingController(text: vehicle['vin']?.toString() ?? '');
+    final engine = TextEditingController(text: vehicle['engine']?.toString() ?? '');
+    final mileage = TextEditingController(text: vehicle['current_mileage_km']?.toString() ?? '');
+    final notes = TextEditingController(text: vehicle['notes']?.toString() ?? '');
+    int customerId = vehicle['customer_id'] as int;
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, updateDialog) => AlertDialog(
+          title: const Text('Editar vehículo'),
+          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<int>(value: customerId, decoration: const InputDecoration(labelText: 'Cliente *'),
+              items: _customers.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text(item['full_name'].toString()))).toList(),
+              onChanged: (value) { if (value != null) updateDialog(() => customerId = value); }),
+            const SizedBox(height: 10),
+            TextFormField(controller: plate, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Patente *'), validator: (value) => value == null || value.trim().isEmpty ? 'Ingresa la patente' : null),
+            const SizedBox(height: 10), TextFormField(controller: make, decoration: const InputDecoration(labelText: 'Marca *'), validator: (value) => value == null || value.trim().isEmpty ? 'Ingresa la marca' : null),
+            const SizedBox(height: 10), TextFormField(controller: model, decoration: const InputDecoration(labelText: 'Modelo *'), validator: (value) => value == null || value.trim().isEmpty ? 'Ingresa el modelo' : null),
+            const SizedBox(height: 10), TextFormField(controller: year, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Año'), validator: (value) => value == null || value.trim().isEmpty || int.tryParse(value.trim()) != null ? null : 'Ingresa un año válido'),
+            const SizedBox(height: 10), TextFormField(controller: vin, decoration: const InputDecoration(labelText: 'VIN')),
+            const SizedBox(height: 10), TextFormField(controller: engine, decoration: const InputDecoration(labelText: 'Motor')),
+            const SizedBox(height: 10), TextFormField(controller: mileage, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Kilometraje'), validator: (value) => value == null || value.trim().isEmpty || int.tryParse(value.trim()) != null ? null : 'Ingresa un kilometraje válido'),
+            const SizedBox(height: 10), TextFormField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Notas')),
+          ]))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(context, {'customer_id': customerId, 'plate': plate.text.trim().toUpperCase(), 'make': make.text.trim(), 'model': model.text.trim(), 'year': int.tryParse(year.text.trim()), 'vin': vin.text.trim().toUpperCase(), 'engine': engine.text.trim(), 'current_mileage_km': int.tryParse(mileage.text.trim()), 'notes': notes.text.trim()});
+            }, child: const Text('Guardar cambios')),
+          ],
+        )),
+      );
+      if (data == null) return;
+      await widget.api.patchJson('/api/v1/vehicles/' + vehicle['id'].toString(), data);
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vehículo actualizado')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      plate.dispose(); make.dispose(); model.dispose(); year.dispose(); vin.dispose(); engine.dispose(); mileage.dispose(); notes.dispose();
+    }
+  }
+
+  Future<void> _deleteRecord(Map<String, dynamic> item, {required bool vehicle}) async {
+    final type = vehicle ? 'vehículo' : 'cliente';
+    final label = vehicle ? item['plate'].toString() : item['full_name'].toString();
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: Text('Eliminar ' + type),
+      content: Text('¿Eliminar ' + label + '? Esta acción no se puede deshacer. Si tiene historial asociado, Gudex impedirá la eliminación.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar'))],
+    ));
+    if (confirmed != true) return;
+    try {
+      await widget.api.delete('/api/v1/' + (vehicle ? 'vehicles' : 'customers') + '/' + item['id'].toString());
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((vehicle ? 'Vehículo' : 'Cliente') + ' eliminado')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    }
+  }
+
   Future<void> _createWorkOrder() async {
     if (_customers.isEmpty || _vehicles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registra primero un cliente y su vehículo.')));
@@ -1659,6 +1916,15 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
       leading: const CircleAvatar(child: Icon(Icons.person_outline)),
       title: Text('${item['full_name'] ?? 'Cliente'}'),
       subtitle: Text([item['phone'], item['email'], '$owned vehículo(s)'].where((value) => value != null && '$value'.isNotEmpty).join(' · ')),
+      trailing: widget.role != 'admin' ? null : PopupMenuButton<String>(
+        tooltip: 'Acciones del cliente',
+        onSelected: (value) { if (value == 'edit') _editCustomer(item); else _deleteRecord(item, vehicle: false); },
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+          PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Eliminar'))),
+        ],
+      ),
+      onTap: widget.role == 'admin' ? () => _editCustomer(item) : null,
     ));
   }
 
@@ -1669,7 +1935,19 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
       leading: const CircleAvatar(child: Icon(Icons.directions_car_outlined)),
       title: Text('${item['plate']} · ${item['make']} ${item['model']}'),
       subtitle: Text('$customerName${item['year'] == null ? '' : ' · ${item['year']}'}${item['current_mileage_km'] == null ? '' : ' · ${item['current_mileage_km']} km'}'),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: widget.role != 'admin' ? const Icon(Icons.chevron_right) : PopupMenuButton<String>(
+        tooltip: 'Acciones del vehículo',
+        onSelected: (value) {
+          if (value == 'edit') _editVehicle(item);
+          else if (value == 'delete') _deleteRecord(item, vehicle: true);
+          else Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false)));
+        },
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history), title: Text('Ver historial'))),
+          PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+          PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Eliminar'))),
+        ],
+      ),
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false))),
     ));
   }
@@ -1682,7 +1960,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     return Card(child: ListTile(
       leading: const CircleAvatar(child: Icon(Icons.build_outlined)),
       title: Text('${item['code'] ?? 'Orden'} · $vehicleLabel'),
-      subtitle: Text('$customerLabel\nEstado: ${'${item['status'] ?? 'received'}'.replaceAll('_', ' ')}${item['technician_name'] == null ? '' : ' · ${item['technician_name']}'}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
+      subtitle: Text('$customerLabel\nEstado: ${spanishStatus(item['status'] ?? 'received')}${item['technician_name'] == null ? '' : ' · ${item['technician_name']}'}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
       isThreeLine: true,
       trailing: const Icon(Icons.chevron_right),
       onTap: () => _openOrder(item),
@@ -2237,7 +2515,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
           DropdownButtonFormField<String>(
             value: _statuses.contains(_status) ? _status : 'received',
             decoration: const InputDecoration(labelText: 'Estado del trabajo'),
-            items: _statuses.map((value) => DropdownMenuItem(value: value, child: Text(value.replaceAll('_', ' ')))).toList(),
+            items: _statuses.map((value) => DropdownMenuItem(value: value, child: Text(spanishStatus(value)))).toList(),
             onChanged: (value) { if (value != null) setState(() => _status = value); },
           ),
           const SizedBox(height: 12),
@@ -2322,7 +2600,7 @@ class _WorkOrderDetailsState extends State<_WorkOrderDetails> {
                 return Card(child: ListTile(
                   leading: Icon(isDraft ? Icons.edit_note : Icons.request_quote_outlined),
                   title: Text('${quote['description']}'),
-                  subtitle: Text('${_currency(amount)} · ${'${quote['status'] ?? 'draft'}'.replaceAll('_', ' ')}${quote['notes'] == null ? '' : '\n${quote['notes']}'}'),
+                  subtitle: Text('${_currency(amount)} · ${spanishStatus(quote['status'] ?? 'draft')}${quote['notes'] == null ? '' : '\n${quote['notes']}'}'),
                   isThreeLine: quote['notes'] != null,
                   trailing: isDraft ? IconButton(onPressed: _saving ? null : () => _publishQuote(quote), icon: const Icon(Icons.send_outlined), tooltip: 'Publicar para cliente') : null,
                 ));
@@ -2656,7 +2934,7 @@ class _PosScreenState extends State<_PosScreen> {
           ..._sales.take(10).map((sale) => Card(child: ListTile(
             leading: const Icon(Icons.receipt_long_outlined, color: GudexColors.primary),
             title: Text('${sale['receipt_code']} · ${_formatMoney(_money(sale['total_clp']))}'),
-            subtitle: Text('Estado: ${sale['status']} · ${sale['created_at'] ?? ''}'),
+      subtitle: Text('Estado: ${spanishStatus(sale['status'])} · ${sale['created_at'] ?? ''}'),
             trailing: IconButton(tooltip: 'Imprimir / guardar comprobante PDF', icon: const Icon(Icons.picture_as_pdf_outlined),
               onPressed: () => _printSaleReceipt(sale)),
           ))),
@@ -2709,7 +2987,7 @@ class _RecordCard extends StatelessWidget {
   String _displayValue(String key, dynamic value) {
     if (value == null || value is Map || value is List) return '';
     if (key.endsWith('_clp')) return '\$${value.toString()}';
-    return value.toString().replaceAll('_', ' ');
+    return spanishStatus(value);
   }
 
   @override
@@ -2725,17 +3003,17 @@ class _RecordCard extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: GudexColors.ink))),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface))),
           if (statusStyle != null) ...[
             const SizedBox(width: 8),
             Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
               decoration: BoxDecoration(color: statusStyle.$1, borderRadius: BorderRadius.circular(30)),
-              child: Text(status!.replaceAll('_', ' '), maxLines: 1, overflow: TextOverflow.ellipsis,
+              child: Text(spanishStatus(status), maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: statusStyle.$2, fontSize: 10, fontWeight: FontWeight.w700)))),
           ],
         ]),
         for (final entry in entries)
-          Padding(padding: const EdgeInsets.only(top: 6), child: Text('${entry.key.replaceAll('_', ' ')}: ${_displayValue(entry.key, entry.value)}',
+          Padding(padding: const EdgeInsets.only(top: 6), child: Text('${spanishField(entry.key)}: ${_displayValue(entry.key, entry.value)}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: const Color(0xFF536B78)))),
         if (onApprove != null || onReject != null || onOpen != null) ...[
           const SizedBox(height: 12),
@@ -2812,7 +3090,7 @@ class _UsersScreenState extends State<_UsersScreen> {
     if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
     if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
     final users = snapshot.data ?? [];
-    return Stack(children: [RefreshIndicator(onRefresh: () async => setState(() => _users = _load()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 90), children: users.map((user) => Card(child: ListTile(leading: CircleAvatar(child: Icon(user['role'] == 'admin' ? Icons.admin_panel_settings_outlined : Icons.handyman_outlined)), title: Text(user['full_name'].toString()), subtitle: Text(user['email'].toString() + ' · ' + user['role'].toString() + (user['active'] == true ? '' : ' · inactivo')), trailing: const Icon(Icons.edit_outlined), onTap: () => _edit(user)))).toList())), Positioned(right: 18, bottom: 18, child: FloatingActionButton.extended(onPressed: () => _edit(null), icon: const Icon(Icons.person_add_alt_1), label: const Text('Nuevo usuario')))]);
+    return Stack(children: [RefreshIndicator(onRefresh: () async => setState(() => _users = _load()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 90), children: users.map((user) => Card(child: ListTile(leading: CircleAvatar(child: Icon(user['role'] == 'admin' ? Icons.admin_panel_settings_outlined : Icons.handyman_outlined)), title: Text(user['full_name'].toString()), subtitle: Text(user['email'].toString() + ' · ' + spanishRole(user['role']) + (user['active'] == true ? '' : ' · Inactivo')), trailing: const Icon(Icons.edit_outlined), onTap: () => _edit(user)))).toList())), Positioned(right: 18, bottom: 18, child: FloatingActionButton.extended(onPressed: () => _edit(null), icon: const Icon(Icons.person_add_alt_1), label: const Text('Nuevo usuario')))]);
   });
 }
 
@@ -2857,11 +3135,11 @@ class _DashboardScreenState extends State<_DashboardScreen> {
         const SizedBox(height: 20),
         Text('Requiere atención', style: Theme.of(context).textTheme.titleLarge),
         if (urgent.isEmpty) const Card(child: ListTile(leading: Icon(Icons.check_circle_outline, color: GudexColors.success), title: Text('No hay órdenes vencidas.'))),
-        ...urgent.map((item) => Card(child: ListTile(leading: const Icon(Icons.warning_amber_outlined), title: Text(item['code'].toString()), subtitle: Text('Estado: ' + item['status'].toString().replaceAll('_', ' ') + (item['technician_name'] == null ? '' : ' · ' + item['technician_name'].toString())), onTap: () => widget.onOpenModule(1)))),
+        ...urgent.map((item) => Card(child: ListTile(leading: const Icon(Icons.warning_amber_outlined), title: Text(item['code'].toString()), subtitle: Text('Estado: ' + spanishStatus(item['status']) + (item['technician_name'] == null ? '' : ' · ' + item['technician_name'].toString())), onTap: () => widget.onOpenModule(1)))),
         const SizedBox(height: 12),
         Text('Agenda de hoy', style: Theme.of(context).textTheme.titleLarge),
         if (schedule.isEmpty) const Card(child: ListTile(leading: Icon(Icons.event_available_outlined), title: Text('No hay citas pendientes hoy.'))),
-        ...schedule.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16) + ' · ' + item['status'].toString()), onTap: () => widget.onOpenModule(4)))),
+        ...schedule.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16) + ' · ' + spanishStatus(item['status'])), onTap: () => widget.onOpenModule(4)))),
         const SizedBox(height: 12),
         Text('Reposición prioritaria', style: Theme.of(context).textTheme.titleLarge),
         if (stock.isEmpty) const Card(child: ListTile(leading: Icon(Icons.inventory_outlined), title: Text('No hay alertas de stock.'))),
@@ -2931,7 +3209,7 @@ class _VehicleHistoryScreenState extends State<_VehicleHistoryScreen> {
             if (orders.isEmpty) const ListTile(title: Text('Sin trabajos registrados')),
             ...orders.map((order) => Card(child: ListTile(
               leading: const Icon(Icons.build_outlined),
-              title: Text(order['code'].toString() + ' · ' + order['status'].toString().replaceAll('_', ' ')),
+              title: Text(order['code'].toString() + ' · ' + spanishStatus(order['status'])),
               subtitle: Text(_date(order['opened_at']) + (order['diagnosis'] == null ? '' : '\n' + order['diagnosis'].toString())),
               isThreeLine: order['diagnosis'] != null,
             ))),
@@ -2951,7 +3229,7 @@ class _VehicleHistoryScreenState extends State<_VehicleHistoryScreen> {
             ...appointments.map((appointment) => ListTile(
               leading: const Icon(Icons.event_outlined),
               title: Text(appointment['service_type'].toString()),
-              subtitle: Text(_date(appointment['starts_at']) + ' · ' + appointment['status'].toString()),
+              subtitle: Text(_date(appointment['starts_at']) + ' · ' + spanishStatus(appointment['status'])),
             )),
           ]),
         );
@@ -3017,7 +3295,7 @@ class _CustomerAppointmentsScreenState extends State<_CustomerAppointmentsScreen
     final appointments = snapshot.data ?? [];
     return Stack(children: [RefreshIndicator(onRefresh: () async => setState(() => _appointments = _loadAppointments()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 90), children: [
       if (appointments.isEmpty) const Padding(padding: EdgeInsets.only(top: 80), child: Center(child: Text('Aún no tienes citas solicitadas.'))),
-      ...appointments.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: Text(item['status'].toString().replaceAll('_', ' '))))),
+      ...appointments.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: Text(spanishStatus(item['status']))))),
     ])), Positioned(right: 18, bottom: 18, child: FloatingActionButton.extended(onPressed: _request, icon: const Icon(Icons.add), label: const Text('Solicitar cita')))]);
   });
 }
@@ -3095,7 +3373,7 @@ class _AgendaScreenState extends State<_AgendaScreen> {
             ...records.map((item) { final at = _at(item['starts_at']); return ListTile(
               contentPadding: EdgeInsets.zero, leading: const Icon(Icons.event_available_outlined),
               title: Text(at.hour.toString().padLeft(2, '0') + ':' + at.minute.toString().padLeft(2, '0') + ' · ' + item['service_type'].toString()),
-              subtitle: Text('Cliente #' + item['customer_id'].toString() + ' · ' + item['status'].toString()),
+              subtitle: Text('Cliente #' + item['customer_id'].toString() + ' · ' + spanishStatus(item['status'])),
               trailing: widget.role == 'admin' && item['status'] == 'requested' ? FilledButton(onPressed: () => _changeStatus(item['id'] as int, 'confirmed'), child: const Text('Confirmar')) : null,
             ); }),
           ])));
