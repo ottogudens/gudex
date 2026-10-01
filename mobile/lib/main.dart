@@ -303,7 +303,7 @@ class LubricentroApp extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           ),
           snackBarTheme: SnackBarThemeData(behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-          pageTransitionsTheme: const PageTransitionsTheme(builders: {
+          pageTransitionsTheme: PageTransitionsTheme(builders: {
             TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
             TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
             TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
