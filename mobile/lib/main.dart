@@ -440,7 +440,7 @@ class _CustomerAccessPageState extends State<CustomerAccessPage> {
   @override
   void dispose() { _password.dispose(); _confirm.dispose(); super.dispose(); }
   Future<void> _submit() async {
-    if (_password.text.length < 12) { setState(() => _error = 'La contraseña debe tener al menos 12 caracteres.'); return; }
+    if (_password.text.length < 6) { setState(() => _error = 'La contraseña debe tener al menos 6 caracteres.'); return; }
     if (_password.text != _confirm.text) { setState(() => _error = 'Las contraseñas no coinciden.'); return; }
     setState(() { _busy = true; _error = null; });
     try {
@@ -453,7 +453,7 @@ class _CustomerAccessPageState extends State<CustomerAccessPage> {
   @override
   Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(widget.passwordReset ? 'Nueva contraseña' : 'Activar acceso'), actions: [gudexThemeButton(context)]), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 460), child: ListView(padding: const EdgeInsets.all(24), children: [
     Text(widget.passwordReset ? 'Crea una nueva contraseña para tu portal.' : 'Crea una contraseña para acceder a tu portal Gudex.'), const SizedBox(height: 18),
-    TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña (12 caracteres mínimo)')),
+    TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña (6 caracteres mínimo)')),
     const SizedBox(height: 12), TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña')),
     if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
     const SizedBox(height: 18), FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'Guardando…' : 'Guardar')),
@@ -1613,7 +1613,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
             if (createPortalAccess) ...[
               CheckboxListTile.adaptive(contentPadding: EdgeInsets.zero, value: setManualPassword, onChanged: (value) => update(() => setManualPassword = value == true), title: const Text('Definir contraseña manualmente'), subtitle: const Text('El cliente podrá cambiarla después desde el portal.')),
               if (setManualPassword) ...[
-                TextFormField(controller: password, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'Contraseña inicial *', helperText: 'Mínimo 12 caracteres'), validator: (v) => (v == null || v.length < 12) ? 'Usa al menos 12 caracteres' : null),
+                TextFormField(controller: password, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'Contraseña inicial *', helperText: 'Mínimo 6 caracteres'), validator: (v) => (v == null || v.length < 6) ? 'Usa al menos 6 caracteres' : null),
                 const SizedBox(height: 10),
                 TextFormField(controller: confirmPassword, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña *'), validator: (v) => v != password.text ? 'Las contraseñas no coinciden' : null),
               ],
@@ -1761,7 +1761,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
         content: SizedBox(width: 420, child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text('Cuenta para ${customer['email']}'),
           const SizedBox(height: 12),
-          TextFormField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Nueva contraseña', helperText: 'Mínimo 12 caracteres'), validator: (v) => v == null || v.length < 12 ? 'Usa al menos 12 caracteres' : null),
+          TextFormField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Nueva contraseña', helperText: 'Mínimo 6 caracteres'), validator: (v) => v == null || v.length < 6 ? 'Usa al menos 6 caracteres' : null),
           const SizedBox(height: 10),
           TextFormField(controller: confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña'), validator: (v) => v != password.text ? 'Las contraseñas no coinciden' : null),
         ]))),

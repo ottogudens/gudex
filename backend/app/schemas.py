@@ -90,16 +90,16 @@ class CustomerUpdate(CustomerCreate):
 
 class CustomerPortalAccessCreate(CustomerCreate):
     create_portal_access: bool = False
-    password: Optional[str] = Field(default=None, min_length=12, max_length=200)
+    password: Optional[str] = Field(default=None, min_length=6, max_length=200)
 
 
 class CustomerPortalPasswordSet(SQLModel):
-    password: str = Field(min_length=12, max_length=200)
+    password: str = Field(min_length=6, max_length=200)
 
 
 class CustomerAccessTokenConfirm(SQLModel):
     token: str = Field(min_length=20, max_length=512)
-    password: str = Field(min_length=12, max_length=200)
+    password: str = Field(min_length=6, max_length=200)
 
 
 class CustomerPasswordResetRequest(SQLModel):

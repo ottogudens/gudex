@@ -168,7 +168,7 @@ curl -sS -X POST "$API_URL/api/v1/users" \
   -d '{"email":"cliente.prueba@example.com","full_name":"Cliente de prueba","password":"<otra-contraseña-larga>","role":"customer","customer_id":<CUSTOMER_ID>}'
 ```
 
-Usa contraseñas de al menos 12 caracteres. Para verificar aislamiento, inicia sesión con el usuario cliente y consulta `/api/v1/portal/profile`; debe mostrar solamente sus vehículos y órdenes. Una ruta interna como `/api/v1/customers` debe responder HTTP 403 a la cuenta cliente.
+Usa contraseñas de al menos 12 caracteres para administración y mecánicos, y al menos 6 para clientes. Para verificar aislamiento, inicia sesión con el usuario cliente y consulta `/api/v1/portal/profile`; debe mostrar solamente sus vehículos y órdenes. Una ruta interna como `/api/v1/customers` debe responder HTTP 403 a la cuenta cliente.
 
 ### Flujo de mantención, cotización y aprobación
 

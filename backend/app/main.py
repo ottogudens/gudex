@@ -121,11 +121,12 @@ def login(username: str = Form(...), password: str = Form(...)):
 
 @app.post("/api/v1/account/password")
 def change_password(data: PasswordChange, request: Request, session: Session = Depends(get_session)):
-    if len(data.new_password) < 12:
-        raise HTTPException(422, "La nueva contraseña debe tener al menos 12 caracteres")
     user = session.exec(select(User).where(User.email == request.state.user_email)).first()
     if not user or not verify_password(data.current_password, user.password_hash):
         raise HTTPException(401, "La contraseña actual es incorrecta")
+    minimum_length = 6 if user.role == UserRole.customer else 12
+    if len(data.new_password) < minimum_length:
+        raise HTTPException(422, f"La nueva contraseña debe tener al menos {minimum_length} caracteres")
     user.password_hash = hash_password(data.new_password)
     user.token_version += 1
     session.add(user)
@@ -138,8 +139,9 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
     email = data.email.strip().lower()
     if session.exec(select(User).where(User.email == email)).first():
         raise HTTPException(409, "Ya existe un usuario con ese correo")
-    if len(data.password) < 12:
-        raise HTTPException(422, "La contraseña debe tener al menos 12 caracteres")
+    minimum_length = 6 if data.role == UserRole.customer else 12
+    if len(data.password) < minimum_length:
+        raise HTTPException(422, f"La contraseña debe tener al menos {minimum_length} caracteres")
     if data.role == UserRole.customer and (not data.customer_id or not session.get(Customer, data.customer_id)):
         raise HTTPException(422, "Un usuario cliente debe vincularse a un cliente registrado")
     if data.role != UserRole.customer and data.customer_id is not None:
