@@ -247,12 +247,13 @@ class LubricentroApp extends StatelessWidget {
             surface: Colors.white,
           ),
           useMaterial3: true,
+          visualDensity: VisualDensity.adaptivePlatformDensity,
           scaffoldBackgroundColor: GudexColors.canvas,
           appBarTheme: const AppBarTheme(
             backgroundColor: GudexColors.canvas,
             foregroundColor: GudexColors.ink,
             surfaceTintColor: Colors.transparent,
-            elevation: 0,
+            elevation: 1,
             scrolledUnderElevation: 0,
           ),
           cardTheme: CardThemeData(
@@ -260,6 +261,7 @@ class LubricentroApp extends StatelessWidget {
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             margin: const EdgeInsets.symmetric(vertical: 6),
+            shadowColor: const Color(0x1A242424),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
               side: const BorderSide(color: GudexColors.line),
@@ -278,6 +280,8 @@ class LubricentroApp extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: GudexColors.primary, width: 1.7),
             ),
+            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFB3261E))),
+            focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFB3261E), width: 1.7)),
           ),
           filledButtonTheme: FilledButtonThemeData(
             style: FilledButton.styleFrom(
@@ -294,8 +298,18 @@ class LubricentroApp extends StatelessWidget {
           dialogTheme: DialogThemeData(
             backgroundColor: Colors.white,
             surfaceTintColor: Colors.transparent,
+            alignment: Alignment.center,
+            constraints: const BoxConstraints(maxWidth: 560),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           ),
+          snackBarTheme: SnackBarThemeData(behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+          pageTransitionsTheme: const PageTransitionsTheme(builders: {
+            TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+          }),
           navigationBarTheme: NavigationBarThemeData(
             backgroundColor: Colors.white,
             indicatorColor: const Color(0xFFFFF3A8),
@@ -313,19 +327,24 @@ class LubricentroApp extends StatelessWidget {
             surface: const Color(0xFF1D1D1F),
           ),
           useMaterial3: true,
+          visualDensity: VisualDensity.adaptivePlatformDensity,
           scaffoldBackgroundColor: const Color(0xFF121212),
           appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF121212), surfaceTintColor: Colors.transparent, elevation: 0, scrolledUnderElevation: 0),
           cardTheme: CardThemeData(
-            color: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, elevation: 0,
+            color: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, elevation: 1,
             margin: const EdgeInsets.symmetric(vertical: 6),
+            shadowColor: Colors.black26,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF3A3A3C))),
           ),
           inputDecorationTheme: InputDecorationTheme(
             filled: true, fillColor: const Color(0xFF29292C),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF454549))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFFF6B6B), width: 1.7)),
           ),
-          dialogTheme: DialogThemeData(backgroundColor: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+          dialogTheme: DialogThemeData(backgroundColor: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, alignment: Alignment.center, constraints: const BoxConstraints(maxWidth: 560), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+          snackBarTheme: SnackBarThemeData(behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
           navigationBarTheme: const NavigationBarThemeData(backgroundColor: Color(0xFF1D1D1F), indicatorColor: Color(0xFF643333)),
         ),
         themeMode: themeMode,
@@ -504,7 +523,7 @@ class _LoginPageState extends State<LoginPage> {
                           child: Image.asset('assets/gudex-logo.png', fit: BoxFit.contain),
                         )),
                         const SizedBox(height: 22),
-                        Text('Gestión simple para tu lubricentro', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: const Color(0xFF5B6F7A))),
+                        Text('Gestión simple para tu lubricentro', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         const SizedBox(height: 28),
                         TextField(controller: _email, keyboardType: TextInputType.emailAddress,
                           autofillHints: const [AutofillHints.username, AutofillHints.email],
@@ -613,14 +632,20 @@ class _HomePageState extends State<HomePage> {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Hola, ${widget.name}', maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)),
-              Text(_roleName(widget.role), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFF637986))),
+              Text(_roleName(widget.role), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ])),
             if (constraints.maxWidth >= 600) _RoleChip(role: widget.role),
           ])),
           Expanded(
             child: Center(child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1120),
-              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child:
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: KeyedSubtree(
+                  key: ValueKey(modules[selected].path),
+                  child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child:
                 modules[selected].path == '/api/v1/sales'
                     ? _PosScreen(api: api)
                     : modules[selected].path == '/api/v1/dashboard'
@@ -638,6 +663,8 @@ class _HomePageState extends State<HomePage> {
                     : {'/api/v1/work-orders', '/api/v1/work-orders/mine', '/api/v1/customers'}.contains(modules[selected].path)
                         ? _WorkshopScreen(api: api, module: modules[selected], role: widget.role)
                         : _ModuleList(api: api, module: modules[selected], role: widget.role),
+                  ),
+                ),
               ),
             )),
           ),
@@ -1564,13 +1591,16 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     final email = TextEditingController();
     final phone = TextEditingController();
     final rut = TextEditingController();
+    final password = TextEditingController();
+    final confirmPassword = TextEditingController();
     bool createPortalAccess = false;
+    bool setManualPassword = false;
     try {
       final data = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
           title: const Text('Registrar cliente'),
-          content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          content: SizedBox(width: 480, child: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo *'), validator: (v) => (v == null || v.trim().length < 2) ? 'Ingresa el nombre' : null),
             const SizedBox(height: 10),
             TextFormField(controller: rut, decoration: const InputDecoration(labelText: 'RUT (opcional)')),
@@ -1579,8 +1609,16 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
             const SizedBox(height: 10),
             TextFormField(controller: email, keyboardType: TextInputType.emailAddress, decoration: InputDecoration(labelText: createPortalAccess ? 'Correo para acceso al portal *' : 'Correo'), validator: (v) => createPortalAccess && (v == null || !v.contains('@')) ? 'Ingresa un correo válido' : null),
             const SizedBox(height: 8),
-            SwitchListTile.adaptive(contentPadding: EdgeInsets.zero, value: createPortalAccess, onChanged: (value) => update(() => createPortalAccess = value), title: const Text('Crear acceso al portal'), subtitle: const Text('Se enviará una invitación para que el cliente cree su contraseña.')),
-          ]))),
+            SwitchListTile.adaptive(contentPadding: EdgeInsets.zero, value: createPortalAccess, onChanged: (value) => update(() { createPortalAccess = value; if (!value) setManualPassword = false; }), title: const Text('Crear acceso al portal'), subtitle: const Text('El cliente podrá consultar sus vehículos, trabajos y cotizaciones.')),
+            if (createPortalAccess) ...[
+              CheckboxListTile.adaptive(contentPadding: EdgeInsets.zero, value: setManualPassword, onChanged: (value) => update(() => setManualPassword = value == true), title: const Text('Definir contraseña manualmente'), subtitle: const Text('El cliente podrá cambiarla después desde el portal.')),
+              if (setManualPassword) ...[
+                TextFormField(controller: password, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'Contraseña inicial *', helperText: 'Mínimo 12 caracteres'), validator: (v) => (v == null || v.length < 12) ? 'Usa al menos 12 caracteres' : null),
+                const SizedBox(height: 10),
+                TextFormField(controller: confirmPassword, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña *'), validator: (v) => v != password.text ? 'Las contraseñas no coinciden' : null),
+              ],
+            ],
+          ])))),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
             FilledButton(onPressed: () {
@@ -1591,14 +1629,15 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
                 if (phone.text.trim().isNotEmpty) 'phone': phone.text.trim(),
                 if (email.text.trim().isNotEmpty) 'email': email.text.trim(),
                 'create_portal_access': createPortalAccess,
+                if (setManualPassword) 'password': password.text,
               });
             }, child: const Text('Guardar')),
           ],
         )),
       );
-      if (data != null) await _save(data['create_portal_access'] == true ? '/api/v1/customers/with-portal-access' : '/api/v1/customers', data, data['create_portal_access'] == true ? 'Cliente registrado; invitación preparada para envío.' : 'Cliente registrado');
+      if (data != null) await _save(data['create_portal_access'] == true ? '/api/v1/customers/with-portal-access' : '/api/v1/customers', data, data['password'] != null ? 'Cliente registrado y acceso configurado. Entrega la contraseña al cliente de forma segura.' : data['create_portal_access'] == true ? 'Cliente registrado; invitación preparada para envío.' : 'Cliente registrado');
     } finally {
-      name.dispose(); email.dispose(); phone.dispose(); rut.dispose();
+      name.dispose(); email.dispose(); phone.dispose(); rut.dispose(); password.dispose(); confirmPassword.dispose();
     }
   }
 
@@ -1706,6 +1745,36 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
     } finally {
       name.dispose(); rut.dispose(); phone.dispose(); email.dispose(); notes.dispose();
     }
+  }
+
+  Future<void> _setCustomerPassword(Map<String, dynamic> customer) async {
+    if ((customer['email']?.toString() ?? '').isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agrega primero un correo al cliente.')));
+      return;
+    }
+    final form = GlobalKey<FormState>();
+    final password = TextEditingController();
+    final confirm = TextEditingController();
+    try {
+      final value = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Definir contraseña del portal'),
+        content: SizedBox(width: 420, child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Cuenta para ${customer['email']}'),
+          const SizedBox(height: 12),
+          TextFormField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Nueva contraseña', helperText: 'Mínimo 12 caracteres'), validator: (v) => v == null || v.length < 12 ? 'Usa al menos 12 caracteres' : null),
+          const SizedBox(height: 10),
+          TextFormField(controller: confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña'), validator: (v) => v != password.text ? 'Las contraseñas no coinciden' : null),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () {
+          if (form.currentState!.validate()) Navigator.pop(context, password.text);
+        }, child: const Text('Guardar contraseña'))],
+      ));
+      if (value == null) return;
+      await widget.api.postJson('/api/v1/customers/' + customer['id'].toString() + '/portal-access/password', {'password': value});
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Acceso al portal listo. Entrega la contraseña al cliente de forma segura.')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally { password.dispose(); confirm.dispose(); }
   }
 
   Future<void> _editVehicle(Map<String, dynamic> vehicle) async {
@@ -1918,9 +1987,14 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
       subtitle: Text([item['phone'], item['email'], '$owned vehículo(s)'].where((value) => value != null && '$value'.isNotEmpty).join(' · ')),
       trailing: widget.role != 'admin' ? null : PopupMenuButton<String>(
         tooltip: 'Acciones del cliente',
-        onSelected: (value) { if (value == 'edit') _editCustomer(item); else _deleteRecord(item, vehicle: false); },
+        onSelected: (value) {
+          if (value == 'edit') _editCustomer(item);
+          else if (value == 'password') _setCustomerPassword(item);
+          else _deleteRecord(item, vehicle: false);
+        },
         itemBuilder: (context) => const [
           PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+          PopupMenuItem(value: 'password', child: ListTile(leading: Icon(Icons.lock_reset_outlined), title: Text('Definir contraseña del portal'))),
           PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Eliminar'))),
         ],
       ),
@@ -2621,6 +2695,7 @@ class _PosScreen extends StatefulWidget {
 
 class _PosScreenState extends State<_PosScreen> {
   final _discountController = TextEditingController(text: '0');
+  final _productSearch = TextEditingController();
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _customers = [];
   List<Map<String, dynamic>> _sales = [];
@@ -2641,6 +2716,7 @@ class _PosScreenState extends State<_PosScreen> {
   @override
   void dispose() {
     _discountController.dispose();
+    _productSearch.dispose();
     super.dispose();
   }
 
@@ -2851,96 +2927,127 @@ class _PosScreenState extends State<_PosScreen> {
       ));
     }
     final available = _products.where((product) => product['active'] != false).toList();
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 28), children: [
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Nueva venta', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (available.isEmpty)
-              const Text('No hay productos disponibles en el inventario.')
-            else
-              ...available.map(_productTile),
-            const Divider(height: 28),
-            Text('Detalle', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            if (_cart.isEmpty && _serviceItems.isEmpty) const Text('Agrega productos o servicios para comenzar.')
-            else ..._cart.entries.map(_cartTile),
-            ..._serviceItems.asMap().entries.map((entry) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(entry.value['description'] as String),
-              subtitle: Text('Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(_formatMoney(_money(entry.value['line_total_clp']))),
-                IconButton(tooltip: 'Quitar servicio', onPressed: () => setState(() => _serviceItems.removeAt(entry.key)), icon: const Icon(Icons.close)),
-              ]),
-            )),
-            Align(alignment: Alignment.centerLeft, child: TextButton.icon(
-              onPressed: _addServiceLine, icon: const Icon(Icons.build_outlined), label: const Text('Agregar servicio / trabajo'),
-            )),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int?>(
-              value: _customerId,
-              decoration: const InputDecoration(labelText: 'Cliente (opcional)'),
-              items: [
-                const DropdownMenuItem<int?>(value: null, child: Text('Venta sin cliente')),
-                ..._customers.map((customer) => DropdownMenuItem<int?>(
-                  value: customer['id'] as int?, child: Text('${customer['full_name']}'),
-                )),
-              ],
-              onChanged: (value) => setState(() => _customerId = value),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _discountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Descuento (CLP)', prefixText: '\$'),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _paymentMethod,
-              decoration: const InputDecoration(labelText: 'Medio de pago'),
-              items: const [
-                DropdownMenuItem(value: 'cash', child: Text('Efectivo')),
-                DropdownMenuItem(value: 'card', child: Text('Tarjeta / Mercado Pago Point (terminal externa)')),
-                DropdownMenuItem(value: 'transfer', child: Text('Transferencia')),
-                DropdownMenuItem(value: 'mercado_pago_checkout', child: Text('Mercado Pago Checkout Pro (en línea)')),
-              ],
-              onChanged: (value) { if (value != null) setState(() => _paymentMethod = value); },
-            ),
-            const SizedBox(height: 16),
-            _totalRow('Subtotal', _subtotal),
-            _totalRow('Descuento', _discount.clamp(0, _subtotal).toInt()),
-            const Divider(),
-            _totalRow('Total', _total, emphasize: true),
-            const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: FilledButton.icon(
-              onPressed: _saving ? null : _checkout,
-              icon: _saving
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.point_of_sale),
-              label: Text(_saving ? 'Guardando…' : 'Confirmar venta'),
-            )),
-          ],
-        ))),
-        const SizedBox(height: 12),
-        Text('Ventas recientes', style: Theme.of(context).textTheme.titleLarge),
-        if (_sales.isEmpty)
-          const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Todavía no hay ventas.')))
-        else
-          ..._sales.take(10).map((sale) => Card(child: ListTile(
-            leading: const Icon(Icons.receipt_long_outlined, color: GudexColors.primary),
-            title: Text('${sale['receipt_code']} · ${_formatMoney(_money(sale['total_clp']))}'),
-      subtitle: Text('Estado: ${spanishStatus(sale['status'])} · ${sale['created_at'] ?? ''}'),
-            trailing: IconButton(tooltip: 'Imprimir / guardar comprobante PDF', icon: const Icon(Icons.picture_as_pdf_outlined),
-              onPressed: () => _printSaleReceipt(sale)),
-          ))),
-      ]),
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      final desktop = constraints.maxWidth >= 920;
+      return Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(18, 12, 18, 10), child: Row(children: [
+          Container(width: 44, height: 44, decoration: BoxDecoration(color: Theme.of(context).colorScheme.primaryContainer, borderRadius: BorderRadius.circular(14)), child: Icon(Icons.point_of_sale_outlined, color: Theme.of(context).colorScheme.onPrimaryContainer)),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Punto de venta', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+            Text('Productos, servicios y cobros', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ])),
+          IconButton(tooltip: 'Actualizar datos', onPressed: _refresh, icon: const Icon(Icons.refresh)),
+        ])),
+        Expanded(child: desktop
+            ? Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
+                Expanded(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Expanded(flex: 6, child: _catalogPanel(available, desktop: true)),
+                  const SizedBox(width: 14),
+                  Expanded(flex: 5, child: _checkoutPanel(desktop: true)),
+                ])),
+                const SizedBox(height: 10),
+                SizedBox(height: 156, child: _salesPanel()),
+              ]))
+            : RefreshIndicator(onRefresh: _refresh, child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 24), children: [
+                _catalogPanel(available, desktop: false),
+                const SizedBox(height: 10),
+                _checkoutPanel(desktop: false),
+                const SizedBox(height: 10),
+                SizedBox(height: 320, child: _salesPanel()),
+              ]))),
+      ]);
+    });
   }
+
+  Widget _catalogPanel(List<Map<String, dynamic>> available, {required bool desktop}) {
+    final query = _productSearch.text.trim().toLowerCase();
+    final filtered = available.where((product) => query.isEmpty || '${product['name']} ${product['sku'] ?? ''} ${product['category'] ?? ''}'.toLowerCase().contains(query)).toList();
+    return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [Expanded(child: Text('Catálogo', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700))), Chip(label: Text('${filtered.length}'))]),
+      const SizedBox(height: 10),
+      TextField(controller: _productSearch, onChanged: (_) => setState(() {}), decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Buscar por producto o código', isDense: true)),
+      const SizedBox(height: 10),
+      if (filtered.isEmpty)
+        if (desktop)
+          Expanded(child: Center(child: Text(available.isEmpty ? 'No hay productos disponibles.' : 'No hay resultados para esa búsqueda.')))
+        else
+          Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Center(child: Text(available.isEmpty ? 'No hay productos disponibles.' : 'No hay resultados para esa búsqueda.')))
+      else if (desktop)
+        Expanded(child: ListView.separated(itemCount: filtered.length, separatorBuilder: (_, __) => const Divider(height: 1), itemBuilder: (context, index) => _productTile(filtered[index])))
+      else
+        ...filtered.map(_productTile),
+    ])));
+  }
+
+  Widget _checkoutPanel({required bool desktop}) => Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [Expanded(child: Text('Venta actual', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700))), Text('${_cart.length + _serviceItems.length} líneas', style: Theme.of(context).textTheme.bodySmall)]),
+    const SizedBox(height: 8),
+    if (desktop) Expanded(child: ListView(padding: EdgeInsets.zero, children: [
+      if (_cart.isEmpty && _serviceItems.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('Agrega productos o servicios para comenzar.')),
+      ..._cart.entries.map(_cartTile),
+      ..._serviceItems.asMap().entries.map((entry) => ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(entry.value['description'] as String),
+        subtitle: Text('Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [Text(_formatMoney(_money(entry.value['line_total_clp']))), IconButton(tooltip: 'Quitar servicio', onPressed: () => setState(() => _serviceItems.removeAt(entry.key)), icon: const Icon(Icons.close))]),
+      )),
+      Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _addServiceLine, icon: const Icon(Icons.build_outlined), label: const Text('Agregar servicio / trabajo'))),
+    ])) else ...[
+      if (_cart.isEmpty && _serviceItems.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('Agrega productos o servicios para comenzar.')),
+      ..._cart.entries.map(_cartTile),
+      ..._serviceItems.asMap().entries.map((entry) => ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(entry.value['description'] as String),
+        subtitle: Text('Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [Text(_formatMoney(_money(entry.value['line_total_clp']))), IconButton(tooltip: 'Quitar servicio', onPressed: () => setState(() => _serviceItems.removeAt(entry.key)), icon: const Icon(Icons.close))]),
+      )),
+      Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _addServiceLine, icon: const Icon(Icons.build_outlined), label: const Text('Agregar servicio / trabajo'))),
+    ],
+    const SizedBox(height: 8),
+      DropdownButtonFormField<int?>(
+        value: _customerId,
+        decoration: const InputDecoration(labelText: 'Cliente (opcional)', isDense: true),
+        items: [const DropdownMenuItem<int?>(value: null, child: Text('Venta sin cliente')), ..._customers.map((customer) => DropdownMenuItem<int?>(value: customer['id'] as int?, child: Text('${customer['full_name']}')))],
+        onChanged: (value) => setState(() => _customerId = value),
+      ),
+      const SizedBox(height: 10),
+      TextField(controller: _discountController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Descuento (CLP)', prefixText: '\$', isDense: true), onChanged: (_) => setState(() {})),
+      const SizedBox(height: 10),
+      DropdownButtonFormField<String>(
+        value: _paymentMethod,
+        decoration: const InputDecoration(labelText: 'Medio de pago', isDense: true),
+        items: const [
+          DropdownMenuItem(value: 'cash', child: Text('Efectivo')),
+          DropdownMenuItem(value: 'card', child: Text('Tarjeta / Mercado Pago Point')),
+          DropdownMenuItem(value: 'transfer', child: Text('Transferencia')),
+          DropdownMenuItem(value: 'mercado_pago_checkout', child: Text('Mercado Pago Checkout Pro')),
+        ],
+        onChanged: (value) { if (value != null) setState(() => _paymentMethod = value); },
+      ),
+    const Divider(height: 22),
+    _totalRow('Subtotal', _subtotal),
+    _totalRow('Descuento', _discount.clamp(0, _subtotal).toInt()),
+    _totalRow('Total', _total, emphasize: true),
+    const SizedBox(height: 10),
+    SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _saving || (_cart.isEmpty && _serviceItems.isEmpty) ? null : _checkout,
+      icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.lock_outline),
+      label: Text(_saving ? 'Guardando…' : 'Cobrar ${_formatMoney(_total)}'))),
+  ])));
+
+  Widget _salesPanel() => Card(child: Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text('Ventas recientes', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+    const SizedBox(height: 4),
+    Expanded(child: _sales.isEmpty ? const Center(child: Text('Todavía no hay ventas.')) : ListView.separated(
+      itemCount: _sales.length.clamp(0, 10).toInt(), separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) { final sale = _sales[index]; return ListTile(
+        dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.receipt_long_outlined, color: GudexColors.primary),
+        title: Text('${sale['receipt_code']} · ${_formatMoney(_money(sale['total_clp']))}'),
+        subtitle: Text('Estado: ${spanishStatus(sale['status'])} · ${sale['created_at'] ?? ''}'),
+        trailing: IconButton(tooltip: 'Abrir comprobante PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: () => _printSaleReceipt(sale)),
+      ); },
+    )),
+  ])));
 
   Widget _productTile(Map<String, dynamic> product) {
     final id = product['id'] as int?;
@@ -2948,13 +3055,12 @@ class _PosScreenState extends State<_PosScreen> {
     final quantity = id == null ? 0 : (_cart[id] ?? 0);
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text('${product['name'] ?? 'Producto'}'),
-      subtitle: Text('Stock: ${stock.toStringAsFixed(stock % 1 == 0 ? 0 : 2)} ${product['unit'] ?? ''} · ${_formatMoney(_money(product['price_clp']))}'),
+      leading: CircleAvatar(backgroundColor: Theme.of(context).colorScheme.secondaryContainer, child: Icon(Icons.inventory_2_outlined, color: Theme.of(context).colorScheme.onSecondaryContainer)),
+      title: Text('${product['name'] ?? 'Producto'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Padding(padding: const EdgeInsets.only(top: 4), child: Text('Stock ${stock.toStringAsFixed(stock % 1 == 0 ? 0 : 2)} ${product['unit'] ?? ''}  ·  ${_formatMoney(_money(product['price_clp']))}')),
       trailing: stock <= 0
           ? const Chip(label: Text('Sin stock'))
-          : quantity == 0
-              ? IconButton(onPressed: () => _changeQuantity(product, 1), icon: const Icon(Icons.add_shopping_cart), tooltip: 'Agregar')
-              : TextButton.icon(onPressed: () => _changeQuantity(product, 1), icon: const Icon(Icons.add), label: Text(quantity.toStringAsFixed(quantity % 1 == 0 ? 0 : 2))),
+          : FilledButton.tonalIcon(onPressed: () => _changeQuantity(product, 1), icon: Icon(quantity == 0 ? Icons.add_shopping_cart : Icons.add), label: Text(quantity == 0 ? 'Agregar' : quantity.toStringAsFixed(quantity % 1 == 0 ? 0 : 2))),
     );
   }
 
@@ -3014,7 +3120,7 @@ class _RecordCard extends StatelessWidget {
         ]),
         for (final entry in entries)
           Padding(padding: const EdgeInsets.only(top: 6), child: Text('${spanishField(entry.key)}: ${_displayValue(entry.key, entry.value)}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: const Color(0xFF536B78)))),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
         if (onApprove != null || onReject != null || onOpen != null) ...[
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [

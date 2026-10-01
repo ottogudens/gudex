@@ -23,7 +23,7 @@ from app.models import (
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
-    PasswordChange, ProductUpdate, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate,
+    PasswordChange, ProductUpdate, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
@@ -237,6 +237,8 @@ async def create_customer_with_portal_access(data: CustomerPortalAccessCreate, r
                                              session: Session = Depends(get_session)):
     if not data.email:
         raise HTTPException(422, "El correo es obligatorio para crear acceso al portal")
+    if data.password and not data.create_portal_access:
+        raise HTTPException(422, "Activa el acceso al portal para definir una contraseña")
     if data.rut and session.exec(select(Customer).where(Customer.rut == data.rut)).first():
         raise HTTPException(409, "Ya existe un cliente con ese RUT")
     if session.exec(select(Customer).where(Customer.email == data.email)).first() or session.exec(select(User).where(User.email == data.email)).first():
@@ -245,13 +247,44 @@ async def create_customer_with_portal_access(data: CustomerPortalAccessCreate, r
     session.add(customer)
     session.commit()
     session.refresh(customer)
-    user = User(email=data.email, full_name=data.full_name, password_hash=hash_password(secrets.token_urlsafe(32)),
-                role=UserRole.customer, customer_id=customer.id, active=False)
+    user = User(email=data.email, full_name=data.full_name,
+                password_hash=hash_password(data.password or secrets.token_urlsafe(32)),
+                role=UserRole.customer, customer_id=customer.id, active=bool(data.password))
     session.add(user)
     session.commit()
     session.refresh(user)
-    delivery = await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)
+    delivery = "manual_password" if data.password else await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)
     return {"customer": customer, "user": {"id": user.id, "email": user.email, "active": user.active}, "invitation_delivery": delivery}
+
+
+@app.post("/api/v1/customers/{customer_id}/portal-access/password", dependencies=[Depends(require_admin)])
+def set_customer_portal_password(customer_id: int, data: CustomerPortalPasswordSet, session: Session = Depends(get_session)):
+    customer = session.get(Customer, customer_id)
+    if not customer or not customer.email:
+        raise HTTPException(404, "Cliente con correo registrado no encontrado")
+    user = session.exec(select(User).where(User.customer_id == customer_id, User.role == UserRole.customer)).first()
+    email_owner = session.exec(select(User).where(User.email == customer.email)).first()
+    if email_owner and (not user or email_owner.id != user.id):
+        raise HTTPException(409, "El correo del cliente ya pertenece a otro usuario")
+    if not user:
+        user = User(email=customer.email, full_name=customer.full_name, password_hash=hash_password(data.password),
+                    role=UserRole.customer, customer_id=customer.id, active=True)
+        session.add(user)
+    else:
+        user.email = customer.email
+        user.full_name = customer.full_name
+        user.password_hash = hash_password(data.password)
+        user.active = True
+        user.token_version += 1
+        session.add(user)
+        now = datetime.now(timezone.utc)
+        for access_token in session.exec(select(CustomerAccessToken).where(
+            CustomerAccessToken.user_id == user.id, CustomerAccessToken.used_at == None  # noqa: E711
+        )).all():
+            access_token.used_at = now
+            session.add(access_token)
+    session.commit()
+    return {"message": "Contraseña configurada. El cliente ya puede iniciar sesión."}
 
 
 @app.post("/api/v1/customers/{customer_id}/portal-access/invitation", dependencies=[Depends(require_admin)])
