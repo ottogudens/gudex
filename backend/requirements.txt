@@ -10,3 +10,4 @@ alembic>=1.14,<2
 httpx>=0.28,<1
 cryptography>=44,<47
 reportlab>=4.2,<5
+sentry-sdk>=2.0,<3
