@@ -45,7 +45,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecciona un vehículo antes de adjuntar el informe.'))); 
       return; 
     }
-    final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+    final picked = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
     if (picked == null || picked.files.single.bytes == null) return;
     try {
       var path = '/api/v1/scanner-reports?vehicle_id=$_vehicleId';
