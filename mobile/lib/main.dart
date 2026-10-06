@@ -20,6 +20,10 @@ import 'core/theme.dart';
 import 'providers/auth_provider.dart';
 import 'screens/auth/customer_access_page.dart';
 import 'screens/auth/login_page.dart';
+import 'screens/customer_appointments_screen.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/users_screen.dart';
+import 'screens/vehicle_history_screen.dart';
 
 part 'quotes_screen.dart';
 
@@ -229,15 +233,15 @@ class _HomePageState extends ConsumerState<HomePage> {
                     : modules[selected].path == '/api/v1/quotes'
                         ? _QuotesScreen(api: api)
                     : modules[selected].path == '/api/v1/dashboard'
-                        ? _DashboardScreen(api: api, onOpenModule: (index) => setState(() => _selected = index))
+                        ? DashboardScreen(api: api, onOpenModule: (index) => setState(() => _selected = index))
                     : modules[selected].path == '/api/v1/users'
-                        ? _UsersScreen(api: api)
+                        ? UsersScreen(api: api)
                     : modules[selected].path == '/api/v1/products'
                         ? _InventoryScreen(api: api, canManage: widget.role == 'admin')
                     : modules[selected].path == '/api/v1/appointments'
                         ? _AgendaScreen(api: api, role: widget.role)
                     : modules[selected].path == '/api/v1/portal/appointments'
-                        ? _CustomerAppointmentsScreen(api: api)
+                        ? CustomerAppointmentsScreen(api: api)
                     : modules[selected].path == '/api/v1/scanner-reports'
                         ? _ScannerScreen(api: api, role: widget.role)
                     : {'/api/v1/work-orders', '/api/v1/work-orders/mine', '/api/v1/customers'}.contains(modules[selected].path)
@@ -724,7 +728,7 @@ class _ModuleListState extends State<_ModuleList> {
                   onOpen: widget.module.path == '/api/v1/portal/work-orders' && data['id'] is int
                       ? () => _showInspectionReport(data['id'] as int)
                       : widget.module.path == '/api/v1/portal/profile' && data['id'] is int
-                          ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: data['id'] as int, portal: true)))
+                          ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => VehicleHistoryScreen(api: widget.api, vehicleId: data['id'] as int, portal: true)))
                       : null,
                 );
               },
@@ -1601,7 +1605,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
         onSelected: (value) {
           if (value == 'edit') _editVehicle(item);
           else if (value == 'delete') _deleteRecord(item, vehicle: true);
-          else Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false)));
+          else Navigator.push(context, MaterialPageRoute(builder: (_) => VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false)));
         },
         itemBuilder: (context) => const [
           PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history), title: Text('Ver historial'))),
@@ -1609,7 +1613,7 @@ class _WorkshopScreenState extends State<_WorkshopScreen> {
           PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Eliminar'))),
         ],
       ),
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false))),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => VehicleHistoryScreen(api: widget.api, vehicleId: item['id'] as int, portal: false))),
     ));
   }
 
@@ -2775,263 +2779,13 @@ class _RecordCard extends StatelessWidget {
   }
 }
 
-class _UsersScreen extends StatefulWidget {
-  const _UsersScreen({required this.api});
-  final ApiClient api;
-  @override
-  State<_UsersScreen> createState() => _UsersScreenState();
-}
 
-class _UsersScreenState extends State<_UsersScreen> {
-  late Future<List<Map<String, dynamic>>> _users;
-  @override void initState() { super.initState(); _users = _load(); }
-  Future<List<Map<String, dynamic>>> _load() async {
-    final raw = await widget.api.get('/api/v1/users');
-    return raw is List ? raw.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList() : [];
-  }
-  Future<void> _edit(Map<String, dynamic>? user) async {
-    final isNew = user == null;
-    final name = TextEditingController(text: user?['full_name']?.toString() ?? '');
-    final email = TextEditingController(text: user?['email']?.toString() ?? '');
-    final password = TextEditingController();
-    String role = user?['role']?.toString() ?? 'mechanic';
-    bool active = user?['active'] != false;
-    final saved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-      title: Text(isNew ? 'Nuevo usuario' : 'Editar usuario'),
-      content: StatefulBuilder(builder: (context, update) => SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo')),
-        if (isNew) TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
-        if (isNew) TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña inicial (12 caracteres mínimo)')),
-        DropdownButtonFormField<String>(value: role, decoration: const InputDecoration(labelText: 'Rol'), items: const [DropdownMenuItem(value: 'admin', child: Text('Administración')), DropdownMenuItem(value: 'mechanic', child: Text('Mecánico'))], onChanged: (value) { if (value != null) update(() => role = value); }),
-        if (!isNew) SwitchListTile(contentPadding: EdgeInsets.zero, value: active, onChanged: (value) => update(() => active = value), title: const Text('Cuenta activa')),
-      ]))),
-      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () async {
-        try {
-          if (isNew) {
-            await widget.api.postJson('/api/v1/users', {'full_name': name.text.trim(), 'email': email.text.trim(), 'password': password.text, 'role': role});
-          } else {
-            await widget.api.patchJson('/api/v1/users/' + user!['id'].toString(), {'full_name': name.text.trim(), 'role': role, 'active': active});
-          }
-          if (context.mounted) Navigator.pop(context, true);
-        } catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
-      }, child: const Text('Guardar'))],
-    ));
-    name.dispose(); email.dispose(); password.dispose();
-    if (saved == true && mounted) setState(() => _users = _load());
-  }
-  @override Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(future: _users, builder: (context, snapshot) {
-    if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-    if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
-    final users = snapshot.data ?? [];
-    return Stack(children: [RefreshIndicator(onRefresh: () async => setState(() => _users = _load()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 90), children: users.map((user) => Card(child: ListTile(leading: CircleAvatar(child: Icon(user['role'] == 'admin' ? Icons.admin_panel_settings_outlined : Icons.handyman_outlined)), title: Text(user['full_name'].toString()), subtitle: Text(user['email'].toString() + ' · ' + spanishRole(user['role']) + (user['active'] == true ? '' : ' · Inactivo')), trailing: const Icon(Icons.edit_outlined), onTap: () => _edit(user)))).toList())), Positioned(right: 18, bottom: 18, child: FloatingActionButton.extended(onPressed: () => _edit(null), icon: const Icon(Icons.person_add_alt_1), label: const Text('Nuevo usuario')))]);
-  });
-}
 
-class _DashboardScreen extends StatefulWidget {
-  const _DashboardScreen({required this.api, required this.onOpenModule});
-  final ApiClient api;
-  final void Function(int index) onOpenModule;
-  @override
-  State<_DashboardScreen> createState() => _DashboardScreenState();
-}
 
-class _DashboardScreenState extends State<_DashboardScreen> {
-  late Future<Map<String, dynamic>> _data;
-  @override
-  void initState() { super.initState(); _data = _load(); }
-  Future<Map<String, dynamic>> _load() async => Map<String, dynamic>.from(await widget.api.get('/api/v1/dashboard') as Map);
-  int _number(dynamic value) => value is num ? value.round() : int.tryParse(value.toString()) ?? 0;
-  String _money(dynamic value) => r'$' + _number(value).toString() + ' CLP';
-  @override
-  Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(
-    future: _data,
-    builder: (context, snapshot) {
-      if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-      if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
-      final data = snapshot.data!;
-      final metrics = Map<String, dynamic>.from(data['metrics'] as Map);
-      final urgent = data['urgent_orders'] is List ? data['urgent_orders'] as List : const [];
-      final schedule = data['today_schedule'] is List ? data['today_schedule'] as List : const [];
-      final stock = data['low_stock_items'] is List ? data['low_stock_items'] as List : const [];
-      return RefreshIndicator(onRefresh: () async => setState(() => _data = _load()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 24), children: [
-        Text('Panel principal', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 4), const Text('Resumen operativo del taller para hoy.'),
-        const SizedBox(height: 14),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          _DashboardMetric(label: 'Órdenes activas', value: _number(metrics['active_orders']).toString(), icon: Icons.build_outlined, color: GudexColors.primary, onTap: () => widget.onOpenModule(1)),
-          _DashboardMetric(label: 'Trabajos atrasados', value: _number(metrics['overdue_orders']).toString(), icon: Icons.warning_amber_outlined, color: Colors.deepOrange, onTap: () => widget.onOpenModule(1)),
-          _DashboardMetric(label: 'Citas de hoy', value: _number(metrics['today_appointments']).toString(), icon: Icons.calendar_today_outlined, color: GudexColors.success, onTap: () => widget.onOpenModule(4)),
-          _DashboardMetric(label: 'Solicitudes nuevas', value: _number(metrics['requested_appointments']).toString(), icon: Icons.mark_email_unread_outlined, color: Colors.amber.shade800, onTap: () => widget.onOpenModule(4)),
-          _DashboardMetric(label: 'Stock bajo', value: _number(metrics['low_stock']).toString(), icon: Icons.inventory_2_outlined, color: Colors.deepPurple, onTap: () => widget.onOpenModule(3)),
-          _DashboardMetric(label: 'Ventas cobradas hoy', value: _money(metrics['sales_today_clp']), icon: Icons.point_of_sale_outlined, color: Colors.teal, onTap: () => widget.onOpenModule(6)),
-        ]),
-        const SizedBox(height: 20),
-        Text('Requiere atención', style: Theme.of(context).textTheme.titleLarge),
-        if (urgent.isEmpty) const Card(child: ListTile(leading: Icon(Icons.check_circle_outline, color: GudexColors.success), title: Text('No hay órdenes vencidas.'))),
-        ...urgent.map((item) => Card(child: ListTile(leading: const Icon(Icons.warning_amber_outlined), title: Text(item['code'].toString()), subtitle: Text('Estado: ' + spanishStatus(item['status']) + (item['technician_name'] == null ? '' : ' · ' + item['technician_name'].toString())), onTap: () => widget.onOpenModule(1)))),
-        const SizedBox(height: 12),
-        Text('Agenda de hoy', style: Theme.of(context).textTheme.titleLarge),
-        if (schedule.isEmpty) const Card(child: ListTile(leading: Icon(Icons.event_available_outlined), title: Text('No hay citas pendientes hoy.'))),
-        ...schedule.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16) + ' · ' + spanishStatus(item['status'])), onTap: () => widget.onOpenModule(4)))),
-        const SizedBox(height: 12),
-        Text('Reposición prioritaria', style: Theme.of(context).textTheme.titleLarge),
-        if (stock.isEmpty) const Card(child: ListTile(leading: Icon(Icons.inventory_outlined), title: Text('No hay alertas de stock.'))),
-        ...stock.map((item) => Card(child: ListTile(leading: const Icon(Icons.inventory_2_outlined), title: Text(item['name'].toString()), subtitle: Text('Disponible: ' + item['stock_quantity'].toString() + ' ' + item['unit'].toString() + ' · mínimo: ' + item['minimum_quantity'].toString()), onTap: () => widget.onOpenModule(3)))),
-      ]));
-    },
-  );
-}
 
-class _DashboardMetric extends StatelessWidget {
-  const _DashboardMetric({required this.label, required this.value, required this.icon, required this.color, required this.onTap});
-  final String label; final String value; final IconData icon; final Color color; final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) => SizedBox(width: 170, child: Card(child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Icon(icon, color: color), const SizedBox(height: 12), Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)), Text(label, style: Theme.of(context).textTheme.bodySmall),
-  ])))));
-}
 
-class _VehicleHistoryScreen extends StatefulWidget {
-  const _VehicleHistoryScreen({required this.api, required this.vehicleId, required this.portal});
-  final ApiClient api;
-  final int vehicleId;
-  final bool portal;
-  @override
-  State<_VehicleHistoryScreen> createState() => _VehicleHistoryScreenState();
-}
 
-class _VehicleHistoryScreenState extends State<_VehicleHistoryScreen> {
-  late Future<Map<String, dynamic>> _history;
-  @override
-  void initState() { super.initState(); _history = _load(); }
-  Future<Map<String, dynamic>> _load() async {
-    final prefix = widget.portal ? '/api/v1/portal' : '/api/v1';
-    final raw = await widget.api.get(prefix + '/vehicles/' + widget.vehicleId.toString() + '/history');
-    return Map<String, dynamic>.from(raw as Map);
-  }
-  List<Map<String, dynamic>> _maps(dynamic raw) => raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
-  String _date(dynamic value) {
-    final text = value.toString().replaceFirst('T', ' ');
-    return text.length > 16 ? text.substring(0, 16) : text;
-  }
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Ficha e historial')),
-    body: FutureBuilder<Map<String, dynamic>>(
-      future: _history,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
-        final data = snapshot.data!;
-        final vehicle = Map<String, dynamic>.from(data['vehicle'] as Map);
-        final customer = data['customer'] is Map ? Map<String, dynamic>.from(data['customer'] as Map) : <String, dynamic>{};
-        final orders = _maps(data['work_orders']);
-        final reports = _maps(data['scanner_reports']);
-        final appointments = _maps(data['appointments']);
-        return RefreshIndicator(
-          onRefresh: () async => setState(() => _history = _load()),
-          child: ListView(padding: const EdgeInsets.all(16), children: [
-            Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(vehicle['plate'].toString() + ' · ' + vehicle['make'].toString() + ' ' + vehicle['model'].toString(), style: Theme.of(context).textTheme.titleLarge),
-              Text('Año ' + (vehicle['year'] ?? 'sin registro').toString() + ' · ' + (vehicle['current_mileage_km'] ?? '—').toString() + ' km'),
-              if (vehicle['vin'] != null) Text('VIN: ' + vehicle['vin'].toString()),
-              if (customer.isNotEmpty) Text('Cliente: ' + customer['full_name'].toString() + (customer['phone'] == null ? '' : ' · ' + customer['phone'].toString())),
-            ]))),
-            const SizedBox(height: 12),
-            Text('Órdenes de trabajo', style: Theme.of(context).textTheme.titleMedium),
-            if (orders.isEmpty) const ListTile(title: Text('Sin trabajos registrados')),
-            ...orders.map((order) => Card(child: ListTile(
-              leading: const Icon(Icons.build_outlined),
-              title: Text(order['code'].toString() + ' · ' + spanishStatus(order['status'])),
-              subtitle: Text(_date(order['opened_at']) + (order['diagnosis'] == null ? '' : '\n' + order['diagnosis'].toString())),
-              isThreeLine: order['diagnosis'] != null,
-            ))),
-            const SizedBox(height: 12),
-            Text('Informes scanner LAUNCH', style: Theme.of(context).textTheme.titleMedium),
-            if (reports.isEmpty) const ListTile(title: Text('Sin informes scanner adjuntos')),
-            ...reports.map((report) => Card(child: ListTile(
-              leading: const Icon(Icons.document_scanner_outlined),
-              title: Text(report['filename'].toString()),
-              subtitle: Text(_date(report['scanned_at']) + (report['mileage_km'] == null ? '' : ' · ' + report['mileage_km'].toString() + ' km')),
-              trailing: IconButton(icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: () async {
-                try { await openGudexPdf(widget.api, report['download_url'].toString(), report['filename'].toString()); } catch (_) {}
-              }),
-            ))),
-            const SizedBox(height: 12),
-            Text('Citas', style: Theme.of(context).textTheme.titleMedium),
-            ...appointments.map((appointment) => ListTile(
-              leading: const Icon(Icons.event_outlined),
-              title: Text(appointment['service_type'].toString()),
-              subtitle: Text(_date(appointment['starts_at']) + ' · ' + spanishStatus(appointment['status'])),
-            )),
-          ]),
-        );
-      },
-    ),
-  );
-}
 
-class _CustomerAppointmentsScreen extends StatefulWidget {
-  const _CustomerAppointmentsScreen({required this.api});
-  final ApiClient api;
-  @override
-  State<_CustomerAppointmentsScreen> createState() => _CustomerAppointmentsScreenState();
-}
-
-class _CustomerAppointmentsScreenState extends State<_CustomerAppointmentsScreen> {
-  late Future<List<Map<String, dynamic>>> _appointments;
-  late Future<List<Map<String, dynamic>>> _vehicles;
-  @override
-  void initState() { super.initState(); _appointments = _loadAppointments(); _vehicles = _loadVehicles(); }
-  Future<List<Map<String, dynamic>>> _maps(String path) async {
-    final raw = await widget.api.get(path);
-    return raw is List ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
-  }
-  Future<List<Map<String, dynamic>>> _loadAppointments() => _maps('/api/v1/portal/appointments');
-  Future<List<Map<String, dynamic>>> _loadVehicles() async {
-    final raw = await widget.api.get('/api/v1/portal/profile');
-    final rows = raw is Map ? raw['vehicles'] : null;
-    return rows is List ? rows.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
-  }
-  Future<void> _request() async {
-    final vehicles = await _vehicles;
-    if (!mounted) return;
-    if (vehicles.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Primero registra un vehículo con el taller.'))); return; }
-    int vehicleId = vehicles.first['id'] as int;
-    final service = TextEditingController(text: 'Mantención preventiva');
-    final notes = TextEditingController();
-    final date = await showDatePicker(context: context, initialDate: DateTime.now().add(const Duration(days: 1)), firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)));
-    if (date == null || !mounted) return;
-    final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 9, minute: 0));
-    if (time == null || !mounted) return;
-    final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Solicitar cita'),
-      content: StatefulBuilder(builder: (context, update) => SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        DropdownButtonFormField<int>(value: vehicleId, decoration: const InputDecoration(labelText: 'Vehículo'), items: vehicles.map((v) => DropdownMenuItem(value: v['id'] as int, child: Text(v['plate'].toString() + ' · ' + v['make'].toString()))).toList(), onChanged: (value) { if (value != null) update(() => vehicleId = value); }),
-        const SizedBox(height: 10), TextField(controller: service, decoration: const InputDecoration(labelText: 'Servicio solicitado')),
-        const SizedBox(height: 10), TextField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Observaciones')),
-      ]))),
-      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar solicitud'))],
-    ));
-    if (accepted != true) { service.dispose(); notes.dispose(); return; }
-    try {
-      final start = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-      await widget.api.postJson('/api/v1/portal/appointments', {'vehicle_id': vehicleId, 'starts_at': start.toUtc().toIso8601String(), 'ends_at': start.add(const Duration(hours: 1)).toUtc().toIso8601String(), 'service_type': service.text.trim(), if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim()});
-      if (mounted) { setState(() => _appointments = _loadAppointments()); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Solicitud enviada al taller.'))); }
-    } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
-    service.dispose(); notes.dispose();
-  }
-  @override
-  Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(future: _appointments, builder: (context, snapshot) {
-    if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-    if (snapshot.hasError) return Center(child: Text(snapshot.error.toString()));
-    final appointments = snapshot.data ?? [];
-    return Stack(children: [RefreshIndicator(onRefresh: () async => setState(() => _appointments = _loadAppointments()), child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 90), children: [
-      if (appointments.isEmpty) const Padding(padding: EdgeInsets.only(top: 80), child: Center(child: Text('Aún no tienes citas solicitadas.'))),
-      ...appointments.map((item) => Card(child: ListTile(leading: const Icon(Icons.event_outlined), title: Text(item['service_type'].toString()), subtitle: Text(item['starts_at'].toString().replaceFirst('T', ' ').substring(0, 16)), trailing: Text(spanishStatus(item['status']))))),
-    ])), Positioned(right: 18, bottom: 18, child: FloatingActionButton.extended(onPressed: _request, icon: const Icon(Icons.add), label: const Text('Solicitar cita')))]);
-  });
-}
 
 class _AgendaScreen extends StatefulWidget {
   const _AgendaScreen({required this.api, required this.role});
