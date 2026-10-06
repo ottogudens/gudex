@@ -10,6 +10,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:printing/printing.dart';
+import 'package:flutter/services.dart' show rootBundle;
+
+part 'quotes_screen.dart';
 
 final _themeMode = ValueNotifier<ThemeMode>(ThemeMode.light);
 
@@ -609,6 +612,7 @@ class _HomePageState extends State<HomePage> {
       _Module('Scanner LAUNCH', '/api/v1/scanner-reports'),
       _Module('POS', '/api/v1/sales'),
       _Module('Usuarios', '/api/v1/users'),
+      _Module('Cotizaciones', '/api/v1/quotes'),
     ];
   }
 
@@ -649,6 +653,8 @@ class _HomePageState extends State<HomePage> {
                   child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child:
                 modules[selected].path == '/api/v1/sales'
                     ? _PosScreen(api: api)
+                    : modules[selected].path == '/api/v1/quotes'
+                        ? _QuotesScreen(api: api)
                     : modules[selected].path == '/api/v1/dashboard'
                         ? _DashboardScreen(api: api, onOpenModule: (index) => setState(() => _selected = index))
                     : modules[selected].path == '/api/v1/users'
@@ -701,13 +707,20 @@ class _HomePageState extends State<HomePage> {
         const VerticalDivider(width: 1, thickness: 1, color: GudexColors.line),
         Expanded(child: pageContent),
       ]) : pageContent,
-      bottomNavigationBar: useNavigationRail ? null : NavigationBar(
+      bottomNavigationBar: useNavigationRail ? null : SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: MediaQuery.sizeOf(context).width < modules.length * 88.0
+              ? modules.length * 88.0 : MediaQuery.sizeOf(context).width,
+          child: NavigationBar(
         selectedIndex: selected,
         onDestinationSelected: (index) => setState(() => _selected = index),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: [for (final module in modules) NavigationDestination(
           icon: Icon(_iconFor(module.title)), label: _navLabel(module.title),
         )],
+          ),
+        ),
       ),
     );
   }

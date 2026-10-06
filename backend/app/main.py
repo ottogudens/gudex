@@ -30,7 +30,7 @@ from app.routers.inspections import router as inspection_router
 from app.routers.integrations import router as integrations_router
 from app.routers.assistant import router as assistant_router
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
-from app.services.documents import sale_receipt_pdf
+from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
@@ -710,6 +710,44 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
     return session.exec(select(Quote).where(Quote.work_order_id == order_id).order_by(Quote.created_at.desc())).all()
 
 
+@app.get("/api/v1/quotes", dependencies=[Depends(require_admin)])
+def list_quotes(session: Session = Depends(get_session)):
+    rows = session.exec(select(Quote, WorkOrder, Customer, Vehicle)
+                        .join(WorkOrder, Quote.work_order_id == WorkOrder.id)
+                        .join(Customer, WorkOrder.customer_id == Customer.id)
+                        .join(Vehicle, WorkOrder.vehicle_id == Vehicle.id)
+                        .order_by(Quote.created_at.desc(), Quote.id.desc())).all()
+    return [{**quote.model_dump(), "customer_name": customer.full_name,
+             "customer_id": customer.id, "order_code": order.code, "vehicle_plate": vehicle.plate}
+            for quote, order, customer, vehicle in rows]
+
+
+@app.put("/api/v1/quotes/{quote_id}", response_model=Quote, dependencies=[Depends(require_admin)])
+def update_quote(quote_id: int, data: QuoteCreate, session: Session = Depends(get_session)):
+    quote = session.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Cotización no encontrada")
+    if quote.status != "draft":
+        raise HTTPException(409, "Solo se pueden editar cotizaciones en borrador")
+    quote.sqlmodel_update(data.model_dump())
+    session.add(quote)
+    session.commit()
+    session.refresh(quote)
+    return quote
+
+
+@app.get("/api/v1/quotes/{quote_id}/pdf", dependencies=[Depends(require_admin)])
+def download_quote(quote_id: int, session: Session = Depends(get_session)):
+    quote = session.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Cotización no encontrada")
+    order = session.get(WorkOrder, quote.work_order_id)
+    customer = session.get(Customer, order.customer_id)
+    vehicle = session.get(Vehicle, order.vehicle_id)
+    return Response(content=quote_pdf(quote, order, customer, vehicle), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="cotizacion-{quote.id}.pdf"'})
+
+
 @app.delete("/api/v1/quotes/{quote_id}", dependencies=[Depends(require_admin)])
 def delete_quote(quote_id: int, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
@@ -752,6 +790,7 @@ def publish_quote(quote_id: int, session: Session = Depends(get_session)):
     order = session.get(WorkOrder, quote.work_order_id)
     if order:
         order.status = WorkStatus.awaiting_approval
+        order.total_clp = quote.labor_clp + quote.parts_clp
         session.add(order)
     session.commit()
     session.refresh(quote)

@@ -144,3 +144,43 @@ def sale_receipt_pdf(sale, items: list, customer=None, vehicle=None, payments: l
     story += [Spacer(1, 3 * mm), Paragraph(f"Estado de venta: {_text(sale.status)}<br/>Pagos: {_text(payment_summary)}", styles["GudexSmall"])]
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buffer.getvalue()
+
+
+def quote_pdf(quote, order, customer, vehicle) -> bytes:
+    buffer = BytesIO()
+    code = f"COT-{quote.id:06d}"
+    doc, styles = _document(buffer, f"Cotización {code}")
+    story = _header(styles, "Cotización", code, quote.created_at)
+    if quote.status == "draft":
+        story.append(Paragraph("BORRADOR · Pendiente de envío al cliente", styles["Heading2"]))
+    for label, value in (
+        ("Cliente", customer.full_name), ("RUT", customer.rut),
+        ("Vehículo", f"{vehicle.make} {vehicle.model} · {vehicle.plate}"),
+        ("Orden de trabajo", order.code),
+    ):
+        story.append(Paragraph(f"<b>{label}:</b> {_text(value)}", styles["GudexBody"]))
+    story += [Spacer(1, 5 * mm), Paragraph("Trabajo propuesto", styles["Heading2"]),
+              Paragraph(_text(quote.description), styles["GudexBody"])]
+    if quote.notes:
+        story += [Paragraph("Detalle y observaciones", styles["Heading2"]),
+                  Paragraph(_text(quote.notes), styles["GudexBody"])]
+    money = lambda value: "$" + f"{value:,}".replace(",", ".")
+    table = Table([
+        ["Concepto", "Valor (CLP)"],
+        ["Mano de obra / servicios", money(quote.labor_clp)],
+        ["Repuestos e insumos", money(quote.parts_clp)],
+        ["TOTAL", money(quote.labor_clp + quote.parts_clp)],
+    ], colWidths=[120 * mm, 51 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), YELLOW),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, RED),
+    ]))
+    story += [Spacer(1, 6 * mm), table, Spacer(1, 4 * mm),
+              Paragraph("Cotización de trabajos propuestos. No acredita pago ni sustituye una boleta o factura.", styles["GudexSmall"])]
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    return buffer.getvalue()

@@ -25,3 +25,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/gudex-logo.png
+    - assets/catalogo-servicios.json

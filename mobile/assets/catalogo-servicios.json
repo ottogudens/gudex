@@ -1,0 +1,302 @@
+[
+  {
+    "code": "LUB-001",
+    "category": "Lubricentro",
+    "name": "Cambio de aceite de motor y filtro"
+  },
+  {
+    "code": "LUB-002",
+    "category": "Lubricentro",
+    "name": "Cambio de filtro de aire del motor"
+  },
+  {
+    "code": "LUB-003",
+    "category": "Lubricentro",
+    "name": "Cambio de filtro de combustible"
+  },
+  {
+    "code": "LUB-004",
+    "category": "Lubricentro",
+    "name": "Cambio de filtro de habitáculo"
+  },
+  {
+    "code": "LUB-005",
+    "category": "Lubricentro",
+    "name": "Cambio de aceite de caja manual"
+  },
+  {
+    "code": "LUB-006",
+    "category": "Lubricentro",
+    "name": "Mantención de transmisión automática"
+  },
+  {
+    "code": "LUB-007",
+    "category": "Lubricentro",
+    "name": "Cambio de aceite de diferencial"
+  },
+  {
+    "code": "LUB-008",
+    "category": "Lubricentro",
+    "name": "Cambio de aceite de caja de transferencia"
+  },
+  {
+    "code": "LUB-009",
+    "category": "Lubricentro",
+    "name": "Engrase de componentes"
+  },
+  {
+    "code": "MAN-001",
+    "category": "Mantención preventiva",
+    "name": "Mantención por kilometraje"
+  },
+  {
+    "code": "MAN-002",
+    "category": "Mantención preventiva",
+    "name": "Inspección general del vehículo"
+  },
+  {
+    "code": "MAN-003",
+    "category": "Mantención preventiva",
+    "name": "Revisión previa a viaje"
+  },
+  {
+    "code": "MAN-004",
+    "category": "Mantención preventiva",
+    "name": "Revisión previa a revisión técnica"
+  },
+  {
+    "code": "MAN-005",
+    "category": "Mantención preventiva",
+    "name": "Cambio de plumillas"
+  },
+  {
+    "code": "DIA-001",
+    "category": "Diagnóstico",
+    "name": "Diagnóstico con scanner automotriz"
+  },
+  {
+    "code": "DIA-002",
+    "category": "Diagnóstico",
+    "name": "Diagnóstico de fallas de motor"
+  },
+  {
+    "code": "DIA-003",
+    "category": "Diagnóstico",
+    "name": "Diagnóstico de ruidos y vibraciones"
+  },
+  {
+    "code": "DIA-004",
+    "category": "Diagnóstico",
+    "name": "Revisión de fugas de fluidos"
+  },
+  {
+    "code": "FRE-001",
+    "category": "Frenos",
+    "name": "Inspección del sistema de frenos"
+  },
+  {
+    "code": "FRE-002",
+    "category": "Frenos",
+    "name": "Cambio de pastillas de freno"
+  },
+  {
+    "code": "FRE-003",
+    "category": "Frenos",
+    "name": "Cambio de discos de freno"
+  },
+  {
+    "code": "FRE-004",
+    "category": "Frenos",
+    "name": "Cambio de balatas de freno"
+  },
+  {
+    "code": "FRE-005",
+    "category": "Frenos",
+    "name": "Mantención de frenos de tambor"
+  },
+  {
+    "code": "FRE-006",
+    "category": "Frenos",
+    "name": "Cambio de líquido de frenos y purgado"
+  },
+  {
+    "code": "FRE-007",
+    "category": "Frenos",
+    "name": "Mantención de cálipers"
+  },
+  {
+    "code": "FRE-008",
+    "category": "Frenos",
+    "name": "Revisión y ajuste de freno de estacionamiento"
+  },
+  {
+    "code": "SUS-001",
+    "category": "Suspensión y dirección",
+    "name": "Inspección de suspensión y dirección"
+  },
+  {
+    "code": "SUS-002",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de amortiguadores"
+  },
+  {
+    "code": "SUS-003",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de cazoletas"
+  },
+  {
+    "code": "SUS-004",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de bandejas y bujes"
+  },
+  {
+    "code": "SUS-005",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de rótulas"
+  },
+  {
+    "code": "SUS-006",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de terminales y axiales de dirección"
+  },
+  {
+    "code": "SUS-007",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de bieletas y bujes de barra estabilizadora"
+  },
+  {
+    "code": "SUS-008",
+    "category": "Suspensión y dirección",
+    "name": "Cambio de rodamientos de rueda"
+  },
+  {
+    "code": "NEU-001",
+    "category": "Neumáticos",
+    "name": "Montaje y cambio de neumáticos"
+  },
+  {
+    "code": "NEU-002",
+    "category": "Neumáticos",
+    "name": "Balanceo de ruedas"
+  },
+  {
+    "code": "NEU-003",
+    "category": "Neumáticos",
+    "name": "Alineación de dirección"
+  },
+  {
+    "code": "NEU-004",
+    "category": "Neumáticos",
+    "name": "Rotación de neumáticos"
+  },
+  {
+    "code": "NEU-005",
+    "category": "Neumáticos",
+    "name": "Reparación de pinchazos"
+  },
+  {
+    "code": "MOT-001",
+    "category": "Motor",
+    "name": "Cambio de bujías"
+  },
+  {
+    "code": "MOT-002",
+    "category": "Motor",
+    "name": "Cambio de bobinas de encendido"
+  },
+  {
+    "code": "MOT-003",
+    "category": "Motor",
+    "name": "Limpieza de cuerpo de aceleración"
+  },
+  {
+    "code": "MOT-004",
+    "category": "Motor",
+    "name": "Servicio de inyectores"
+  },
+  {
+    "code": "MOT-005",
+    "category": "Motor",
+    "name": "Cambio de correa de accesorios"
+  },
+  {
+    "code": "MOT-006",
+    "category": "Motor",
+    "name": "Cambio de kit de distribución"
+  },
+  {
+    "code": "MOT-007",
+    "category": "Motor",
+    "name": "Cambio de soportes de motor y caja"
+  },
+  {
+    "code": "REF-001",
+    "category": "Refrigeración",
+    "name": "Inspección del sistema de refrigeración"
+  },
+  {
+    "code": "REF-002",
+    "category": "Refrigeración",
+    "name": "Cambio de líquido refrigerante"
+  },
+  {
+    "code": "REF-003",
+    "category": "Refrigeración",
+    "name": "Cambio de termostato"
+  },
+  {
+    "code": "REF-004",
+    "category": "Refrigeración",
+    "name": "Cambio de bomba de agua"
+  },
+  {
+    "code": "REF-005",
+    "category": "Refrigeración",
+    "name": "Cambio de radiador y mangueras"
+  },
+  {
+    "code": "ELE-001",
+    "category": "Electricidad y batería",
+    "name": "Prueba de batería y sistema de carga"
+  },
+  {
+    "code": "ELE-002",
+    "category": "Electricidad y batería",
+    "name": "Cambio de batería"
+  },
+  {
+    "code": "ELE-003",
+    "category": "Electricidad y batería",
+    "name": "Diagnóstico de sistema de arranque"
+  },
+  {
+    "code": "ELE-004",
+    "category": "Electricidad y batería",
+    "name": "Cambio de alternador"
+  },
+  {
+    "code": "ELE-005",
+    "category": "Electricidad y batería",
+    "name": "Cambio de motor de arranque"
+  },
+  {
+    "code": "ELE-006",
+    "category": "Electricidad y batería",
+    "name": "Revisión y cambio de luces"
+  },
+  {
+    "code": "TRA-001",
+    "category": "Embrague y transmisión",
+    "name": "Cambio de kit de embrague"
+  },
+  {
+    "code": "TRA-002",
+    "category": "Embrague y transmisión",
+    "name": "Cambio de homocinéticas y fuelles"
+  },
+  {
+    "code": "TRA-003",
+    "category": "Embrague y transmisión",
+    "name": "Revisión del sistema hidráulico de embrague"
+  }
+]

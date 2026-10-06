@@ -285,9 +285,9 @@ class WorkOrderEvidenceRead(SQLModel):
 
 
 class QuoteCreate(SQLModel):
-    description: str
-    labor_clp: int = 0
-    parts_clp: int = 0
+    description: str = Field(min_length=1, max_length=250, pattern=r"\S")
+    labor_clp: int = Field(default=0, ge=0)
+    parts_clp: int = Field(default=0, ge=0)
     notes: Optional[str] = None
 
 
