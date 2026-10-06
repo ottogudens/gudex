@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     ai_base_url: str = "https://api.openai.com/v1"
     ai_max_output_tokens: int = 900
     ai_audit_retention_days: int = 90
+    sentry_dsn: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

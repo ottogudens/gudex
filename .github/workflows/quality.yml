@@ -8,6 +8,23 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        db: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gudex_test
+          POSTGRES_USER: gudex
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -21,7 +38,14 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev]'
       - run: python -m compileall -q app
-      - run: pytest tests -q --strict-markers
+      - name: Run tests (SQLite)
+        if: matrix.db == 'sqlite'
+        run: pytest tests -q --strict-markers
+      - name: Run tests (PostgreSQL)
+        if: matrix.db == 'postgres'
+        env:
+          DATABASE_URL: postgresql://gudex:password@localhost:5432/gudex_test
+        run: pytest tests -q --strict-markers
 
   mobile:
     runs-on: ubuntu-latest

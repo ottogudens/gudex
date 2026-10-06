@@ -28,6 +28,7 @@ from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
     PasswordChange, ProductUpdate, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
+from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
 from app.routers.integrations import router as integrations_router
@@ -38,6 +39,19 @@ from app.services import google
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
+
+if settings.sentry_dsn:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.app_env,
+            traces_sample_rate=0.1 if _is_production else 1.0,
+        )
+        logger.info("Sentry inicializado correctamente para %s", settings.app_env)
+    except Exception as exc:
+        logger.warning("No se pudo inicializar Sentry: %s", exc)
+
 # En producción no se publica el esquema completo de la API.
 app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro",
               docs_url=None if _is_production else "/docs", redoc_url=None if _is_production else "/redoc",
@@ -48,6 +62,8 @@ LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 MANUAL_PAYMENT_METHODS = {"cash", "card", "transfer"}
 EXTERNAL_PAYMENT_METHODS = {"mercado_pago", "mercado_pago_checkout"}
 REVERSAL_STATUSES = {"refunded", "charged_back"}
+DEFAULT_PAGE_LIMIT = 50
+MAX_PAGE_LIMIT = 200
 app.add_middleware(AuthenticationMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -68,11 +84,12 @@ def on_startup() -> None:
             raise RuntimeError("En producción JWT_SECRET debe ser una clave aleatoria de al menos 32 caracteres")
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
-    # Las migraciones Alembic son el mecanismo principal. Este segundo control
-    # es deliberadamente aditivo: Railway puede omitir un predeploy en un
-    # servicio ya creado y create_all(checkfirst) agrega solo tablas faltantes,
-    # sin alterar ni borrar datos existentes.
-    create_db_and_tables()
+    if _is_production:
+        # En producción la BD debe estar al día con Alembic (railway.json preDeployCommand).
+        # create_db_and_tables() solo se usa en desarrollo y tests.
+        logger.info("Producción: se omite create_db_and_tables(); Alembic es el único mecanismo de migración.")
+    else:
+        create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     if not uploads_are_persistent():
         logger.error("UPLOAD_DIR=%s no está en un volumen persistente: los PDFs y evidencias se perderán en el "
@@ -149,9 +166,10 @@ def change_password(data: PasswordChange, request: Request, session: Session = D
     user = session.exec(select(User).where(User.email == request.state.user_email)).first()
     if not user or not verify_password(data.current_password, user.password_hash):
         raise HTTPException(401, "La contraseña actual es incorrecta")
-    minimum_length = 6 if user.role == UserRole.customer else 12
-    if len(data.new_password) < minimum_length:
-        raise HTTPException(422, f"La nueva contraseña debe tener al menos {minimum_length} caracteres")
+    is_customer = user.role == UserRole.customer
+    error = validate_password(data.new_password, is_customer=is_customer)
+    if error:
+        raise HTTPException(422, error)
     user.password_hash = hash_password(data.new_password)
     user.token_version += 1
     session.add(user)
@@ -164,9 +182,10 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
     email = data.email.strip().lower()
     if session.exec(select(User).where(User.email == email)).first():
         raise HTTPException(409, "Ya existe un usuario con ese correo")
-    minimum_length = 6 if data.role == UserRole.customer else 12
-    if len(data.password) < minimum_length:
-        raise HTTPException(422, f"La contraseña debe tener al menos {minimum_length} caracteres")
+    is_customer = data.role == UserRole.customer
+    error = validate_password(data.password, is_customer=is_customer)
+    if error:
+        raise HTTPException(422, error)
     if data.role == UserRole.customer and (not data.customer_id or not session.get(Customer, data.customer_id)):
         raise HTTPException(422, "Un usuario cliente debe vincularse a un cliente registrado")
     if data.role != UserRole.customer and data.customer_id is not None:
@@ -266,6 +285,10 @@ async def create_customer_with_portal_access(data: CustomerPortalAccessCreate, r
         raise HTTPException(422, "El correo es obligatorio para crear acceso al portal")
     if data.password and not data.create_portal_access:
         raise HTTPException(422, "Activa el acceso al portal para definir una contraseña")
+    if data.password:
+        pwd_err = validate_password(data.password, is_customer=True)
+        if pwd_err:
+            raise HTTPException(422, pwd_err)
     if data.rut and session.exec(select(Customer).where(Customer.rut == data.rut)).first():
         raise HTTPException(409, "Ya existe un cliente con ese RUT")
     if session.exec(select(Customer).where(Customer.email == data.email)).first() or session.exec(select(User).where(User.email == data.email)).first():
@@ -289,6 +312,9 @@ def set_customer_portal_password(customer_id: int, data: CustomerPortalPasswordS
     customer = session.get(Customer, customer_id)
     if not customer or not customer.email:
         raise HTTPException(404, "Cliente con correo registrado no encontrado")
+    pwd_err = validate_password(data.password, is_customer=True)
+    if pwd_err:
+        raise HTTPException(422, pwd_err)
     user = session.exec(select(User).where(User.customer_id == customer_id, User.role == UserRole.customer)).first()
     email_owner = session.exec(select(User).where(User.email == customer.email)).first()
     if email_owner and (not user or email_owner.id != user.id):
@@ -325,6 +351,9 @@ async def resend_customer_invitation(customer_id: int, request: Request, session
 
 @app.post("/auth/customer/activate", dependencies=[Depends(rate_limit("customer-token", 10, 15 * 60))])
 def activate_customer_access(data: CustomerAccessTokenConfirm, session: Session = Depends(get_session)):
+    pwd_err = validate_password(data.password, is_customer=True)
+    if pwd_err:
+        raise HTTPException(422, pwd_err)
     token_hash = hashlib.sha256(data.token.encode()).hexdigest()
     record = session.exec(select(CustomerAccessToken).where(CustomerAccessToken.token_hash == token_hash)).first()
     now = datetime.now(timezone.utc)
@@ -354,6 +383,9 @@ async def request_customer_password_reset(data: CustomerPasswordResetRequest, re
 
 @app.post("/auth/customer/password-reset/confirm", dependencies=[Depends(rate_limit("customer-token", 10, 15 * 60))])
 def confirm_customer_password_reset(data: CustomerAccessTokenConfirm, session: Session = Depends(get_session)):
+    pwd_err = validate_password(data.password, is_customer=True)
+    if pwd_err:
+        raise HTTPException(422, pwd_err)
     token_hash = hashlib.sha256(data.token.encode()).hexdigest()
     record = session.exec(select(CustomerAccessToken).where(CustomerAccessToken.token_hash == token_hash)).first()
     now = datetime.now(timezone.utc)
@@ -396,8 +428,10 @@ def create_customer(data: CustomerCreate, session: Session = Depends(get_session
 
 
 @app.get("/api/v1/customers", response_model=list[Customer], dependencies=[Depends(require_staff)])
-def list_customers(q: str | None = None, session: Session = Depends(get_session)):
-    statement = select(Customer).order_by(Customer.full_name)
+def list_customers(q: str | None = None, limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+                   session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
+    statement = select(Customer).order_by(Customer.full_name).offset(offset).limit(limit)
     if q:
         statement = statement.where(Customer.full_name.contains(q))
     return session.exec(statement).all()
@@ -448,8 +482,11 @@ def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session))
 
 
 @app.get("/api/v1/vehicles", response_model=list[Vehicle], dependencies=[Depends(require_staff)])
-def list_vehicles(customer_id: int | None = None, plate: str | None = None, session: Session = Depends(get_session)):
-    statement = select(Vehicle).order_by(Vehicle.plate)
+def list_vehicles(customer_id: int | None = None, plate: str | None = None,
+                  limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+                  session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
+    statement = select(Vehicle).order_by(Vehicle.plate).offset(offset).limit(limit)
     if customer_id:
         statement = statement.where(Vehicle.customer_id == customer_id)
     if plate:
@@ -591,8 +628,11 @@ def create_work_order(data: WorkOrderCreate, session: Session = Depends(get_sess
 
 
 @app.get("/api/v1/work-orders", response_model=list[WorkOrder], dependencies=[Depends(require_staff)])
-def list_work_orders(status: WorkStatus | None = None, vehicle_id: int | None = None, session: Session = Depends(get_session)):
-    statement = select(WorkOrder).order_by(WorkOrder.opened_at.desc())
+def list_work_orders(status: WorkStatus | None = None, vehicle_id: int | None = None,
+                    limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+                    session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
+    statement = select(WorkOrder).order_by(WorkOrder.opened_at.desc()).offset(offset).limit(limit)
     if status:
         statement = statement.where(WorkOrder.status == status)
     if vehicle_id:
@@ -743,12 +783,14 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
 
 
 @app.get("/api/v1/quotes", dependencies=[Depends(require_admin)])
-def list_quotes(session: Session = Depends(get_session)):
+def list_quotes(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0, session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     rows = session.exec(select(Quote, WorkOrder, Customer, Vehicle)
                         .join(WorkOrder, Quote.work_order_id == WorkOrder.id)
                         .join(Customer, WorkOrder.customer_id == Customer.id)
                         .join(Vehicle, WorkOrder.vehicle_id == Vehicle.id)
-                        .order_by(Quote.created_at.desc(), Quote.id.desc())).all()
+                        .order_by(Quote.created_at.desc(), Quote.id.desc())
+                        .offset(offset).limit(limit)).all()
     return [{**quote.model_dump(), "customer_name": customer.full_name,
              "customer_id": customer.id, "order_code": order.code, "vehicle_plate": vehicle.plate}
             for quote, order, customer, vehicle in rows]
@@ -867,13 +909,16 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
 
 
 @app.get("/api/v1/appointments", response_model=list[Appointment])
-def list_appointments(from_date: datetime | None = None, to_date: datetime | None = None, session: Session = Depends(get_session)):
+def list_appointments(from_date: datetime | None = None, to_date: datetime | None = None,
+                      limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+                      session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     statement = select(Appointment).order_by(Appointment.starts_at)
     if from_date:
         statement = statement.where(Appointment.starts_at >= from_date)
     if to_date:
         statement = statement.where(Appointment.starts_at < to_date)
-    return session.exec(statement).all()
+    return session.exec(statement.offset(offset).limit(limit)).all()
 
 
 @app.patch("/api/v1/appointments/{appointment_id}/status", response_model=Appointment, dependencies=[Depends(require_admin)])
@@ -993,10 +1038,13 @@ def create_product(data: ProductCreate, session: Session = Depends(get_session))
 
 
 @app.get("/api/v1/products", response_model=list[Product])
-def list_products(low_stock: bool = False, session: Session = Depends(get_session)):
+def list_products(low_stock: bool = False, limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+                  session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     statement = select(Product).where(Product.active == True).order_by(Product.name)  # noqa: E712
-    products = session.exec(statement).all()
-    return [p for p in products if p.stock_quantity <= p.minimum_quantity] if low_stock else products
+    if low_stock:
+        statement = statement.where(Product.stock_quantity <= Product.minimum_quantity)
+    return session.exec(statement.offset(offset).limit(limit)).all()
 
 
 @app.patch("/api/v1/products/{product_id}", response_model=Product, dependencies=[Depends(require_admin)])
@@ -1227,15 +1275,26 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
 
 
 @app.get("/api/v1/sales", dependencies=[Depends(require_admin)])
-def list_sales(session: Session = Depends(get_session)):
-    sales = session.exec(select(Sale).order_by(Sale.created_at.desc())).all()
+def list_sales(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+              session: Session = Depends(get_session)):
+    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
+    sales = session.exec(select(Sale).order_by(Sale.created_at.desc()).offset(offset).limit(limit)).all()
+    if not sales:
+        return []
+    sale_ids = [sale.id for sale in sales]
+    items_by_sale: dict[int, list] = {sid: [] for sid in sale_ids}
+    for item in session.exec(select(SaleItem).where(SaleItem.sale_id.in_(sale_ids))).all():
+        items_by_sale[item.sale_id].append(item)
+    payments_by_sale: dict[int, list] = {sid: [] for sid in sale_ids}
+    for payment in session.exec(select(Payment).where(Payment.sale_id.in_(sale_ids))).all():
+        payments_by_sale[payment.sale_id].append(payment)
     return [{
         "id": sale.id, "receipt_code": sale.receipt_code, "customer_id": sale.customer_id,
         "vehicle_id": sale.vehicle_id, "work_order_id": sale.work_order_id,
         "subtotal_clp": sale.subtotal_clp, "discount_clp": sale.discount_clp,
         "total_clp": sale.total_clp, "status": sale.status, "created_at": sale.created_at,
-        "items": session.exec(select(SaleItem).where(SaleItem.sale_id == sale.id)).all(),
-        "payments": session.exec(select(Payment).where(Payment.sale_id == sale.id)).all(),
+        "items": items_by_sale.get(sale.id, []),
+        "payments": payments_by_sale.get(sale.id, []),
     } for sale in sales]
 
 
