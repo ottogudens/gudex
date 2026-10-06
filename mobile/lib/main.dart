@@ -32,9 +32,9 @@ abstract final class GudexColors {
 }
 
 const _storage = FlutterSecureStorage();
-// La aplicación usa exclusivamente la API pública de Gudex. Las credenciales
-// de PostgreSQL pertenecen solo al backend y nunca deben llegar al cliente.
-const _apiBaseUrl = 'https://bknd.gudex.cl';
+// La aplicación usa la API pública configurada por compilación (--dart-define=API_URL=...)
+// o recurre a la URL de producción si no se especifica.
+const _apiBaseUrl = String.fromEnvironment('API_URL', defaultValue: 'https://bknd.gudex.cl');
 
 Future<void> toggleGudexTheme() async {
   final next = _themeMode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;

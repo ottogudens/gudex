@@ -10,5 +10,4 @@ mobile/.dart_tool/
 mobile/.flutter-plugins*
 mobile/build/
 mobile/.packages
-mobile/pubspec.lock
 .DS_Store
