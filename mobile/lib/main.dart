@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -12,29 +13,27 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
+import 'services/api_client.dart';
+import 'services/draft_store.dart';
+import 'core/constants.dart';
+import 'core/theme.dart';
+import 'providers/auth_provider.dart';
+import 'screens/auth/customer_access_page.dart';
+import 'screens/auth/login_page.dart';
+
 part 'quotes_screen.dart';
 
-final _themeMode = ValueNotifier<ThemeMode>(ThemeMode.light);
-
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  _themeMode.value = await _storage.read(key: 'theme_mode') == 'dark' ? ThemeMode.dark : ThemeMode.light;
-  runApp(const LubricentroApp());
-}
-
-abstract final class GudexColors {
-  static const ink = Color(0xFF242424);
-  static const primary = Color(0xFFED0606);
-  static const secondary = Color(0xFFFFE600);
-  static const canvas = Color(0xFFF7F7F7);
-  static const line = Color(0xFFE3E3E3);
-  static const success = Color(0xFF237A57);
-}
-
+// ---------------------------------------------------------------------------
+// Backward-compatible aliases so the existing screen code (below) continues
+// to compile without changes.  These will be removed incrementally as each
+// screen is extracted into its own file.
+// ---------------------------------------------------------------------------
 const _storage = FlutterSecureStorage();
-// La aplicación usa la API pública configurada por compilación (--dart-define=API_URL=...)
-// o recurre a la URL de producción si no se especifica.
-const _apiBaseUrl = String.fromEnvironment('API_URL', defaultValue: 'https://bknd.gudex.cl');
+const _apiBaseUrl = apiBaseUrl;
+
+// Keep the global ValueNotifier alive for screens that still reference it
+// directly.  New code should use [themeModeProvider] instead.
+final _themeMode = ValueNotifier<ThemeMode>(ThemeMode.light);
 
 Future<void> toggleGudexTheme() async {
   final next = _themeMode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
@@ -48,193 +47,20 @@ IconButton gudexThemeButton(BuildContext context) => IconButton(
       onPressed: toggleGudexTheme,
     );
 
-const _statusLabels = <String, String>{
-  'received': 'Recibida', 'inspecting': 'En inspección', 'quoted': 'Cotizada',
-  'awaiting_approval': 'Esperando autorización', 'quote_rejected': 'Cotización rechazada',
-  'approved': 'Aprobada', 'in_progress': 'En proceso', 'ready': 'Lista',
-  'delivered': 'Entregada', 'cancelled': 'Cancelada', 'draft': 'Borrador',
-  'sent': 'Enviada', 'rejected': 'Rechazada', 'paid': 'Pagada', 'open': 'Abierta',
-  'requested': 'Solicitada', 'confirmed': 'Confirmada', 'completed': 'Completada',
-  'pending': 'Pendiente', 'pending_external': 'Pago externo pendiente',
-  'refunded': 'Reembolsada', 'charged_back': 'Contracargo', 'needs_refund': 'Requiere devolución',
-  'recorded': 'Registrado', 'normal': 'Normal', 'observation': 'Observación',
-  'failed': 'Falla', 'not_inspected': 'No inspeccionado', 'not_applicable': 'No aplica',
-  'active': 'Activo', 'inactive': 'Inactivo', 'cash': 'Efectivo',
-  'card': 'Tarjeta', 'mercado_pago': 'Mercado Pago',
-};
+// Re-export helpers under their old private names so the rest of the file
+// keeps compiling.
+const _statusLabels = statusLabels;
+const _fieldLabels = fieldLabels;
 
-const _fieldLabels = <String, String>{
-  'service_type': 'Tipo de servicio', 'starts_at': 'Inicio', 'ends_at': 'Fin',
-  'created_at': 'Creado', 'updated_at': 'Actualizado', 'stock_quantity': 'Stock',
-  'price_clp': 'Precio', 'cost_clp': 'Costo', 'payment_method': 'Medio de pago',
-  'full_name': 'Nombre', 'phone': 'Teléfono', 'email': 'Correo', 'plate': 'Patente',
-  'make': 'Marca', 'model': 'Modelo', 'year': 'Año', 'current_mileage_km': 'Kilometraje',
-  'reported_symptoms': 'Síntomas informados', 'diagnosis': 'Diagnóstico', 'notes': 'Notas',
-  'technician_name': 'Técnico', 'status': 'Estado', 'role': 'Perfil',
-};
-
-String spanishStatus(dynamic value) {
-  final status = value?.toString() ?? '';
-  return _statusLabels[status] ?? status.replaceAll('_', ' ');
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  _themeMode.value = await loadThemeMode();
+  runApp(const ProviderScope(child: LubricentroApp()));
 }
 
-String spanishField(String key) => _fieldLabels[key] ?? key.replaceAll('_', ' ');
-
-String spanishRole(dynamic value) {
-  switch (value?.toString()) {
-    case 'admin': return 'Administración';
-    case 'mechanic': return 'Mecánico';
-    case 'customer': return 'Cliente';
-    default: return value?.toString() ?? '';
-  }
-}
-
-class ApiClient {
-  ApiClient(this.baseUrl, {this.token});
-  final String baseUrl;
-  final String? token;
-
-  Map<String, String> get _headers => {
-        'Accept': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
-
-  Future<Map<String, dynamic>> login(String email, String password) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/auth/token'),
-      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: {'username': email, 'password': password},
-    );
-    final body = _decode(response);
-    return Map<String, dynamic>.from(body as Map);
-  }
-
-  Future<dynamic> get(String path) async {
-    final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
-    return _decode(response);
-  }
-
-  Future<Uint8List> getBytes(String path) async {
-    final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Error HTTP ${response.statusCode}');
-    }
-    return response.bodyBytes;
-  }
-
-  Future<dynamic> post(String path) async {
-    final response = await http.post(Uri.parse('$baseUrl$path'), headers: _headers);
-    return _decode(response);
-  }
-
-  Future<dynamic> postJson(String path, Map<String, dynamic> data) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl$path'),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    return _decode(response);
-  }
-
-  Future<dynamic> patchJson(String path, Map<String, dynamic> data) async {
-    final response = await http.patch(
-      Uri.parse('$baseUrl$path'),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    return _decode(response);
-  }
-
-  Future<dynamic> putJson(String path, Map<String, dynamic> data) async {
-    final response = await http.put(
-      Uri.parse('$baseUrl$path'),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    return _decode(response);
-  }
-
-  Future<dynamic> delete(String path) async {
-    final response = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
-    return _decode(response);
-  }
-
-  Future<dynamic> uploadBytes(String path, List<int> bytes, String filename, {String? contentType}) async {
-    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
-    request.headers.addAll(_headers);
-    request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
-    return _decode(response);
-  }
-
-  dynamic _decode(http.Response response) {
-    final body = response.body.isEmpty ? null : jsonDecode(response.body);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = body is Map ? body['detail'] : null;
-      throw Exception(message?.toString() ?? 'Error HTTP ${response.statusCode}');
-    }
-    return body;
-  }
-}
-
-Future<void> openGudexPdf(ApiClient api, String path, String filename) async {
-  final bytes = await api.getBytes(path);
-  if (kIsWeb) {
-    await Printing.layoutPdf(onLayout: (_) async => bytes);
-  } else {
-    await Printing.sharePdf(bytes: bytes, filename: filename);
-  }
-}
-
-class WorkOrderDraftStore {
-  static String _key(int orderId) => 'work_order_draft_$orderId';
-  static String _receptionKey(int orderId) => 'work_order_reception_draft_$orderId';
-  static String _inspectionKey(int orderId, int inspectionId) => 'work_order_inspection_draft_${orderId}_$inspectionId';
-
-  static Future<Map<String, dynamic>?> _load(String key) async {
-    final stored = await _storage.read(key: key);
-    if (stored == null) return null;
-    try {
-      final decoded = jsonDecode(stored);
-      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
-    } on FormatException {
-      await _storage.delete(key: key);
-      return null;
-    }
-  }
-
-  static Future<Map<String, dynamic>?> load(int orderId) => _load(_key(orderId));
-
-  static Future<void> save(int orderId, {required String status, required String diagnosis}) => _storage.write(
-        key: _key(orderId),
-        value: jsonEncode({
-          'status': status,
-          'diagnosis': diagnosis,
-          'saved_at': DateTime.now().toUtc().toIso8601String(),
-        }),
-      );
-
-  static Future<void> clear(int orderId) => _storage.delete(key: _key(orderId));
-
-  static Future<Map<String, dynamic>?> loadReception(int orderId) => _load(_receptionKey(orderId));
-
-  static Future<void> saveReception(int orderId, Map<String, dynamic> data) => _storage.write(
-        key: _receptionKey(orderId),
-        value: jsonEncode({...data, 'saved_at': DateTime.now().toUtc().toIso8601String()}),
-      );
-
-  static Future<void> clearReception(int orderId) => _storage.delete(key: _receptionKey(orderId));
-
-  static Future<Map<String, dynamic>?> loadInspection(int orderId, int inspectionId) => _load(_inspectionKey(orderId, inspectionId));
-
-  static Future<void> saveInspection(int orderId, int inspectionId, Map<String, dynamic> data) => _storage.write(
-        key: _inspectionKey(orderId, inspectionId),
-        value: jsonEncode({...data, 'saved_at': DateTime.now().toUtc().toIso8601String()}),
-      );
-
-  static Future<void> clearInspection(int orderId, int inspectionId) => _storage.delete(key: _inspectionKey(orderId, inspectionId));
-}
 
 class LubricentroApp extends StatelessWidget {
   const LubricentroApp({super.key});
@@ -245,324 +71,71 @@ class LubricentroApp extends StatelessWidget {
         builder: (context, themeMode, _) => MaterialApp(
         title: 'Gudex',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: GudexColors.primary).copyWith(
-            primary: GudexColors.primary,
-            secondary: GudexColors.secondary,
-            surface: Colors.white,
-          ),
-          useMaterial3: true,
-          visualDensity: VisualDensity.adaptivePlatformDensity,
-          scaffoldBackgroundColor: GudexColors.canvas,
-          appBarTheme: const AppBarTheme(
-            backgroundColor: GudexColors.canvas,
-            foregroundColor: GudexColors.ink,
-            surfaceTintColor: Colors.transparent,
-            elevation: 1,
-            scrolledUnderElevation: 0,
-          ),
-          cardTheme: CardThemeData(
-            color: Colors.white,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            margin: const EdgeInsets.symmetric(vertical: 6),
-            shadowColor: const Color(0x1A242424),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: GudexColors.line),
-            ),
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: GudexColors.line),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: GudexColors.primary, width: 1.7),
-            ),
-            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFB3261E))),
-            focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFB3261E), width: 1.7)),
-          ),
-          filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(48, 48),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          outlinedButtonTheme: OutlinedButtonThemeData(
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(44, 44),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          dialogTheme: DialogThemeData(
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.transparent,
-            alignment: Alignment.center,
-            constraints: const BoxConstraints(maxWidth: 560),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          ),
-          snackBarTheme: SnackBarThemeData(behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-          pageTransitionsTheme: PageTransitionsTheme(builders: {
-            TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
-            TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
-          }),
-          navigationBarTheme: NavigationBarThemeData(
-            backgroundColor: Colors.white,
-            indicatorColor: const Color(0xFFFFF3A8),
-            elevation: 2,
-            labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
-              fontSize: 11,
-              fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
-            )),
-          ),
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: GudexColors.primary, brightness: Brightness.dark).copyWith(
-            primary: const Color(0xFFFF6B6B),
-            secondary: GudexColors.secondary,
-            surface: const Color(0xFF1D1D1F),
-          ),
-          useMaterial3: true,
-          visualDensity: VisualDensity.adaptivePlatformDensity,
-          scaffoldBackgroundColor: const Color(0xFF121212),
-          appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF121212), surfaceTintColor: Colors.transparent, elevation: 0, scrolledUnderElevation: 0),
-          cardTheme: CardThemeData(
-            color: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, elevation: 1,
-            margin: const EdgeInsets.symmetric(vertical: 6),
-            shadowColor: Colors.black26,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF3A3A3C))),
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true, fillColor: const Color(0xFF29292C),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF454549))),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFFF6B6B), width: 1.7)),
-          ),
-          dialogTheme: DialogThemeData(backgroundColor: const Color(0xFF1D1D1F), surfaceTintColor: Colors.transparent, alignment: Alignment.center, constraints: const BoxConstraints(maxWidth: 560), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-          snackBarTheme: SnackBarThemeData(behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-          navigationBarTheme: const NavigationBarThemeData(backgroundColor: Color(0xFF1D1D1F), indicatorColor: Color(0xFF643333)),
-        ),
+        theme: gudexLightTheme(),
+        darkTheme: gudexDarkTheme(),
         themeMode: themeMode,
         home: const SessionGate(),
       ));
 }
 
-class SessionGate extends StatefulWidget {
+class SessionGate extends ConsumerStatefulWidget {
   const SessionGate({super.key});
 
   @override
-  State<SessionGate> createState() => _SessionGateState();
+  ConsumerState<SessionGate> createState() => _SessionGateState();
 }
 
-class _SessionGateState extends State<SessionGate> {
-  String? _token;
-  String? _role;
-  String? _name;
-  late final String? _accessToken;
-  late final bool _isPasswordReset;
-  bool _loading = true;
-
+class _SessionGateState extends ConsumerState<SessionGate> {
   @override
   void initState() {
     super.initState();
-    _accessToken = Uri.base.queryParameters['invite'] ?? Uri.base.queryParameters['reset'];
-    _isPasswordReset = Uri.base.queryParameters.containsKey('reset');
-    _restore();
-  }
+    final invite = Uri.base.queryParameters['invite'];
+    final reset = Uri.base.queryParameters['reset'];
+    final accessToken = invite ?? reset;
+    final isPasswordReset = Uri.base.queryParameters.containsKey('reset');
 
-  Future<void> _restore() async {
-    final token = await _storage.read(key: 'access_token');
-    final role = await _storage.read(key: 'role');
-    final name = await _storage.read(key: 'full_name');
-    if (!mounted) return;
-    setState(() {
-      _token = token;
-      _role = role;
-      _name = name;
-      _loading = false;
-    });
-  }
-
-  Future<void> _signedIn(Map<String, dynamic> session) async {
-    await _storage.write(key: 'access_token', value: session['access_token'] as String);
-    await _storage.write(key: 'role', value: session['role'] as String);
-    await _storage.write(key: 'full_name', value: session['full_name'] as String);
-    if (!mounted) return;
-    setState(() {
-      _token = session['access_token'] as String;
-      _role = session['role'] as String;
-      _name = session['full_name'] as String;
-    });
-  }
-
-  Future<void> _signOut() async {
-    final themePreference = await _storage.read(key: 'theme_mode');
-    await _storage.deleteAll();
-    if (themePreference != null) await _storage.write(key: 'theme_mode', value: themePreference);
-    if (!mounted) return;
-    setState(() {
-      _token = null;
-      _role = null;
-      _name = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_accessToken != null) return CustomerAccessPage(token: _accessToken!, passwordReset: _isPasswordReset, apiBaseUrl: _apiBaseUrl);
-    if (_token == null || _role == null) return LoginPage(onSignedIn: _signedIn);
-    return HomePage(
-      token: _token!, baseUrl: _apiBaseUrl, role: _role!, name: _name ?? 'Usuario', onSignOut: _signOut,
-    );
-  }
-}
-
-class CustomerAccessPage extends StatefulWidget {
-  const CustomerAccessPage({required this.token, required this.passwordReset, required this.apiBaseUrl, super.key});
-  final String token;
-  final bool passwordReset;
-  final String apiBaseUrl;
-  @override
-  State<CustomerAccessPage> createState() => _CustomerAccessPageState();
-}
-
-class _CustomerAccessPageState extends State<CustomerAccessPage> {
-  final _password = TextEditingController();
-  final _confirm = TextEditingController();
-  bool _busy = false;
-  String? _error;
-  @override
-  void dispose() { _password.dispose(); _confirm.dispose(); super.dispose(); }
-  Future<void> _submit() async {
-    if (_password.text.length < 6) { setState(() => _error = 'La contraseña debe tener al menos 6 caracteres.'); return; }
-    if (_password.text != _confirm.text) { setState(() => _error = 'Las contraseñas no coinciden.'); return; }
-    setState(() { _busy = true; _error = null; });
-    try {
-      final path = widget.passwordReset ? '/auth/customer/password-reset/confirm' : '/auth/customer/activate';
-      await ApiClient(widget.apiBaseUrl).postJson(path, {'token': widget.token, 'password': _password.text});
-      if (mounted) setState(() => _error = 'Listo. Ya puedes cerrar esta página e iniciar sesión.');
-    } catch (error) { if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', '')); }
-    finally { if (mounted) setState(() => _busy = false); }
-  }
-  @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(widget.passwordReset ? 'Nueva contraseña' : 'Activar acceso'), actions: [gudexThemeButton(context)]), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 460), child: ListView(padding: const EdgeInsets.all(24), children: [
-    Text(widget.passwordReset ? 'Crea una nueva contraseña para tu portal.' : 'Crea una contraseña para acceder a tu portal Gudex.'), const SizedBox(height: 18),
-    TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña (6 caracteres mínimo)')),
-    const SizedBox(height: 12), TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña')),
-    if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
-    const SizedBox(height: 18), FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'Guardando…' : 'Guardar')),
-  ]))));
-}
-
-class LoginPage extends StatefulWidget {
-  const LoginPage({required this.onSignedIn, super.key});
-  final ValueChanged<Map<String, dynamic>> onSignedIn;
-
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> {
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  bool _busy = false;
-  String? _error;
-
-  Future<void> _submit() async {
-    setState(() { _busy = true; _error = null; });
-    try {
-      final session = await ApiClient(_apiBaseUrl).login(_email.text.trim(), _password.text);
-      widget.onSignedIn(session);
-    } catch (error) {
-      setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    if (accessToken != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(authProvider.notifier).setDeepLinkParams(
+              accessToken: accessToken,
+              isPasswordReset: isPasswordReset,
+            );
+      });
     }
   }
 
   @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    super.dispose();
-  }
+  Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(actions: [gudexThemeButton(context)]),
-        body: DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [GudexColors.ink, GudexColors.primary],
-            ),
-          ),
-          child: SafeArea(
-            child: LayoutBuilder(builder: (context, constraints) => Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 460),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(22),
-                  child: Card(
-                    margin: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    child: Padding(
-                      padding: EdgeInsets.all(constraints.maxWidth < 380 ? 22 : 30),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        Align(alignment: Alignment.centerLeft, child: Container(
-                          width: 250, height: 70,
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-                          padding: const EdgeInsets.all(8),
-                          child: Image.asset('assets/gudex-logo.png', fit: BoxFit.contain),
-                        )),
-                        const SizedBox(height: 22),
-                        Text('Gestión simple para tu lubricentro', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        const SizedBox(height: 28),
-                        TextField(controller: _email, keyboardType: TextInputType.emailAddress,
-                          autofillHints: const [AutofillHints.username, AutofillHints.email],
-                          decoration: const InputDecoration(labelText: 'Correo', prefixIcon: Icon(Icons.mail_outline))),
-                        const SizedBox(height: 14),
-                        TextField(controller: _password, obscureText: true,
-                          autofillHints: const [AutofillHints.password],
-                          decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock_outline)),
-                          onSubmitted: (_) => _submit()),
-                        if (_error != null) ...[
-                          const SizedBox(height: 14),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(color: Theme.of(context).colorScheme.errorContainer, borderRadius: BorderRadius.circular(12)),
-                            child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-                          ),
-                        ],
-                        const SizedBox(height: 22),
-                        FilledButton(
-                          onPressed: _busy ? null : _submit,
-                          child: _busy
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('Ingresar'),
-                        ),
-                      ]),
-                    ),
-                  ),
-                ),
-              ),
-            )),
-          ),
-        ),
+    if (authState.isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (authState.accessToken != null) {
+      return CustomerAccessPage(
+        token: authState.accessToken!,
+        passwordReset: authState.isPasswordReset,
+        apiBaseUrl: _apiBaseUrl,
       );
+    }
+
+    if (!authState.isAuthenticated) {
+      return const LoginPage();
+    }
+
+    return HomePage(
+      token: authState.token!,
+      baseUrl: _apiBaseUrl,
+      role: authState.role!,
+      name: authState.name ?? 'Usuario',
+    );
+  }
 }
+
+
+
+
 
 class _Module {
   const _Module(this.title, this.path, {this.keyName});
@@ -571,19 +144,18 @@ class _Module {
   final String? keyName;
 }
 
-class HomePage extends StatefulWidget {
-  const HomePage({required this.token, required this.baseUrl, required this.role, required this.name, required this.onSignOut, super.key});
+class HomePage extends ConsumerStatefulWidget {
+  const HomePage({required this.token, required this.baseUrl, required this.role, required this.name, super.key});
   final String token;
   final String baseUrl;
   final String role;
   final String name;
-  final VoidCallback onSignOut;
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends ConsumerState<HomePage> {
   int _selected = 0;
 
   List<_Module> get _modules {
@@ -694,7 +266,7 @@ class _HomePageState extends State<HomePage> {
           MaterialPageRoute(builder: (_) => _AssistantScreen(api: api, role: widget.role)))),
         if (widget.role == 'admin') IconButton(tooltip: 'Integraciones', icon: const Icon(Icons.link), onPressed: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => _IntegrationSettingsScreen(api: api)))),
-        IconButton(onPressed: widget.onSignOut, tooltip: 'Cerrar sesión', icon: const Icon(Icons.logout)),
+        IconButton(onPressed: () => ref.read(authProvider.notifier).signOut(), tooltip: 'Cerrar sesión', icon: const Icon(Icons.logout)),
       ]),
       body: useNavigationRail ? Row(children: [
         NavigationRail(

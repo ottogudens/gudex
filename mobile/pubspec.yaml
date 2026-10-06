@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_secure_storage: ^9.2.2
+  flutter_riverpod: ^2.4.9
   http: ^1.2.2
   image_picker: ^1.2.3
   file_picker: ^11.0.3
