@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class VehicleHistoryScreen extends StatefulWidget {
   const VehicleHistoryScreen({required this.api, required this.vehicleId, required this.portal, super.key});

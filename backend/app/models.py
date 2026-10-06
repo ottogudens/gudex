@@ -322,3 +322,51 @@ class AIInteraction(SQLModel, table=True):
     confirmed_at: Optional[datetime] = None
     result_summary: Optional[str] = None
     created_at: datetime = Field(default_factory=now_utc, index=True)
+
+
+class SocialBrand(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    name: str = "Gudex"
+    tone: str = "Cercano, claro y profesional"
+    audience: str = "Conductores y propietarios de vehículos"
+    primary_color: str = "#ED0606"
+    accent_color: str = "#FFE600"
+    call_to_action: str = "Agenda tu atención con nosotros"
+    contact: str = ""
+    logo_base64: str = ""
+
+
+class SocialPost(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    network: str
+    format: str = "square"
+    objective: str = "inform"
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id")
+    source_name: str = ""
+    brief: str = ""
+    caption: str = ""
+    headline: str = ""
+    image_base64: str = ""
+    brand_snapshot: str
+    status: str = Field(default="draft", index=True)
+    planned_at: Optional[datetime] = Field(default=None, index=True)
+    published_at: Optional[datetime] = None
+    created_by: str
+    approved_by: Optional[str] = None
+    generation_method: str = "manual"
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+class ServiceCategory(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=80, unique=True)
+
+
+class Service(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(max_length=40, unique=True)
+    name: str = Field(max_length=160)
+    category_id: int = Field(foreign_key="servicecategory.id", index=True)
+    description: str = Field(default="", max_length=2000)

@@ -42,6 +42,10 @@ Para desplegar backend y PostgreSQL en Railway, y Flutter Web en Vercel, sigue e
 - Citas locales con campos para vincular eventos de Google Calendar.
 - App Flutter inicial y portal de cliente restringido por cuenta.
 
+## Contenido y redes
+
+Administración dispone de marca, borradores desde productos o servicios, generación por plantilla o IA, revisión, calendario editorial y exportación PNG + texto. La publicación en redes es manual en esta etapa. Consulta la [guía del módulo](docs/contenido-y-redes.md).
+
 ## Integraciones externas
 
 Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace (Gmail, Drive y Calendar), el asistente IA y Mercado Pago usan integraciones de backend configurables en Railway. Checkout Pro confirma pagos mediante webhook verificado. La aplicación no emite aún boletas electrónicas: sus PDFs se rotulan como comprobantes internos y no sustituyen un DTE.
@@ -49,3 +53,29 @@ Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace
 ## Próximas etapas
 
 Las fases 1 a 4 están implementadas; las fases 5 y 6 ya tienen una primera entrega. Lo siguiente es validar visualmente la aplicación en dispositivos y navegador, probar Mercado Pago con credenciales sandbox o reales, y avanzar con operación sin conexión, respaldo de evidencias y la decisión tributaria. Revisa [el estado del desarrollo](docs/estado-del-desarrollo.md) y [el alcance de la fase 5](docs/fase-5-auditoria-visual.md).
+
+## Servicios y categorías
+
+Administración → **Servicios** permite buscar, agregar, editar y eliminar servicios y categorías.
+El catálogo se guarda en la base de datos y alimenta Cotizaciones y Contenido y redes.
+La migración `20261006_0007` importa el catálogo inicial; los reinicios no restauran servicios eliminados.
+Antes de eliminar una categoría, mueve o elimina sus servicios. Las cotizaciones ya emitidas mantienen sus descripciones.
+El equipo mecánico puede consultar el catálogo; solo administración puede modificarlo.
+
+## Diagnóstico de fallas con IA
+
+En **Asistente Gudex**, activa **Diagnóstico de falla**, selecciona el vehículo o la orden y describe
+los síntomas, las condiciones en que aparecen y las pruebas realizadas. El backend reúne los datos
+del vehículo, hasta ocho órdenes con inspecciones y antecedentes, los informes de scanner del vehículo
+(incluidos los que no tienen orden) y los adjuntos de sus órdenes. Los archivos importados de Drive que
+estén guardados como informes de scanner participan del mismo modo.
+
+La IA separa hechos con referencias, hipótesis y pruebas sugeridas. No sobrescribe el diagnóstico ni
+cambia la orden. La pantalla muestra qué documentos se pudieron leer. Se extrae texto de hasta ocho
+PDF de 10 MB como máximo, hasta veinte páginas y 4000 caracteres por documento. Las fotos solo aportan
+su descripción; los PDF escaneados sin texto requieren OCR o transcripción previa. No consulta documentos
+externos que no estén importados o vinculados al vehículo. Solo el equipo del taller accede a este modo.
+
+Requiere `AI_PROVIDER=openai`, `AI_API_KEY` y un modelo compatible configurado en Integraciones.
+El diagnóstico utiliza un máximo de 3000 tokens de respuesta. Los documentos se envían al proveedor como
+contexto autorizado; las fuentes almacenadas en la auditoría incluyen metadatos, sin duplicar su texto.

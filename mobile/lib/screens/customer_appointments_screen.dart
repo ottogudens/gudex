@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class CustomerAppointmentsScreen extends StatefulWidget {
   const CustomerAppointmentsScreen({required this.api, super.key});
@@ -60,7 +60,7 @@ class _CustomerAppointmentsScreenState extends State<CustomerAppointmentsScreen>
         title: const Text('Solicitar cita'),
         content: StatefulBuilder(builder: (context, update) => SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<int>(
-            value: vehicleId, 
+            initialValue: vehicleId,
             decoration: const InputDecoration(labelText: 'Vehículo'), 
             items: vehicles.map((v) => DropdownMenuItem(value: v['id'] as int, child: Text('${v['plate']} · ${v['make']}'))).toList(), 
             onChanged: (value) { if (value != null) update(() => vehicleId = value); }

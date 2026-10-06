@@ -1,3 +1,4 @@
+from typing import Literal
 import math
 from datetime import datetime
 from typing import Optional
@@ -424,6 +425,7 @@ class GoogleImportRequest(SQLModel):
 
 
 class AssistantQuery(SQLModel):
+    mode: Literal["general", "diagnostic"] = "general"
     message: str = Field(min_length=2, max_length=2000)
     context_type: str = "general"
     context_id: Optional[int] = None

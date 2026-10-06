@@ -33,6 +33,8 @@ from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
 from app.routers.integrations import router as integrations_router
 from app.routers.assistant import router as assistant_router
+from app.routers.social import router as social_router
+from app.routers.catalog import router as catalog_router
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
@@ -76,6 +78,8 @@ app.include_router(inspection_router)
 app.include_router(inspection_portal_router)
 app.include_router(integrations_router)
 app.include_router(assistant_router)
+app.include_router(social_router)
+app.include_router(catalog_router)
 
 
 def on_startup() -> None:

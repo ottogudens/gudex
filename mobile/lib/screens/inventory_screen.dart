@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class InventoryScreen extends StatefulWidget {
-  const InventoryScreen({required this.api, required this.canManage, super.key});
+  const InventoryScreen({required this.api, required this.canManage, this.onCreateSocialPost, super.key});
   final ApiClient api;
   final bool canManage;
+  final void Function(Map<String, dynamic>)? onCreateSocialPost;
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -145,7 +146,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           title: Text('Ajustar stock · ${product['name']}'),
           content: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
             DropdownButtonFormField<String>(
-              value: movement,
+              initialValue: movement,
               decoration: const InputDecoration(labelText: 'Movimiento'),
               items: const [
                 DropdownMenuItem(value: 'in', child: Text('Ingreso / recepción')),
@@ -275,8 +276,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
         IconButton(onPressed: () => _adjustStock(product), icon: const Icon(Icons.tune), tooltip: 'Ajustar stock'),
         PopupMenuButton<String>(
           tooltip: 'Acciones del producto',
-          onSelected: (value) { if (value == 'edit') _editProduct(product); else _archiveProduct(product); },
-          itemBuilder: (context) => const [
+          onSelected: (value) { if (value == 'social') { widget.onCreateSocialPost?.call(product); } else if (value == 'edit') { _editProduct(product); } else { _archiveProduct(product); } },
+          itemBuilder: (context) => [
+            if (widget.onCreateSocialPost != null) const PopupMenuItem(value: 'social', child: Text('Crear publicación')),
             PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
             PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Archivar'))),
           ],

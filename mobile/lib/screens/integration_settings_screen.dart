@@ -78,7 +78,7 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
       final chosen = await showDialog<String>(context: context, builder: (context) => AlertDialog(
         title: const Text('Modelo del asistente'),
         content: StatefulBuilder(builder: (context, update) => SizedBox(width: 440, child: DropdownButtonFormField<String>(
-          value: models.contains(selected) ? selected : null,
+          initialValue: models.contains(selected) ? selected : null,
           decoration: const InputDecoration(labelText: 'Modelo compatible'),
           items: models.map((model) => DropdownMenuItem(value: model, child: Text(model))).toList(),
           onChanged: (value) { if (value != null) update(() => selected = value); },

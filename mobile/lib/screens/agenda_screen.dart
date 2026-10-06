@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class AgendaScreen extends StatefulWidget {
   const AgendaScreen({required this.api, required this.role, super.key});
@@ -56,7 +56,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
         title: const Text('Agendar cita'), 
         content: StatefulBuilder(builder: (context, update) => Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<int>(
-            value: customerId, 
+            initialValue: customerId,
             decoration: const InputDecoration(labelText: 'Cliente'), 
             items: customers.map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['full_name'].toString()))).toList(), 
             onChanged: (value) { if (value != null) update(() => customerId = value); }

@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
-import '../../services/draft_store.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
+import '../services/draft_store.dart';
 import 'vehicle_history_screen.dart';
 
 class WorkshopScreen extends StatefulWidget {
@@ -145,7 +145,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           title: const Text('Registrar vehículo'),
           content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
             DropdownButtonFormField<int>(
-              value: customerId,
+              initialValue: customerId,
               decoration: const InputDecoration(labelText: 'Cliente *'),
               items: _customers.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text('${item['full_name']}'))).toList(),
               onChanged: (value) { if (value != null) updateDialog(() => customerId = value); },
@@ -277,7 +277,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         builder: (context) => StatefulBuilder(builder: (context, updateDialog) => AlertDialog(
           title: const Text('Editar vehículo'),
           content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            DropdownButtonFormField<int>(value: customerId, decoration: const InputDecoration(labelText: 'Cliente *'),
+            DropdownButtonFormField<int>(initialValue: customerId, decoration: const InputDecoration(labelText: 'Cliente *'),
               items: _customers.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text(item['full_name'].toString()))).toList(),
               onChanged: (value) { if (value != null) updateDialog(() => customerId = value); }),
             const SizedBox(height: 10),
@@ -349,14 +349,14 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
             title: const Text('Abrir orden de trabajo'),
             content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<int>(
-                value: customerId,
+                initialValue: customerId,
                 decoration: const InputDecoration(labelText: 'Cliente *'),
                 items: _customers.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text('${item['full_name']}'))).toList(),
                 onChanged: (value) { if (value != null) updateDialog(() { customerId = value; vehicleId = null; }); },
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<int>(
-                value: customerVehicles.any((v) => v['id'] == vehicleId) ? vehicleId : null,
+                initialValue: customerVehicles.any((v) => v['id'] == vehicleId) ? vehicleId : null,
                 decoration: const InputDecoration(labelText: 'Vehículo *'),
                 items: customerVehicles.map((item) => DropdownMenuItem<int>(value: item['id'] as int, child: Text('${item['plate']} · ${item['make']} ${item['model']}'))).toList(),
                 onChanged: (value) { if (value != null) updateDialog(() => vehicleId = value); },
@@ -685,7 +685,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
             TextFormField(controller: item, decoration: const InputDecoration(labelText: 'Punto inspeccionado *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
-              value: result,
+              initialValue: result,
               decoration: const InputDecoration(labelText: 'Resultado'),
               items: const [
                 DropdownMenuItem(value: 'normal', child: Text('Normal')),
@@ -781,7 +781,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               const SizedBox(height: 10),
             ],
             DropdownButtonFormField<String>(
-              value: result,
+              initialValue: result,
               decoration: const InputDecoration(labelText: 'Resultado'),
               items: const [
                 DropdownMenuItem(value: 'not_inspected', child: Text('No inspeccionado')),
@@ -856,7 +856,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               const Text('Estás editando un borrador local pendiente de envío.', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
             ],
-            DropdownButtonFormField<int>(value: fuel, decoration: const InputDecoration(labelText: 'Combustible'),
+            DropdownButtonFormField<int>(initialValue: fuel, decoration: const InputDecoration(labelText: 'Combustible'),
               items: [0, 25, 50, 75, 100].map((v) => DropdownMenuItem(value: v, child: Text('$v%'))).toList(),
               onChanged: (value) => update(() => fuel = value)),
             const SizedBox(height: 10),
@@ -927,7 +927,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
         bytes = await picked.readAsBytes();
         name = picked.name;
       }
-      if (bytes == null || name == null) throw Exception('No fue posible leer el archivo');
+      if (bytes == null) throw Exception('No fue posible leer el archivo');
       await widget.api.uploadBytes('/api/v1/work-orders/${widget.order['id']}/evidence', bytes, name);
       if (!mounted) return;
       setState(() { _evidence = _loadList('/api/v1/work-orders/${widget.order['id']}/evidence'); _report = _loadReport(); });
@@ -949,7 +949,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
       final decision = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => AlertDialog(
         title: const Text('Asignar mecánico'),
         content: StatefulBuilder(builder: (context, update) => DropdownButtonFormField<int?>(
-          value: selected,
+          initialValue: selected,
           decoration: const InputDecoration(labelText: 'Responsable'),
           items: [const DropdownMenuItem<int?>(value: null, child: Text('Sin asignar')), ...mechanics.map((item) => DropdownMenuItem<int?>(value: item['id'] as int, child: Text('${item['full_name']}')))],
           onChanged: (value) => update(() => selected = value),
@@ -1070,7 +1070,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
           ],
           const SizedBox(height: 18),
           DropdownButtonFormField<String>(
-            value: _statuses.contains(_status) ? _status : 'received',
+            initialValue: _statuses.contains(_status) ? _status : 'received',
             decoration: const InputDecoration(labelText: 'Estado del trabajo'),
             items: _statuses.map((value) => DropdownMenuItem(value: value, child: Text(spanishStatus(value)))).toList(),
             onChanged: (value) { if (value != null) setState(() => _status = value); },

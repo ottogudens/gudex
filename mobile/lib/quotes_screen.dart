@@ -29,13 +29,13 @@ class _QuotesScreenState extends State<_QuotesScreen> {
       final results = await Future.wait([
         widget.api.get('/api/v1/quotes'), widget.api.get('/api/v1/customers'),
         widget.api.get('/api/v1/work-orders'), widget.api.get('/api/v1/vehicles'),
-        rootBundle.loadString('assets/catalogo-servicios.json'),
+        widget.api.get('/api/v1/services'),
       ]);
       if (!mounted) return;
       setState(() {
         _quotes = _records(results[0]); _customers = _records(results[1]);
         _orders = _records(results[2]); _vehicles = _records(results[3]);
-        _services = _records(jsonDecode(results[4] as String));
+        _services = _records(results[4]);
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -74,7 +74,7 @@ class _QuotesScreenState extends State<_QuotesScreen> {
             content: SizedBox(width: 560, child: Form(key: form, child: SingleChildScrollView(child: Column(
               mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 DropdownButtonFormField<int>(
-                  value: customerId, isExpanded: true,
+                  initialValue: customerId, isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Cliente *'),
                   items: _customers.map((c) => DropdownMenuItem<int>(value: c['id'] as int,
                     child: Text(c['full_name'].toString(), overflow: TextOverflow.ellipsis))).toList(),
@@ -83,7 +83,7 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  key: ValueKey(customerId), value: orderId, isExpanded: true,
+                  key: ValueKey(customerId), initialValue: orderId, isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Orden y vehículo *'),
                   items: orders.map((o) => DropdownMenuItem<int>(value: o['id'] as int,
                     child: Text(_orderLabel(o), overflow: TextOverflow.ellipsis))).toList(),

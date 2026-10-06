@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({required this.api, required this.onOpenModule, super.key});

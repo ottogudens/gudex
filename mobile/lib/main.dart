@@ -1,20 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
-
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:printing/printing.dart';
-import 'package:flutter/services.dart' show rootBundle;
-
 import 'services/api_client.dart';
-import 'services/draft_store.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'providers/auth_provider.dart';
@@ -23,17 +14,18 @@ import 'screens/auth/login_page.dart';
 import 'screens/customer_appointments_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/inventory_screen.dart';
+import 'screens/services_screen.dart';
 import 'screens/users_screen.dart';
 import 'screens/agenda_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/pos_screen.dart';
 import 'screens/workshop_screen.dart';
-import 'screens/vehicle_history_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/integration_settings_screen.dart';
 import 'screens/module_list_screen.dart';
 
 part 'quotes_screen.dart';
+part 'social_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Backward-compatible aliases so the existing screen code (below) continues
@@ -58,11 +50,6 @@ IconButton gudexThemeButton(BuildContext context) => IconButton(
       icon: Icon(Theme.of(context).brightness == Brightness.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
       onPressed: toggleGudexTheme,
     );
-
-// Re-export helpers under their old private names so the rest of the file
-// keeps compiling.
-const _statusLabels = statusLabels;
-const _fieldLabels = fieldLabels;
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -193,6 +180,8 @@ class _HomePageState extends ConsumerState<HomePage> {
       AppModule(title: 'POS', icon: Icons.point_of_sale_outlined, path: '/api/v1/sales'),
       AppModule(title: 'Usuarios', icon: Icons.people_outlined, path: '/api/v1/users'),
       AppModule(title: 'Cotizaciones', icon: Icons.request_quote_outlined, path: '/api/v1/quotes'),
+      AppModule(title: 'Servicios', icon: Icons.build_circle_outlined, path: '/api/v1/services'),
+      AppModule(title: 'Contenido y redes', icon: Icons.campaign_outlined, path: '/api/v1/social/posts'),
     ];
   }
 
@@ -233,6 +222,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                   child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child:
                 modules[selected].path == '/api/v1/sales'
                     ? PosScreen(api: api)
+                    : modules[selected].path == '/api/v1/services'
+                        ? ServicesScreen(api: api)
+                    : modules[selected].path == '/api/v1/social/posts'
+                        ? _SocialScreen(api: api)
                     : modules[selected].path == '/api/v1/quotes'
                         ? _QuotesScreen(api: api)
                     : modules[selected].path == '/api/v1/dashboard'
@@ -240,7 +233,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                     : modules[selected].path == '/api/v1/users'
                         ? UsersScreen(api: api)
                     : modules[selected].path == '/api/v1/products'
-                        ? InventoryScreen(api: api, canManage: widget.role == 'admin')
+                        ? InventoryScreen(api: api, canManage: widget.role == 'admin', onCreateSocialPost: (product) => Navigator.push(context, MaterialPageRoute(builder: (_) => _SocialEditor(api: api, product: product))))
                     : modules[selected].path == '/api/v1/appointments'
                         ? AgendaScreen(api: api, role: widget.role)
                     : modules[selected].path == '/api/v1/portal/appointments'
@@ -278,6 +271,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: useNavigationRail ? Row(children: [
         NavigationRail(
           extended: true,
+          scrollable: true,
           selectedIndex: selected,
           onDestinationSelected: (index) => setState(() => _selected = index),
           destinations: [for (final module in modules) NavigationRailDestination(
@@ -306,6 +300,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   IconData _iconFor(String title) {
+    if (title == 'Servicios') return Icons.build_circle_outlined;
+    if (title == 'Contenido y redes') return Icons.campaign_outlined;
     if (title.contains('Panel')) return Icons.space_dashboard_outlined;
     if (title.toLowerCase().contains('orden') || title.toLowerCase().contains('trabajos')) return Icons.assignment_outlined;
     if (title.contains('Inventario')) return Icons.inventory_2_outlined;
@@ -318,6 +314,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (title == 'Órdenes de trabajo') return 'Órdenes';
     if (title == 'Trabajos anteriores') return 'Trabajos';
     if (title == 'Mis vehículos') return 'Vehículos';
+    if (title == 'Contenido y redes') return 'Redes';
     if (title == 'Inventario') return 'Stock';
     if (title == 'Cotizaciones') return 'Cotiz.';
     if (title == 'Mis citas') return 'Citas';

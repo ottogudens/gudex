@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 
-import '../../services/api_client.dart';
+import '../services/api_client.dart';
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({required this.api, required this.role, super.key});
@@ -75,14 +75,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
           const SizedBox(height: 6), const Text('Vincula el informe PDF al vehículo y, cuando corresponda, a su orden de trabajo.'),
           const SizedBox(height: 16),
           DropdownButtonFormField<int>(
-            value: _vehicleId, 
+            initialValue: _vehicleId,
             decoration: const InputDecoration(labelText: 'Vehículo'), 
             items: vehicles.map((v) => DropdownMenuItem(value: v['id'] as int, child: Text('${v['plate']} · ${v['make']} ${v['model']}'))).toList(), 
             onChanged: _selectVehicle
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<int?>(
-            value: _orderId, 
+            initialValue: _orderId,
             decoration: const InputDecoration(labelText: 'Orden de trabajo (opcional)'), 
             items: [
               const DropdownMenuItem<int?>(value: null, child: Text('Solo historial del vehículo')), 

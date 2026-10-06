@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class UsersScreen extends StatefulWidget {
   const UsersScreen({required this.api, super.key});
@@ -38,7 +38,7 @@ class _UsersScreenState extends State<UsersScreen> {
         TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo')),
         if (isNew) TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
         if (isNew) TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña inicial (12 caracteres mínimo)')),
-        DropdownButtonFormField<String>(value: role, decoration: const InputDecoration(labelText: 'Rol'), items: const [DropdownMenuItem(value: 'admin', child: Text('Administración')), DropdownMenuItem(value: 'mechanic', child: Text('Mecánico'))], onChanged: (value) { if (value != null) update(() => role = value); }),
+        DropdownButtonFormField<String>(initialValue: role, decoration: const InputDecoration(labelText: 'Rol'), items: const [DropdownMenuItem(value: 'admin', child: Text('Administración')), DropdownMenuItem(value: 'mechanic', child: Text('Mecánico'))], onChanged: (value) { if (value != null) update(() => role = value); }),
         if (!isNew) SwitchListTile(contentPadding: EdgeInsets.zero, value: active, onChanged: (value) => update(() => active = value), title: const Text('Cuenta activa')),
       ]))),
       actions: [
@@ -48,7 +48,7 @@ class _UsersScreenState extends State<UsersScreen> {
             if (isNew) {
               await widget.api.postJson('/api/v1/users', {'full_name': name.text.trim(), 'email': email.text.trim(), 'password': password.text, 'role': role});
             } else {
-              await widget.api.patchJson('/api/v1/users/${user!['id']}', {'full_name': name.text.trim(), 'role': role, 'active': active});
+              await widget.api.patchJson('/api/v1/users/${user['id']}', {'full_name': name.text.trim(), 'role': role, 'active': active});
             }
             if (context.mounted) Navigator.pop(context, true);
           } catch (error) { 

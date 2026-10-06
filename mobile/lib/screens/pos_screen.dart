@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/constants.dart';
-import '../../services/api_client.dart';
+import '../core/constants.dart';
+import '../services/api_client.dart';
 
 class PosScreen extends StatefulWidget {
   const PosScreen({required this.api, super.key});
@@ -360,7 +360,7 @@ class _PosScreenState extends State<PosScreen> {
     ],
     const SizedBox(height: 8),
       DropdownButtonFormField<int?>(
-        value: _customerId,
+        initialValue: _customerId,
         decoration: const InputDecoration(labelText: 'Cliente (opcional)', isDense: true),
         items: [const DropdownMenuItem<int?>(value: null, child: Text('Venta sin cliente')), ..._customers.map((customer) => DropdownMenuItem<int?>(value: customer['id'] as int?, child: Text('${customer['full_name']}')))],
         onChanged: (value) => setState(() => _customerId = value),
@@ -369,7 +369,7 @@ class _PosScreenState extends State<PosScreen> {
       TextField(controller: _discountController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Descuento (CLP)', prefixText: '\$', isDense: true), onChanged: (_) => setState(() {})),
       const SizedBox(height: 10),
       DropdownButtonFormField<String>(
-        value: _paymentMethod,
+        initialValue: _paymentMethod,
         decoration: const InputDecoration(labelText: 'Medio de pago', isDense: true),
         items: const [
           DropdownMenuItem(value: 'cash', child: Text('Efectivo')),

@@ -13,7 +13,14 @@ engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=Tr
 
 
 def create_db_and_tables() -> None:
+    from sqlalchemy import inspect
+    from app.services.catalog import seed_catalog
+    new_catalog = not inspect(engine).has_table("servicecategory")
     SQLModel.metadata.create_all(engine)
+    if new_catalog:
+        with Session(engine) as session:
+            seed_catalog(session)
+            session.commit()
 
 
 def get_session():

@@ -21,6 +21,8 @@ dependencies = [
   "cryptography>=44,<47",
   "reportlab>=4.2,<5",
   "sentry-sdk>=2.0,<3",
+  "Pillow>=11,<13",
+  "pypdf>=6,<7",
 ]
 
 [project.optional-dependencies]
@@ -30,4 +32,4 @@ dev = ["pytest>=8,<9"]
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["assets/*.png"]
+app = ["assets/*.png", "assets/*.json"]

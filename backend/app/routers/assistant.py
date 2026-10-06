@@ -8,7 +8,9 @@ from app.database import get_session
 from app.models import (AIInteraction, Appointment, Customer, Inspection, Product, Quote,
                         ScannerReport, UserRole, Vehicle, WorkOrder, WorkStatus)
 from app.schemas import AssistantConfirmation, AssistantQuery
-from app.services.ai import generate_answer
+from app.services.ai import generate_answer, DIAGNOSTIC_PROMPT
+from app.services.diagnostics import diagnostic_context
+from starlette.concurrency import run_in_threadpool
 from app.routers.integrations import selected_ai_model
 
 router = APIRouter()
@@ -57,6 +59,18 @@ def build_context(session: Session, query: AssistantQuery, role: str, customer_i
     customer_view = role == UserRole.customer.value
     if customer_view and query.context_type not in {"general", "vehicle", "work_order"}:
         raise HTTPException(403, "Ese contexto no está disponible en el portal cliente")
+    if query.mode == "diagnostic":
+        if customer_view:
+            raise HTTPException(403, "El diagnóstico está disponible para el equipo del taller")
+        if query.context_type not in {"work_order", "vehicle"} or not query.context_id:
+            raise HTTPException(422, "Selecciona un vehículo o una orden para diagnosticar")
+        order = session.get(WorkOrder, query.context_id) if query.context_type == "work_order" else None
+        if query.context_type == "work_order" and not order:
+            raise HTTPException(404, "Orden no encontrada")
+        vehicle = session.get(Vehicle, order.vehicle_id if order else query.context_id)
+        if not vehicle:
+            raise HTTPException(404, "Vehículo no encontrado")
+        return diagnostic_context(session, vehicle, order.id if order else None)
     if query.context_type == "work_order":
         order = session.get(WorkOrder, query.context_id) if query.context_id else None
         if not order:
@@ -129,10 +143,11 @@ def _normalize_proposal(raw: dict | None, role: str, context_type: str, context_
 
 async def _query(query: AssistantQuery, request: Request, session: Session, customer_id: int | None = None):
     role = request.state.user_role
-    context = build_context(session, query, role, customer_id)
+    context = await run_in_threadpool(build_context, session, query, role, customer_id)
     _audit_cleanup(session)
     try:
-        answer = await generate_answer(query.message, context, selected_ai_model(session))
+        options = {"system_prompt": DIAGNOSTIC_PROMPT, "max_output_tokens": 3000} if query.mode == "diagnostic" else {}
+        answer = await generate_answer(query.message, context, selected_ai_model(session), **options)
     except HTTPException as exc:
         session.add(AIInteraction(
             requested_by_email=request.state.user_email, user_role=role, question=query.message,
@@ -142,6 +157,13 @@ async def _query(query: AssistantQuery, request: Request, session: Session, cust
         ))
         session.commit()
         raise
+    if query.mode == "diagnostic":
+        answer["proposed_action"] = None
+        answer["sources"] = [{k: v for k, v in source.items() if k not in {"text", "notes"}}
+                             for source in context["sources"]]
+        answer["sources"] = [{"source_id": item["source_id"], "filename": item["code"],
+                              "date": item["date"], "status": "record"} for item in context["history"]] + answer["sources"]
+        answer["coverage"] = context["coverage"]
     proposal = _normalize_proposal(answer.get("proposed_action"), role, query.context_type, query.context_id)
     answer["proposed_action"] = proposal
     interaction = AIInteraction(
