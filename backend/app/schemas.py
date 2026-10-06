@@ -17,6 +17,16 @@ class UserCreate(SQLModel):
     customer_id: Optional[int] = None
 
 
+class UserRead(SQLModel):
+    id: int
+    email: str
+    full_name: str
+    role: UserRole
+    customer_id: Optional[int] = None
+    active: bool
+    created_at: Optional[datetime] = None
+
+
 class UserUpdate(SQLModel):
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
@@ -291,6 +301,22 @@ class QuoteCreate(SQLModel):
     notes: Optional[str] = None
 
 
+class QuoteRead(SQLModel):
+    id: int
+    work_order_id: int
+    description: str
+    labor_clp: int
+    parts_clp: int
+    status: str
+    customer_approved_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    customer_name: Optional[str] = None
+    customer_id: Optional[int] = None
+    order_code: Optional[str] = None
+    vehicle_plate: Optional[str] = None
+
+
 class ProductCreate(SQLModel):
     sku: Optional[str] = None
     name: str
@@ -348,6 +374,31 @@ class SaleItemRead(SQLModel):
     quantity: float
     unit_price_clp: int
     line_total_clp: int
+
+
+class PaymentRead(SQLModel):
+    id: int
+    sale_id: int
+    method: str
+    amount_clp: int
+    status: str
+    provider_reference: Optional[str] = None
+    created_at: datetime
+
+
+class SaleRead(SQLModel):
+    id: int
+    receipt_code: str
+    customer_id: Optional[int] = None
+    vehicle_id: Optional[int] = None
+    work_order_id: Optional[int] = None
+    subtotal_clp: int
+    discount_clp: int
+    total_clp: int
+    status: str
+    created_at: Optional[datetime] = None
+    items: list[SaleItemRead] = []
+    payments: list[PaymentRead] = []
 
 
 class SaleCreate(SQLModel):

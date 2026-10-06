@@ -25,8 +25,8 @@ from app.models import (
     StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus,
 )
 from app.schemas import (
-    AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, ProductCreate, QuoteCreate,
-    PasswordChange, ProductUpdate, SaleCreate, ScannerReportRead, StockAdjustment, UserCreate, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
+    AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
+    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -177,7 +177,7 @@ def change_password(data: PasswordChange, request: Request, session: Session = D
     return {"message": "Contraseña actualizada. Inicia sesión nuevamente."}
 
 
-@app.post("/api/v1/users", status_code=201, dependencies=[Depends(require_admin)])
+@app.post("/api/v1/users", response_model=UserRead, status_code=201, dependencies=[Depends(require_admin)])
 def create_user(data: UserCreate, session: Session = Depends(get_session)):
     email = data.email.strip().lower()
     if session.exec(select(User).where(User.email == email)).first():
@@ -195,17 +195,15 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
     session.add(user)
     session.commit()
     session.refresh(user)
-    return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "active": user.active}
+    return user
 
 
-@app.get("/api/v1/users", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/users", response_model=list[UserRead], dependencies=[Depends(require_admin)])
 def list_users(session: Session = Depends(get_session)):
-    return [{"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role,
-             "customer_id": user.customer_id, "active": user.active, "created_at": user.created_at}
-            for user in session.exec(select(User).order_by(User.full_name)).all()]
+    return session.exec(select(User).order_by(User.full_name)).all()
 
 
-@app.patch("/api/v1/users/{user_id}", dependencies=[Depends(require_admin)])
+@app.patch("/api/v1/users/{user_id}", response_model=UserRead, dependencies=[Depends(require_admin)])
 def update_user(user_id: int, data: UserUpdate, request: Request, session: Session = Depends(get_session)):
     user = session.get(User, user_id)
     if not user:
@@ -221,7 +219,7 @@ def update_user(user_id: int, data: UserUpdate, request: Request, session: Sessi
         user.customer_id = None
     user.token_version += 1
     session.add(user); session.commit(); session.refresh(user)
-    return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "customer_id": user.customer_id, "active": user.active}
+    return user
 
 
 @app.delete("/api/v1/users/{user_id}", dependencies=[Depends(require_admin)])
@@ -782,7 +780,7 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
     return session.exec(select(Quote).where(Quote.work_order_id == order_id).order_by(Quote.created_at.desc())).all()
 
 
-@app.get("/api/v1/quotes", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/quotes", response_model=list[QuoteRead], dependencies=[Depends(require_admin)])
 def list_quotes(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0, session: Session = Depends(get_session)):
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     rows = session.exec(select(Quote, WorkOrder, Customer, Vehicle)
@@ -1182,7 +1180,7 @@ def delete_scanner_report(report_id: int, session: Session = Depends(get_session
     return {"deleted": True}
 
 
-@app.post("/api/v1/sales", status_code=201, dependencies=[Depends(require_admin)])
+@app.post("/api/v1/sales", response_model=SaleRead, status_code=201, dependencies=[Depends(require_admin)])
 def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
     if not data.lines:
         raise HTTPException(422, "La venta requiere al menos un ítem")
@@ -1243,7 +1241,7 @@ def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
             "items": [item.model_dump() for item in session.exec(select(SaleItem).where(SaleItem.sale_id == sale.id)).all()]}
 
 
-@app.post("/api/v1/sales/{sale_id}/payments", status_code=201, dependencies=[Depends(require_admin)])
+@app.post("/api/v1/sales/{sale_id}/payments", response_model=PaymentRead, status_code=201, dependencies=[Depends(require_admin)])
 def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends(get_session)):
     sale = session.get(Sale, sale_id)
     if not sale:
@@ -1274,7 +1272,7 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
     return payment
 
 
-@app.get("/api/v1/sales", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/sales", response_model=list[SaleRead], dependencies=[Depends(require_admin)])
 def list_sales(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
               session: Session = Depends(get_session)):
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
