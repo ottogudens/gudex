@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
@@ -12,9 +13,11 @@ import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text, update
 from sqlmodel import Session, select
 
-from app.config import settings
+from app.config import settings, uploads_are_persistent
+from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
@@ -33,7 +36,18 @@ from app.security import AuthenticationMiddleware, authenticate, create_access_t
 from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
 
-app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro")
+logger = logging.getLogger("gudex")
+_is_production = settings.app_env.lower() == "production"
+# En producción no se publica el esquema completo de la API.
+app = FastAPI(title=settings.app_name, version="0.1.0", description="API inicial de gestión para el lubricentro",
+              docs_url=None if _is_production else "/docs", redoc_url=None if _is_production else "/redoc",
+              openapi_url=None if _is_production else "/openapi.json")
+
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+MANUAL_PAYMENT_METHODS = {"cash", "card", "transfer"}
+EXTERNAL_PAYMENT_METHODS = {"mercado_pago", "mercado_pago_checkout"}
+REVERSAL_STATUSES = {"refunded", "charged_back"}
 app.add_middleware(AuthenticationMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +74,9 @@ def on_startup() -> None:
     # sin alterar ni borrar datos existentes.
     create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    if not uploads_are_persistent():
+        logger.error("UPLOAD_DIR=%s no está en un volumen persistente: los PDFs y evidencias se perderán en el "
+                     "próximo despliegue. Agrega un Railway Volume al servicio.", settings.upload_dir)
     seed_default_inspection_templates()
     if settings.app_env.lower() == "production" and settings.bootstrap_admin_email and settings.bootstrap_admin_password:
         with Session(engine) as session:
@@ -110,11 +127,19 @@ async def lifespan(_: FastAPI):
 app.router.lifespan_context = lifespan
 
 
-@app.post("/auth/token")
-def login(username: str = Form(...), password: str = Form(...)):
+@app.post("/auth/token", dependencies=[Depends(rate_limit("login", 20, 60))])
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    # Bloqueo por cuenta e IP tras varios fallos: frena fuerza bruta sin permitir
+    # que un tercero bloquee la cuenta desde otra red.
+    failure_key = f"login-fail:{username.strip().lower()}:{client_ip(request)}"
+    retry_after = limiter.blocked_for(failure_key, LOGIN_FAILURE_LIMIT, LOGIN_FAILURE_WINDOW_SECONDS)
+    if retry_after:
+        raise too_many(retry_after)
     user = authenticate(username, password)
     if not user:
+        limiter.hit(failure_key, LOGIN_FAILURE_LIMIT, LOGIN_FAILURE_WINDOW_SECONDS)
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos", headers={"WWW-Authenticate": "Bearer"})
+    limiter.reset(failure_key)
     return {"access_token": create_access_token(user), "token_type": "bearer", "role": user.role.value,
             "full_name": user.full_name, "expires_in": 28800}
 
@@ -298,7 +323,7 @@ async def resend_customer_invitation(customer_id: int, request: Request, session
     return {"invitation_delivery": await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)}
 
 
-@app.post("/auth/customer/activate")
+@app.post("/auth/customer/activate", dependencies=[Depends(rate_limit("customer-token", 10, 15 * 60))])
 def activate_customer_access(data: CustomerAccessTokenConfirm, session: Session = Depends(get_session)):
     token_hash = hashlib.sha256(data.token.encode()).hexdigest()
     record = session.exec(select(CustomerAccessToken).where(CustomerAccessToken.token_hash == token_hash)).first()
@@ -317,7 +342,7 @@ def activate_customer_access(data: CustomerAccessTokenConfirm, session: Session 
     return {"message": "Acceso activado. Ya puedes iniciar sesión."}
 
 
-@app.post("/auth/customer/password-reset")
+@app.post("/auth/customer/password-reset", dependencies=[Depends(rate_limit("password-reset", 5, 60 * 60))])
 async def request_customer_password_reset(data: CustomerPasswordResetRequest, request: Request, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.email == data.email, User.role == UserRole.customer, User.active == True)).first()  # noqa: E712
     if user and user.customer_id:
@@ -327,7 +352,7 @@ async def request_customer_password_reset(data: CustomerPasswordResetRequest, re
     return {"message": "Si existe una cuenta asociada, enviamos instrucciones al correo registrado."}
 
 
-@app.post("/auth/customer/password-reset/confirm")
+@app.post("/auth/customer/password-reset/confirm", dependencies=[Depends(rate_limit("customer-token", 10, 15 * 60))])
 def confirm_customer_password_reset(data: CustomerAccessTokenConfirm, session: Session = Depends(get_session)):
     token_hash = hashlib.sha256(data.token.encode()).hexdigest()
     record = session.exec(select(CustomerAccessToken).where(CustomerAccessToken.token_hash == token_hash)).first()
@@ -347,7 +372,14 @@ def confirm_customer_password_reset(data: CustomerAccessTokenConfirm, session: S
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": settings.app_name}
+    try:
+        with Session(engine) as session:
+            session.exec(text("SELECT 1"))
+    except Exception:  # noqa: BLE001 - el healthcheck solo informa disponibilidad
+        logger.exception("Healthcheck: base de datos no disponible")
+        return Response('{"status":"error","database":"unavailable"}', status_code=503, media_type="application/json")
+    return {"status": "ok", "service": settings.app_name, "database": "ok",
+            "persistent_uploads": uploads_are_persistent()}
 
 
 @app.post("/api/v1/customers", response_model=Customer, status_code=201, dependencies=[Depends(require_admin)])
@@ -1000,17 +1032,35 @@ def list_stock_movements(product_id: int, session: Session = Depends(get_session
                         .order_by(StockMovement.created_at.desc()).limit(100)).all()
 
 
+def _change_stock(session: Session, product_id: int, delta: float) -> bool:
+    """Aplica `delta` al stock en un único UPDATE condicional.
+
+    La condición `stock + delta >= 0` se evalúa dentro de la base de datos, que
+    bloquea la fila durante la actualización; así dos ventas simultáneas no pueden
+    dejar el stock bajo cero. Devuelve False si no había stock suficiente.
+    """
+    result = session.execute(
+        update(Product)
+        .where(Product.id == product_id, Product.stock_quantity + delta >= 0)
+        .values(stock_quantity=Product.stock_quantity + delta)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        return False
+    # El UPDATE no pasa por el ORM: se invalida el valor en caché para que se relea.
+    session.expire(session.get(Product, product_id), ["stock_quantity"])
+    return True
+
+
 @app.post("/api/v1/products/{product_id}/stock-movements", response_model=StockMovement, status_code=201, dependencies=[Depends(require_admin)])
 def adjust_stock(product_id: int, data: StockAdjustment, session: Session = Depends(get_session)):
-    product = session.get(Product, product_id)
-    if not product:
+    if not session.get(Product, product_id):
         raise HTTPException(404, "Producto no encontrado")
-    new_quantity = product.stock_quantity + data.quantity_change
-    if new_quantity < 0:
+    # Actualización condicional y atómica: evita perder movimientos concurrentes.
+    if not _change_stock(session, product_id, data.quantity_change):
+        session.rollback()
         raise HTTPException(409, "El movimiento dejaría el stock bajo cero")
-    product.stock_quantity = new_quantity
     movement = StockMovement.model_validate(data, update={"product_id": product_id})
-    session.add(product)
     session.add(movement)
     session.commit()
     session.refresh(movement)
@@ -1111,9 +1161,14 @@ def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
     total = subtotal - data.discount_clp
     if total < 0:
         raise HTTPException(422, "El descuento supera el subtotal")
+    for product_id in product_quantities:
+        if not session.get(Product, product_id):
+            raise HTTPException(404, f"Producto {product_id} no encontrado")
+    # Descuento atómico antes de crear la venta: si otra venta concurrente tomó
+    # el stock, el UPDATE condicional no afecta filas y se revierte todo.
     for product_id, quantity in product_quantities.items():
-        product = session.get(Product, product_id)
-        if not product or product.stock_quantity < quantity:
+        if not _change_stock(session, product_id, -quantity):
+            session.rollback()
             raise HTTPException(409, f"Stock insuficiente para el producto {product_id}")
     sale = Sale(
         receipt_code=f"V-{datetime.now():%y%m%d}-{uuid4().hex[:6].upper()}",
@@ -1130,9 +1185,6 @@ def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
             line_total_clp=round(line.quantity * line.unit_price_clp),
         ))
     for product_id, quantity in product_quantities.items():
-        product = session.get(Product, product_id)
-        product.stock_quantity -= quantity
-        session.add(product)
         session.add(StockMovement(product_id=product_id, quantity_change=-quantity, reason="pos_sale", reference=sale.receipt_code))
     session.commit()
     session.refresh(sale)
@@ -1150,8 +1202,15 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
         raise HTTPException(404, "Venta no encontrada")
     if data.amount_clp <= 0:
         raise HTTPException(422, "El monto debe ser mayor que cero")
-    if data.method not in {"cash", "card", "transfer", "mercado_pago", "mercado_pago_checkout"}:
+    if data.method not in MANUAL_PAYMENT_METHODS | EXTERNAL_PAYMENT_METHODS:
         raise HTTPException(422, "Medio de pago no admitido")
+    if sale.status == "paid":
+        raise HTTPException(409, "La venta ya está pagada")
+    pending_external = session.exec(select(Payment).where(
+        Payment.sale_id == sale_id, Payment.status == "pending_external")).first()
+    if pending_external:
+        # Evita doble cobro: si el cliente paga el checkout después, se registraría un segundo pago.
+        raise HTTPException(409, "La venta tiene un cobro de Mercado Pago pendiente. Cancélalo antes de registrar otro pago.")
     paid = sum(p.amount_clp for p in session.exec(select(Payment).where(Payment.sale_id == sale_id, Payment.status == "recorded")).all())
     if paid + data.amount_clp > sale.total_clp:
         raise HTTPException(409, "El pago supera el saldo de la venta")
@@ -1301,24 +1360,59 @@ async def mercado_pago_webhook(request: Request, session: Session = Depends(get_
     amount = round(float(payment_data.get("transaction_amount") or 0))
     if not sale or payment_data.get("currency_id") != "CLP" or amount != sale.total_clp:
         raise HTTPException(409, "El pago no coincide con el monto o la moneda de la venta")
-    existing = session.exec(select(Payment).where(Payment.provider_reference == str(payment_data.get("id")),
+    provider_id = str(payment_data.get("id"))[:100]
+    provider_status = payment_data.get("status")
+    existing = session.exec(select(Payment).where(Payment.provider_reference == provider_id,
                                Payment.method == "mercado_pago_checkout")).first()
     if existing:
+        # Reembolso o contracargo de un pago ya confirmado: la venta vuelve a tener saldo.
+        if provider_status in REVERSAL_STATUSES and existing.status in {"recorded", "needs_refund"}:
+            was_recorded = existing.status == "recorded"
+            existing.status = provider_status
+            session.add(existing)
+            if was_recorded:
+                sale.status = "refunded"
+                session.add(sale)
+            session.commit()
         return {"received": True}
     pending = session.exec(select(Payment).where(Payment.sale_id == sale_id,
                           Payment.method == "mercado_pago_checkout", Payment.status == "pending_external")).first()
-    if payment_data.get("status") == "approved":
+    if provider_status == "approved":
+        if sale.status == "paid" and not pending:
+            # El cliente pagó un checkout ya cancelado sobre una venta saldada por otro medio:
+            # se deja registro para devolver el dinero, sin alterar la venta.
+            logger.warning("Pago Mercado Pago %s recibido para la venta %s ya pagada: requiere devolución", provider_id, sale_id)
+            session.add(Payment(sale_id=sale_id, method="mercado_pago_checkout", amount_clp=amount,
+                                status="needs_refund", provider_reference=provider_id))
+            session.commit()
+            return {"received": True}
         if pending:
             pending.status = "recorded"
-            pending.provider_reference = str(payment_data.get("id"))[:100]
+            pending.provider_reference = provider_id
             session.add(pending)
         else:
             session.add(Payment(sale_id=sale_id, method="mercado_pago_checkout", amount_clp=amount,
-                                status="recorded", provider_reference=str(payment_data.get("id"))[:100]))
+                                status="recorded", provider_reference=provider_id))
         sale.status = "paid"
         session.add(sale)
-    elif pending and payment_data.get("status") in {"rejected", "cancelled", "refunded", "charged_back"}:
+    elif pending and provider_status in {"rejected", "cancelled"} | REVERSAL_STATUSES:
         pending.status = "failed"
         session.add(pending)
     session.commit()
     return {"received": True}
+
+
+@app.post("/api/v1/sales/{sale_id}/mercado-pago/cancel", dependencies=[Depends(require_admin)])
+def cancel_mercado_pago_checkout(sale_id: int, session: Session = Depends(get_session)):
+    """Libera la venta para cobrarla por otro medio. Un pago tardío queda marcado para devolución."""
+    if not session.get(Sale, sale_id):
+        raise HTTPException(404, "Venta no encontrada")
+    pending = session.exec(select(Payment).where(Payment.sale_id == sale_id,
+                          Payment.status == "pending_external")).all()
+    if not pending:
+        raise HTTPException(409, "La venta no tiene cobros externos pendientes")
+    for payment in pending:
+        payment.status = "cancelled"
+        session.add(payment)
+    session.commit()
+    return {"cancelled": len(pending)}

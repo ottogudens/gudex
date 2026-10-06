@@ -56,6 +56,7 @@ const _statusLabels = <String, String>{
   'sent': 'Enviada', 'rejected': 'Rechazada', 'paid': 'Pagada', 'open': 'Abierta',
   'requested': 'Solicitada', 'confirmed': 'Confirmada', 'completed': 'Completada',
   'pending': 'Pendiente', 'pending_external': 'Pago externo pendiente',
+  'refunded': 'Reembolsada', 'charged_back': 'Contracargo', 'needs_refund': 'Requiere devolución',
   'recorded': 'Registrado', 'normal': 'Normal', 'observation': 'Observación',
   'failed': 'Falla', 'not_inspected': 'No inspeccionado', 'not_applicable': 'No aplica',
   'active': 'Activo', 'inactive': 'Inactivo', 'cash': 'Efectivo',
@@ -2834,6 +2835,41 @@ class _PosScreenState extends State<_PosScreen> {
     }
   }
 
+  bool _hasPendingCheckout(Map<String, dynamic> sale) {
+    final payments = sale['payments'];
+    return payments is List && payments.any((payment) => payment is Map && payment['status'] == 'pending_external');
+  }
+
+  Future<void> _cancelCheckout(Map<String, dynamic> sale) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancelar cobro de Mercado Pago'),
+        content: Text('La venta ${sale['receipt_code']} quedará disponible para cobrarse por otro medio. '
+            'Si el cliente igual paga el enlace, ese pago quedará marcado para devolución.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Volver')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Cancelar cobro')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await widget.api.post('/api/v1/sales/${sale['id']}/mercado-pago/cancel');
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cobro cancelado. Ya puedes registrar el pago de ${sale['receipt_code']} por otro medio.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo cancelar el cobro: ${error.toString().replaceFirst('Exception: ', '')}')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _checkout() async {
     if (_cart.isEmpty && _serviceItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agrega al menos un producto o servicio a la venta.')));
@@ -3057,8 +3093,13 @@ class _PosScreenState extends State<_PosScreen> {
       itemBuilder: (context, index) { final sale = _sales[index]; return ListTile(
         dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.receipt_long_outlined, color: GudexColors.primary),
         title: Text('${sale['receipt_code']} · ${_formatMoney(_money(sale['total_clp']))}'),
-        subtitle: Text('Estado: ${spanishStatus(sale['status'])} · ${sale['created_at'] ?? ''}'),
-        trailing: IconButton(tooltip: 'Abrir comprobante PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: () => _printSaleReceipt(sale)),
+        subtitle: Text('Estado: ${spanishStatus(sale['status'])}${_hasPendingCheckout(sale) ? ' · Cobro Mercado Pago pendiente' : ''} · ${sale['created_at'] ?? ''}'),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (_hasPendingCheckout(sale))
+            IconButton(tooltip: 'Cancelar cobro de Mercado Pago', icon: const Icon(Icons.cancel_outlined), color: Theme.of(context).colorScheme.error,
+                onPressed: _saving ? null : () => _cancelCheckout(sale)),
+          IconButton(tooltip: 'Abrir comprobante PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: () => _printSaleReceipt(sale)),
+        ]),
       ); },
     )),
   ])));

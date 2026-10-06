@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,3 +42,20 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Railway expone RAILWAY_VOLUME_MOUNT_PATH cuando el servicio tiene un volumen
+# persistente. Si UPLOAD_DIR no se configuró explícitamente, los adjuntos se
+# guardan allí para que sobrevivan a cada despliegue.
+_volume_path = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+if _volume_path and "UPLOAD_DIR" not in os.environ:
+    settings.upload_dir = str(Path(_volume_path) / "uploads")
+
+
+def uploads_are_persistent() -> bool:
+    """Indica si los adjuntos quedan en almacenamiento que sobrevive a un redeploy."""
+    if settings.app_env.lower() != "production":
+        return True
+    volume = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+    if not volume:
+        return False
+    return Path(settings.upload_dir).resolve().is_relative_to(Path(volume).resolve())
