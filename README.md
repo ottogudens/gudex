@@ -49,6 +49,7 @@ Administración dispone de marca, borradores desde productos o servicios, genera
 ## Integraciones externas
 
 Las credenciales no se guardan en Flutter ni en el repositorio. Google Workspace (Gmail, Drive y Calendar), el asistente IA y Mercado Pago usan integraciones de backend configurables en Railway. Checkout Pro confirma pagos mediante webhook verificado. La aplicación no emite aún boletas electrónicas: sus PDFs se rotulan como comprobantes internos y no sustituyen un DTE.
+Consulta el [manual de configuración de Google y redes sociales](docs/manual-integraciones-google-redes-sociales.md).
 
 ## Próximas etapas
 
