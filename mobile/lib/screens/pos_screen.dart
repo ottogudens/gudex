@@ -26,6 +26,7 @@ class _PosScreenState extends State<PosScreen> {
   int? _vehicleId;
   String _paymentMethod = 'cash';
   String _categoryFilter = 'Todos';
+  String _posLayout = 'compact';
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -422,23 +423,7 @@ class _PosScreenState extends State<PosScreen> {
             ])),
         Expanded(
             child: desktop
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Column(children: [
-                      Expanded(
-                          child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                            Expanded(
-                                flex: 6,
-                                child: _catalogPanel(available, desktop: true)),
-                            const SizedBox(width: 14),
-                            Expanded(
-                                flex: 5, child: _checkoutPanel(desktop: true)),
-                          ])),
-                      const SizedBox(height: 10),
-                      SizedBox(height: 156, child: _salesPanel()),
-                    ]))
+                ? _desktopPos(available, constraints.maxHeight)
                 : RefreshIndicator(
                     onRefresh: _refresh,
                     child: ListView(
@@ -453,6 +438,85 @@ class _PosScreenState extends State<PosScreen> {
       ]);
     });
   }
+
+  Widget _desktopPos(List<Map<String, dynamic>> available, double height) {
+    final layout = _posLayout;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(children: [
+        _layoutSelector(),
+        const SizedBox(height: 8),
+        Expanded(
+            child: layout == 'compact'
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                        Expanded(
+                            flex: 6,
+                            child: _catalogPanel(available, desktop: true)),
+                        const SizedBox(width: 14),
+                        Expanded(flex: 5, child: _checkoutPanel(desktop: true)),
+                      ])
+                : layout == 'catalog'
+                    ? Column(children: [
+                        Expanded(
+                            flex: 6,
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                      child: _catalogPanel(available,
+                                          desktop: true)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                      child: _checkoutPanel(desktop: true)),
+                                ])),
+                        const SizedBox(height: 10),
+                        SizedBox(height: 176, child: _salesPanel()),
+                      ])
+                    : Column(children: [
+                        Expanded(
+                            flex: 7,
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                      flex: 5,
+                                      child: _catalogPanel(available,
+                                          desktop: true)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                      flex: 6,
+                                      child: _checkoutPanel(desktop: true)),
+                                ])),
+                        const SizedBox(height: 10),
+                        SizedBox(height: 116, child: _salesPanel()),
+                      ])),
+      ]),
+    );
+  }
+
+  Widget _layoutSelector() => Align(
+      alignment: Alignment.centerRight,
+      child: SegmentedButton<String>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+              value: 'compact',
+              icon: Icon(Icons.view_agenda_outlined),
+              label: Text('Compacta')),
+          ButtonSegment(
+              value: 'catalog',
+              icon: Icon(Icons.grid_view_outlined),
+              label: Text('Catálogo')),
+          ButtonSegment(
+              value: 'checkout',
+              icon: Icon(Icons.point_of_sale_outlined),
+              label: Text('Cobro')),
+        ],
+        selected: {_posLayout},
+        onSelectionChanged: (value) => setState(() => _posLayout = value.first),
+      ));
 
   Widget _catalogPanel(List<Map<String, dynamic>> available,
       {required bool desktop}) {
