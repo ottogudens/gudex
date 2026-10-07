@@ -17,10 +17,13 @@ class _PosScreenState extends State<PosScreen> {
   final _productSearch = TextEditingController();
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _customers = [];
+  List<Map<String, dynamic>> _readyOrders = [];
   List<Map<String, dynamic>> _sales = [];
   final Map<int, double> _cart = {};
   final List<Map<String, dynamic>> _serviceItems = [];
   int? _customerId;
+  int? _workOrderId;
+  int? _vehicleId;
   String _paymentMethod = 'cash';
   String _categoryFilter = 'Todos';
   bool _loading = true;
@@ -49,13 +52,15 @@ class _PosScreenState extends State<PosScreen> {
       final results = await Future.wait([
         widget.api.get('/api/v1/products'),
         widget.api.get('/api/v1/customers'),
+        widget.api.get('/api/v1/work-orders?status=ready'),
         widget.api.get('/api/v1/sales'),
       ]);
       if (!mounted) return;
       setState(() {
         _products = _asMaps(results[0]);
         _customers = _asMaps(results[1]);
-        _sales = _asMaps(results[2]);
+        _readyOrders = _asMaps(results[2]);
+        _sales = _asMaps(results[3]);
         _cart.removeWhere((id, quantity) {
           final product = _findProduct(id);
           return product == null ||
@@ -97,9 +102,14 @@ class _PosScreenState extends State<PosScreen> {
         return total + (entry.value * _money(product['price_clp'])).round();
       }) +
       _serviceItems.fold<int>(
-          0, (total, item) => total + _money(item['line_total_clp']));
+          0, (total, item) => total + _money(item['line_total_clp'])) +
+      _readyOrderTotal;
 
   int get _discount => int.tryParse(_discountController.text.trim()) ?? 0;
+  int get _readyOrderTotal => _workOrderId == null
+      ? 0
+      : _money(_readyOrders
+          .firstWhere((order) => order['id'] == _workOrderId)['total_clp']);
   int get _total => (_subtotal - _discount).clamp(0, _subtotal).toInt();
 
   void _changeQuantity(Map<String, dynamic> product, double delta) {
@@ -239,7 +249,7 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Future<void> _checkout() async {
-    if (_cart.isEmpty && _serviceItems.isEmpty) {
+    if (_cart.isEmpty && _serviceItems.isEmpty && _workOrderId == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Agrega al menos un producto o servicio a la venta.')));
       return;
@@ -275,6 +285,8 @@ class _PosScreenState extends State<PosScreen> {
     try {
       final result = await widget.api.postJson('/api/v1/sales', {
         if (_customerId != null) 'customer_id': _customerId,
+        if (_vehicleId != null) 'vehicle_id': _vehicleId,
+        if (_workOrderId != null) 'work_order_id': _workOrderId,
         'discount_clp': _discount,
         'lines': [
           ..._cart.entries.map((entry) {
@@ -292,6 +304,12 @@ class _PosScreenState extends State<PosScreen> {
                 'quantity': item['quantity'],
                 'unit_price_clp': item['unit_price_clp'],
               }),
+          if (_workOrderId != null)
+            {
+              'description': 'Orden de trabajo #$_workOrderId',
+              'quantity': 1,
+              'unit_price_clp': _readyOrderTotal,
+            },
         ],
       });
       sale = Map<String, dynamic>.from(result as Map);
@@ -299,6 +317,8 @@ class _PosScreenState extends State<PosScreen> {
         _cart.clear();
         _serviceItems.clear();
         _discountController.text = '0';
+        _workOrderId = null;
+        _vehicleId = null;
       });
 
       if (total > 0) {
@@ -573,36 +593,38 @@ class _PosScreenState extends State<PosScreen> {
             ]),
             const SizedBox(height: 8),
             if (desktop)
-              Expanded(
+              SizedBox(
+                  height: 112,
                   child: ListView(padding: EdgeInsets.zero, children: [
-                if (_cart.isEmpty && _serviceItems.isEmpty)
-                  const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 20),
-                      child:
-                          Text('Agrega productos o servicios para comenzar.')),
-                ..._cart.entries.map(_cartTile),
-                ..._serviceItems.asMap().entries.map((entry) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(entry.value['description'] as String),
-                      subtitle: Text(
-                          'Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
-                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(_formatMoney(
-                            _money(entry.value['line_total_clp']))),
-                        IconButton(
-                            tooltip: 'Quitar servicio',
-                            onPressed: () => setState(
-                                () => _serviceItems.removeAt(entry.key)),
-                            icon: const Icon(Icons.close))
-                      ]),
-                    )),
-                Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                        onPressed: _addServiceLine,
-                        icon: const Icon(Icons.build_outlined),
-                        label: const Text('Agregar servicio / trabajo'))),
-              ]))
+                    if (_cart.isEmpty && _serviceItems.isEmpty)
+                      const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20),
+                          child: Text(
+                              'Agrega productos o servicios para comenzar.')),
+                    ..._cart.entries.map(_cartTile),
+                    ..._serviceItems.asMap().entries.map((entry) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(entry.value['description'] as String),
+                          subtitle: Text(
+                              'Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
+                          trailing:
+                              Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(_formatMoney(
+                                _money(entry.value['line_total_clp']))),
+                            IconButton(
+                                tooltip: 'Quitar servicio',
+                                onPressed: () => setState(
+                                    () => _serviceItems.removeAt(entry.key)),
+                                icon: const Icon(Icons.close))
+                          ]),
+                        )),
+                    Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                            onPressed: _addServiceLine,
+                            icon: const Icon(Icons.build_outlined),
+                            label: const Text('Agregar servicio / trabajo'))),
+                  ]))
             else ...[
               if (_cart.isEmpty && _serviceItems.isEmpty)
                 const Padding(
@@ -644,6 +666,34 @@ class _PosScreenState extends State<PosScreen> {
               ],
               onChanged: (value) => setState(() => _customerId = value),
             ),
+            if (_readyOrders.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int?>(
+                initialValue: _workOrderId,
+                decoration: const InputDecoration(
+                    labelText: 'Orden lista para pago',
+                    isDense: true,
+                    prefixIcon: Icon(Icons.assignment_turned_in_outlined)),
+                items: [
+                  const DropdownMenuItem<int?>(
+                      value: null, child: Text('Sin orden de trabajo')),
+                  ..._readyOrders.map((order) => DropdownMenuItem<int?>(
+                      value: order['id'] as int?,
+                      child: Text(
+                          '${order['code']} · ${_formatMoney(_money(order['total_clp']))}'))),
+                ],
+                onChanged: (value) {
+                  final order = value == null
+                      ? null
+                      : _readyOrders.firstWhere((item) => item['id'] == value);
+                  setState(() {
+                    _workOrderId = value;
+                    _customerId = order?['customer_id'] as int? ?? _customerId;
+                    _vehicleId = order?['vehicle_id'] as int?;
+                  });
+                },
+              ),
+            ],
             const SizedBox(height: 10),
             TextField(
                 controller: _discountController,
@@ -709,10 +759,12 @@ class _PosScreenState extends State<PosScreen> {
             SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                    onPressed:
-                        _saving || (_cart.isEmpty && _serviceItems.isEmpty)
-                            ? null
-                            : _checkout,
+                    onPressed: _saving ||
+                            (_cart.isEmpty &&
+                                _serviceItems.isEmpty &&
+                                _workOrderId == null)
+                        ? null
+                        : _checkout,
                     icon: _saving
                         ? const SizedBox(
                             width: 18,

@@ -1273,6 +1273,11 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
     if data.method not in {"mercado_pago", "mercado_pago_checkout"} and paid + data.amount_clp == sale.total_clp:
         sale.status = "paid"
         session.add(sale)
+        if sale.work_order_id:
+            order = session.get(WorkOrder, sale.work_order_id)
+            if order and order.status == WorkStatus.ready:
+                order.status = WorkStatus.delivered
+                session.add(order)
     session.commit()
     session.refresh(payment)
     return payment
