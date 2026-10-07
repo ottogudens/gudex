@@ -15,7 +15,9 @@ class PosScreen extends StatefulWidget {
 class _PosScreenState extends State<PosScreen> {
   final _discountController = TextEditingController(text: '0');
   final _productSearch = TextEditingController();
+  final _serviceSearch = TextEditingController();
   List<Map<String, dynamic>> _products = [];
+  List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _customers = [];
   List<Map<String, dynamic>> _readyOrders = [];
   List<Map<String, dynamic>> _sales = [];
@@ -26,6 +28,7 @@ class _PosScreenState extends State<PosScreen> {
   int? _vehicleId;
   String _paymentMethod = 'cash';
   String _categoryFilter = 'Todos';
+  String _serviceCategoryFilter = 'Todos';
   String _posLayout = 'compact';
   bool _loading = true;
   bool _saving = false;
@@ -41,6 +44,7 @@ class _PosScreenState extends State<PosScreen> {
   void dispose() {
     _discountController.dispose();
     _productSearch.dispose();
+    _serviceSearch.dispose();
     super.dispose();
   }
 
@@ -52,6 +56,7 @@ class _PosScreenState extends State<PosScreen> {
     try {
       final results = await Future.wait([
         widget.api.get('/api/v1/products'),
+        widget.api.get('/api/v1/services'),
         widget.api.get('/api/v1/customers'),
         widget.api.get('/api/v1/work-orders?status=ready'),
         widget.api.get('/api/v1/sales'),
@@ -59,9 +64,10 @@ class _PosScreenState extends State<PosScreen> {
       if (!mounted) return;
       setState(() {
         _products = _asMaps(results[0]);
-        _customers = _asMaps(results[1]);
-        _readyOrders = _asMaps(results[2]);
-        _sales = _asMaps(results[3]);
+        _services = _asMaps(results[1]);
+        _customers = _asMaps(results[2]);
+        _readyOrders = _asMaps(results[3]);
+        _sales = _asMaps(results[4]);
         _cart.removeWhere((id, quantity) {
           final product = _findProduct(id);
           return product == null ||
@@ -429,7 +435,7 @@ class _PosScreenState extends State<PosScreen> {
                     child: ListView(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
                         children: [
-                          _catalogPanel(available, desktop: false),
+                          _mobileCatalogs(available),
                           const SizedBox(height: 10),
                           _checkoutPanel(desktop: false),
                           const SizedBox(height: 10),
@@ -451,9 +457,7 @@ class _PosScreenState extends State<PosScreen> {
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                        Expanded(
-                            flex: 6,
-                            child: _catalogPanel(available, desktop: true)),
+                        Expanded(flex: 7, child: _desktopCatalogs(available)),
                         const SizedBox(width: 14),
                         Expanded(flex: 5, child: _checkoutPanel(desktop: true)),
                       ])
@@ -464,9 +468,7 @@ class _PosScreenState extends State<PosScreen> {
                             child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Expanded(
-                                      child: _catalogPanel(available,
-                                          desktop: true)),
+                                  Expanded(child: _desktopCatalogs(available)),
                                   const SizedBox(width: 12),
                                   Expanded(
                                       child: _checkoutPanel(desktop: true)),
@@ -482,8 +484,7 @@ class _PosScreenState extends State<PosScreen> {
                                 children: [
                                   Expanded(
                                       flex: 5,
-                                      child: _catalogPanel(available,
-                                          desktop: true)),
+                                      child: _desktopCatalogs(available)),
                                   const SizedBox(width: 12),
                                   Expanded(
                                       flex: 6,
@@ -518,6 +519,149 @@ class _PosScreenState extends State<PosScreen> {
         onSelectionChanged: (value) => setState(() => _posLayout = value.first),
       ));
 
+  Widget _desktopCatalogs(List<Map<String, dynamic>> available) => Column(
+        children: [
+          Expanded(child: _catalogPanel(available, desktop: true)),
+          const SizedBox(height: 10),
+          Expanded(child: _serviceCatalogPanel(desktop: true)),
+        ],
+      );
+
+  Widget _mobileCatalogs(List<Map<String, dynamic>> available) => Column(
+        children: [
+          SizedBox(height: 360, child: _catalogPanel(available, desktop: true)),
+          const SizedBox(height: 10),
+          SizedBox(height: 360, child: _serviceCatalogPanel(desktop: true)),
+        ],
+      );
+
+  Widget _serviceCatalogPanel({required bool desktop}) {
+    final categories = <String>{
+      'Todos',
+      ..._services
+          .map((service) => service['category']?.toString() ?? 'Sin categoría'),
+    }.toList();
+    final query = _serviceSearch.text.trim().toLowerCase();
+    final filtered = _services.where((service) {
+      final category = service['category']?.toString() ?? 'Sin categoría';
+      return (_serviceCategoryFilter == 'Todos' ||
+              category == _serviceCategoryFilter) &&
+          (query.isEmpty ||
+              '${service['name']} ${service['code']} $category'
+                  .toLowerCase()
+                  .contains(query));
+    }).toList();
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Icon(Icons.build_circle_outlined,
+                    color: Theme.of(context).colorScheme.onTertiaryContainer)),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text('Servicios',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  Text('${filtered.length} servicios disponibles',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant)),
+                ])),
+            IconButton(
+                tooltip: 'Limpiar búsqueda de servicios',
+                onPressed: _serviceSearch.text.isEmpty
+                    ? null
+                    : () {
+                        _serviceSearch.clear();
+                        setState(() {});
+                      },
+                icon: const Icon(Icons.backspace_outlined)),
+          ]),
+          const SizedBox(height: 10),
+          TextField(
+              controller: _serviceSearch,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  labelText: 'Buscar servicio, código o categoría',
+                  isDense: true)),
+          const SizedBox(height: 8),
+          SizedBox(
+              height: 38,
+              child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: categories.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 6),
+                  itemBuilder: (_, index) {
+                    final category = categories[index];
+                    return ChoiceChip(
+                        label: Text(category),
+                        selected: _serviceCategoryFilter == category,
+                        onSelected: (_) =>
+                            setState(() => _serviceCategoryFilter = category));
+                  })),
+          const SizedBox(height: 4),
+          Expanded(
+              child: filtered.isEmpty
+                  ? Center(
+                      child: Text(_services.isEmpty
+                          ? 'No hay servicios en el catálogo.'
+                          : 'No se encontraron servicios.'))
+                  : ListView.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) =>
+                          _serviceTile(filtered[index]))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _serviceTile(Map<String, dynamic> service) {
+    final id = service['id'];
+    final price = _money(service['price_clp']);
+    final alreadyAdded = _serviceItems.any((item) => item['service_id'] == id);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+          child: Icon(Icons.handyman_outlined,
+              color: Theme.of(context).colorScheme.onTertiaryContainer)),
+      title: Text(service['name']?.toString() ?? 'Servicio',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(
+          '${service['category'] ?? 'Servicio'} · ${service['code']}  ·  ${_formatMoney(price)}'),
+      trailing: FilledButton.tonalIcon(
+          onPressed: alreadyAdded
+              ? null
+              : () => setState(() => _serviceItems.add({
+                    'service_id': id,
+                    'description': service['name'],
+                    'quantity': 1.0,
+                    'unit_price_clp': price,
+                    'line_total_clp': price,
+                  })),
+          icon: Icon(alreadyAdded ? Icons.check : Icons.add),
+          label: Text(alreadyAdded ? 'Agregado' : 'Agregar')),
+    );
+  }
+
   Widget _catalogPanel(List<Map<String, dynamic>> available,
       {required bool desktop}) {
     final query = _productSearch.text.trim().toLowerCase();
@@ -537,6 +681,8 @@ class _PosScreenState extends State<PosScreen> {
       return matchesCategory && matchesSearch;
     }).toList();
     return Card(
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
             padding: const EdgeInsets.all(16),
             child:
@@ -623,6 +769,8 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Widget _checkoutPanel({required bool desktop}) => Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: SingleChildScrollView(
           padding: EdgeInsets.zero,
           child: Padding(
