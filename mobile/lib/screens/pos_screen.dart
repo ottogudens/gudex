@@ -559,222 +559,248 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Widget _checkoutPanel({required bool desktop}) => Card(
-      child: Padding(
-          padding: const EdgeInsets.all(18),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Text('Venta actual',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w700)),
-                    Text(
-                        '${_cart.length + _serviceItems.length} líneas · ${_formatMoney(_subtotal)}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant))
-                  ])),
-              if (_cart.isNotEmpty || _serviceItems.isNotEmpty)
-                IconButton(
-                    tooltip: 'Vaciar venta',
-                    icon: const Icon(Icons.delete_sweep_outlined),
-                    onPressed: _saving
-                        ? null
-                        : () => setState(() {
-                              _cart.clear();
-                              _serviceItems.clear();
-                              _discountController.text = '0';
-                            }))
-            ]),
-            const SizedBox(height: 8),
-            if (desktop)
-              SizedBox(
-                  height: 112,
-                  child: ListView(padding: EdgeInsets.zero, children: [
-                    if (_cart.isEmpty && _serviceItems.isEmpty)
-                      const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 20),
-                          child: Text(
-                              'Agrega productos o servicios para comenzar.')),
-                    ..._cart.entries.map(_cartTile),
-                    ..._serviceItems.asMap().entries.map((entry) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(entry.value['description'] as String),
-                          subtitle: Text(
-                              'Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
-                          trailing:
-                              Row(mainAxisSize: MainAxisSize.min, children: [
-                            Text(_formatMoney(
-                                _money(entry.value['line_total_clp']))),
-                            IconButton(
-                                tooltip: 'Quitar servicio',
-                                onPressed: () => setState(
-                                    () => _serviceItems.removeAt(entry.key)),
-                                icon: const Icon(Icons.close))
-                          ]),
-                        )),
-                    Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                            onPressed: _addServiceLine,
-                            icon: const Icon(Icons.build_outlined),
-                            label: const Text('Agregar servicio / trabajo'))),
-                  ]))
-            else ...[
-              if (_cart.isEmpty && _serviceItems.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20),
-                    child: Text('Agrega productos o servicios para comenzar.')),
-              ..._cart.entries.map(_cartTile),
-              ..._serviceItems.asMap().entries.map((entry) => ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(entry.value['description'] as String),
-                    subtitle: Text(
-                        'Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
-                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(_formatMoney(_money(entry.value['line_total_clp']))),
-                      IconButton(
-                          tooltip: 'Quitar servicio',
-                          onPressed: () =>
-                              setState(() => _serviceItems.removeAt(entry.key)),
-                          icon: const Icon(Icons.close))
+      child: SingleChildScrollView(
+          padding: EdgeInsets.zero,
+          child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text('Venta actual',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w700)),
+                            Text(
+                                '${_cart.length + _serviceItems.length} líneas · ${_formatMoney(_subtotal)}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant))
+                          ])),
+                      if (_cart.isNotEmpty || _serviceItems.isNotEmpty)
+                        IconButton(
+                            tooltip: 'Vaciar venta',
+                            icon: const Icon(Icons.delete_sweep_outlined),
+                            onPressed: _saving
+                                ? null
+                                : () => setState(() {
+                                      _cart.clear();
+                                      _serviceItems.clear();
+                                      _discountController.text = '0';
+                                    }))
                     ]),
-                  )),
-              Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                      onPressed: _addServiceLine,
-                      icon: const Icon(Icons.build_outlined),
-                      label: const Text('Agregar servicio / trabajo'))),
-            ],
-            const SizedBox(height: 8),
-            DropdownButtonFormField<int?>(
-              initialValue: _customerId,
-              decoration: const InputDecoration(
-                  labelText: 'Cliente (opcional)', isDense: true),
-              items: [
-                const DropdownMenuItem<int?>(
-                    value: null, child: Text('Venta sin cliente')),
-                ..._customers.map((customer) => DropdownMenuItem<int?>(
-                    value: customer['id'] as int?,
-                    child: Text('${customer['full_name']}')))
-              ],
-              onChanged: (value) => setState(() => _customerId = value),
-            ),
-            if (_readyOrders.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              DropdownButtonFormField<int?>(
-                initialValue: _workOrderId,
-                decoration: const InputDecoration(
-                    labelText: 'Orden lista para pago',
-                    isDense: true,
-                    prefixIcon: Icon(Icons.assignment_turned_in_outlined)),
-                items: [
-                  const DropdownMenuItem<int?>(
-                      value: null, child: Text('Sin orden de trabajo')),
-                  ..._readyOrders.map((order) => DropdownMenuItem<int?>(
-                      value: order['id'] as int?,
-                      child: Text(
-                          '${order['code']} · ${_formatMoney(_money(order['total_clp']))}'))),
-                ],
-                onChanged: (value) {
-                  final order = value == null
-                      ? null
-                      : _readyOrders.firstWhere((item) => item['id'] == value);
-                  setState(() {
-                    _workOrderId = value;
-                    _customerId = order?['customer_id'] as int? ?? _customerId;
-                    _vehicleId = order?['vehicle_id'] as int?;
-                  });
-                },
-              ),
-            ],
-            const SizedBox(height: 10),
-            TextField(
-                controller: _discountController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Descuento (CLP)',
-                    prefixText: '\$',
-                    isDense: true),
-                onChanged: (_) => setState(() {})),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: _paymentMethod,
-              decoration: const InputDecoration(
-                  labelText: 'Medio de pago', isDense: true),
-              items: const [
-                DropdownMenuItem(value: 'cash', child: Text('Efectivo')),
-                DropdownMenuItem(
-                    value: 'card', child: Text('Tarjeta / Mercado Pago Point')),
-                DropdownMenuItem(
-                    value: 'transfer', child: Text('Transferencia')),
-                DropdownMenuItem(
-                    value: 'mercado_pago_checkout',
-                    child: Text('Mercado Pago Checkout Pro')),
-              ],
-              onChanged: (value) {
-                if (value != null) setState(() => _paymentMethod = value);
-              },
-            ),
-            const Divider(height: 22),
-            Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(14)),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Total a cobrar',
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelLarge
-                              ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onPrimaryContainer)),
-                      const SizedBox(height: 2),
-                      Text(_formatMoney(_total),
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onPrimaryContainer)),
-                    ])),
-            const SizedBox(height: 8),
-            _totalRow('Subtotal', _subtotal),
-            _totalRow('Descuento', _discount.clamp(0, _subtotal).toInt()),
-            _totalRow('Total', _total, emphasize: true),
-            const SizedBox(height: 10),
-            SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                    onPressed: _saving ||
-                            (_cart.isEmpty &&
-                                _serviceItems.isEmpty &&
-                                _workOrderId == null)
-                        ? null
-                        : _checkout,
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.lock_outline),
-                    label: Text(_saving
-                        ? 'Guardando…'
-                        : 'Cobrar ${_formatMoney(_total)}'))),
-          ])));
+                    const SizedBox(height: 8),
+                    if (desktop)
+                      SizedBox(
+                          height: 112,
+                          child: ListView(padding: EdgeInsets.zero, children: [
+                            if (_cart.isEmpty && _serviceItems.isEmpty)
+                              const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 20),
+                                  child: Text(
+                                      'Agrega productos o servicios para comenzar.')),
+                            ..._cart.entries.map(_cartTile),
+                            ..._serviceItems
+                                .asMap()
+                                .entries
+                                .map((entry) => ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: Text(
+                                          entry.value['description'] as String),
+                                      subtitle: Text(
+                                          'Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
+                                      trailing: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(_formatMoney(_money(entry
+                                                .value['line_total_clp']))),
+                                            IconButton(
+                                                tooltip: 'Quitar servicio',
+                                                onPressed: () => setState(() =>
+                                                    _serviceItems
+                                                        .removeAt(entry.key)),
+                                                icon: const Icon(Icons.close))
+                                          ]),
+                                    )),
+                            Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton.icon(
+                                    onPressed: _addServiceLine,
+                                    icon: const Icon(Icons.build_outlined),
+                                    label: const Text(
+                                        'Agregar servicio / trabajo'))),
+                          ]))
+                    else ...[
+                      if (_cart.isEmpty && _serviceItems.isEmpty)
+                        const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: Text(
+                                'Agrega productos o servicios para comenzar.')),
+                      ..._cart.entries.map(_cartTile),
+                      ..._serviceItems.asMap().entries.map((entry) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(entry.value['description'] as String),
+                            subtitle: Text(
+                                'Servicio · ${entry.value['quantity']} × ${_formatMoney(_money(entry.value['unit_price_clp']))}'),
+                            trailing:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              Text(_formatMoney(
+                                  _money(entry.value['line_total_clp']))),
+                              IconButton(
+                                  tooltip: 'Quitar servicio',
+                                  onPressed: () => setState(
+                                      () => _serviceItems.removeAt(entry.key)),
+                                  icon: const Icon(Icons.close))
+                            ]),
+                          )),
+                      Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                              onPressed: _addServiceLine,
+                              icon: const Icon(Icons.build_outlined),
+                              label: const Text('Agregar servicio / trabajo'))),
+                    ],
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int?>(
+                      initialValue: _customerId,
+                      decoration: const InputDecoration(
+                          labelText: 'Cliente (opcional)', isDense: true),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                            value: null, child: Text('Venta sin cliente')),
+                        ..._customers.map((customer) => DropdownMenuItem<int?>(
+                            value: customer['id'] as int?,
+                            child: Text('${customer['full_name']}')))
+                      ],
+                      onChanged: (value) => setState(() => _customerId = value),
+                    ),
+                    if (_readyOrders.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<int?>(
+                        initialValue: _workOrderId,
+                        decoration: const InputDecoration(
+                            labelText: 'Orden lista para pago',
+                            isDense: true,
+                            prefixIcon:
+                                Icon(Icons.assignment_turned_in_outlined)),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                              value: null, child: Text('Sin orden de trabajo')),
+                          ..._readyOrders.map((order) => DropdownMenuItem<int?>(
+                              value: order['id'] as int?,
+                              child: Text(
+                                  '${order['code']} · ${_formatMoney(_money(order['total_clp']))}'))),
+                        ],
+                        onChanged: (value) {
+                          final order = value == null
+                              ? null
+                              : _readyOrders
+                                  .firstWhere((item) => item['id'] == value);
+                          setState(() {
+                            _workOrderId = value;
+                            _customerId =
+                                order?['customer_id'] as int? ?? _customerId;
+                            _vehicleId = order?['vehicle_id'] as int?;
+                          });
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    TextField(
+                        controller: _discountController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Descuento (CLP)',
+                            prefixText: '\$',
+                            isDense: true),
+                        onChanged: (_) => setState(() {})),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: _paymentMethod,
+                      decoration: const InputDecoration(
+                          labelText: 'Medio de pago', isDense: true),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'cash', child: Text('Efectivo')),
+                        DropdownMenuItem(
+                            value: 'card',
+                            child: Text('Tarjeta / Mercado Pago Point')),
+                        DropdownMenuItem(
+                            value: 'transfer', child: Text('Transferencia')),
+                        DropdownMenuItem(
+                            value: 'mercado_pago_checkout',
+                            child: Text('Mercado Pago Checkout Pro')),
+                      ],
+                      onChanged: (value) {
+                        if (value != null)
+                          setState(() => _paymentMethod = value);
+                      },
+                    ),
+                    const Divider(height: 22),
+                    Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                            color:
+                                Theme.of(context).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(14)),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Total a cobrar',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onPrimaryContainer)),
+                              const SizedBox(height: 2),
+                              Text(_formatMoney(_total),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onPrimaryContainer)),
+                            ])),
+                    const SizedBox(height: 8),
+                    _totalRow('Subtotal', _subtotal),
+                    _totalRow(
+                        'Descuento', _discount.clamp(0, _subtotal).toInt()),
+                    _totalRow('Total', _total, emphasize: true),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                            onPressed: _saving ||
+                                    (_cart.isEmpty &&
+                                        _serviceItems.isEmpty &&
+                                        _workOrderId == null)
+                                ? null
+                                : _checkout,
+                            icon: _saving
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : const Icon(Icons.lock_outline),
+                            label: Text(_saving
+                                ? 'Guardando…'
+                                : 'Cobrar ${_formatMoney(_total)}'))),
+                  ]))));
 
   Widget _salesPanel() => Card(
       child: Padding(
