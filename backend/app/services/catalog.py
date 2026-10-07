@@ -13,5 +13,5 @@ def seed_catalog(session: Session):
             session.add(category)
             session.flush()
             categories[item["category"]] = category.id
-        session.add(Service(code=item["code"], name=item["name"], category_id=categories[item["category"]]))
+        session.add(Service(code=item["code"], name=item["name"], category_id=categories[item["category"]], price_clp=0))
     session.flush()

@@ -58,6 +58,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     final name = TextEditingController(text: row?['name']?.toString());
     final code = TextEditingController(text: row?['code']?.toString());
     final description = TextEditingController(text: row?['description']?.toString());
+    final price = TextEditingController(text: row?['price_clp']?.toString() ?? '0');
     int? categoryId = row?['category_id'] as int? ?? _category ?? (_categories.isEmpty ? null : _categories.first['id'] as int);
     final form = GlobalKey<FormState>();
     bool saving = false;
@@ -76,6 +77,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
               onChanged: saving ? null : (v) => update(() => categoryId = v)),
             TextFormField(controller: description, maxLength: 2000, minLines: 2, maxLines: 4,
               decoration: const InputDecoration(labelText: 'Descripción')),
+            TextFormField(controller: price, keyboardType: TextInputType.number, maxLength: 10,
+              decoration: const InputDecoration(labelText: 'Precio sugerido (CLP)'),
+              validator: (value) => int.tryParse(value?.trim() ?? '') == null || int.parse(value!.trim()) < 0
+                ? 'Ingresa un precio entero igual o mayor a cero' : null),
           ],
           if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ])))),
@@ -85,7 +90,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
             update(() { saving = true; error = null; });
             try {
               final data = <String, dynamic>{'name': name.text.trim(), if (!category) ...{
-                'code': code.text.trim(), 'category_id': categoryId, 'description': description.text.trim()}};
+                'code': code.text.trim(), 'category_id': categoryId, 'description': description.text.trim(),
+                'price_clp': int.parse(price.text.trim())}};
               final path = '/api/v1/${category ? 'service-categories' : 'services'}';
               if (row == null) { await widget.api.postJson(path, data); }
               else { await widget.api.putJson('$path/${row['id']}', data); }
@@ -96,7 +102,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     ));
     // Wait for the dialog route to finish its closing animation before disposal.
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    name.dispose(); code.dispose(); description.dispose();
+    name.dispose(); code.dispose(); description.dispose(); price.dispose();
     if (saved == true && mounted) await _load();
   }
 
@@ -140,7 +146,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
   Widget _tile(Map<String, dynamic> row, bool category) => Card(child: ListTile(
     title: Text(row['name'].toString()),
-    subtitle: Text(category ? '${_services.where((s) => s['category_id'] == row['id']).length} servicios' : '${row['code']} · ${row['category']}\n${row['description'] ?? ''}'),
+    subtitle: Text(category ? '${_services.where((s) => s['category_id'] == row['id']).length} servicios' : '${row['code']} · ${row['category']} · \$${row['price_clp'] ?? 0} CLP\n${row['description'] ?? ''}'),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
       IconButton(onPressed: _busy ? null : () => _edit(category, row), icon: const Icon(Icons.edit_outlined), tooltip: 'Editar'),
       IconButton(onPressed: _busy ? null : () => _delete(row, category), icon: const Icon(Icons.delete_outline), tooltip: 'Eliminar'),

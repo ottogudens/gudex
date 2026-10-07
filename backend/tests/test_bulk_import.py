@@ -110,7 +110,7 @@ def test_services_new_category_update_and_code_duplicate(client):
     book = workbook(client, 'services'); sheet = only_row(book, service['id'])
     new_category = 'Nueva ' + uuid4().hex
     sheet.cell(2, 3, 'Editado'); sheet.cell(2, 4, new_category)
-    sheet.append([None, uuid4().hex, 'Nuevo', new_category.lower(), 'Detalle', None])
+    sheet.append([None, uuid4().hex, 'Nuevo', new_category.lower(), 'Detalle', 25000, None])
     preview = upload(client, book, 'services')
     assert preview['new_categories'] == [new_category]
     assert confirm(client, preview, 'services').status_code == 200
@@ -119,8 +119,29 @@ def test_services_new_category_update_and_code_duplicate(client):
         assert item.name == 'Editado'
         assert s.get(ServiceCategory, item.category_id).name == new_category
     book = workbook(client, 'services'); sheet = only_row(book, service['id'])
-    sheet.append([None, service['code'], 'Duplicado', new_category, '', None])
+    sheet.append([None, service['code'], 'Duplicado', new_category, '', 0, None])
     assert upload(client, book, 'services')['errors']
+
+
+def test_services_bulk_price_export_import_and_validation(client):
+    category = client.post('/api/v1/service-categories', json={'name': f'Precio {uuid4()}'}).json()
+    service = client.post('/api/v1/services', json={
+        'code': uuid4().hex, 'name': 'Alineación', 'category_id': category['id'], 'price_clp': 18000,
+    }).json()
+    book = workbook(client, 'services')
+    sheet = only_row(book, service['id'])
+    assert [cell.value for cell in sheet[1]] == ['ID', 'Código', 'Nombre', 'Categoría', 'Descripción', 'Precio CLP', '_version']
+    assert sheet.cell(2, 6).value == 18000
+    sheet.cell(2, 6, 22000)
+    preview = upload(client, book, 'services')
+    assert preview['updated'] == 1
+    assert confirm(client, preview, 'services').status_code == 200
+    with Session(engine) as session:
+        assert session.get(Service, service['id']).price_clp == 22000
+    invalid = workbook(client, 'services')
+    invalid_sheet = only_row(invalid, service['id'])
+    invalid_sheet.cell(2, 6, -1)
+    assert 'Precio CLP' in upload(client, invalid, 'services')['errors'][0]['message']
 
 
 def test_archive_and_export_include_inactive_formula_as_literal(client):

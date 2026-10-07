@@ -102,17 +102,23 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                     child: Text('${s['category']} · ${s['name']}', overflow: TextOverflow.ellipsis))).toList(),
                   onChanged: (code) {
                     if (code == null) return;
-                    final name = _services.firstWhere((s) => s['code'] == code)['name'] as String;
+                    final service = _services.firstWhere((s) => s['code'] == code);
+                    final name = service['name'] as String;
+                    final suggestedPrice = (service['price_clp'] as num?)?.toInt() ?? 0;
                     update(() {
-                      if (!selectedServices.contains(name)) selectedServices.add(name);
+                      final isNew = !selectedServices.contains(name);
+                      if (isNew) selectedServices.add(name);
                       if (description.text.trim().isEmpty) description.text = name;
+                      if (isNew && suggestedPrice > 0) {
+                        labor.text = ((int.tryParse(labor.text) ?? 0) + suggestedPrice).toString();
+                      }
                     });
                   },
                 ),
                 Wrap(spacing: 6, children: selectedServices.map((name) => InputChip(label: Text(name),
                   onDeleted: () => update(() => selectedServices.remove(name)))).toList()),
                 const SizedBox(height: 12),
-                const Text('Los servicios no tienen precios predefinidos. Ingresa los valores de esta cotización.'),
+                const Text('El precio sugerido de cada servicio seleccionado se suma a la mano de obra. Puedes ajustarlo antes de guardar.'),
                 const SizedBox(height: 12),
                 TextFormField(controller: labor, keyboardType: TextInputType.number,
                   decoration: const InputDecoration(labelText: 'Mano de obra / servicios (CLP) *'),

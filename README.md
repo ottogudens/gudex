@@ -89,7 +89,7 @@ Conserva ambas columnas en las filas existentes. No cambies los encabezados. Eli
 no elimina registros. En productos, **Activo=No** archiva y **Activo=Sí** reactiva.
 
 - Productos: ID, SKU, Nombre, Categoría, Unidad, Stock, Stock mínimo, Costo CLP, Precio CLP, Activo.
-- Servicios: ID, Código, Nombre, Categoría, Descripción.
+- Servicios: ID, Código, Nombre, Categoría, Descripción, Precio CLP.
 - Códigos y SKU se escriben como texto para conservar ceros iniciales. Importes CLP: enteros sin símbolos;
   cantidades: números no negativos. No se admiten fórmulas ni macros. Máximo 5000 filas y 5 MB.
 - La vista previa muestra errores por fila, valores anteriores/nuevos y categorías de servicios que se

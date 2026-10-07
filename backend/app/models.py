@@ -370,6 +370,7 @@ class Service(SQLModel, table=True):
     name: str = Field(max_length=160)
     category_id: int = Field(foreign_key="servicecategory.id", index=True)
     description: str = Field(default="", max_length=2000)
+    price_clp: int = Field(default=0, ge=0)
 
 
 class BulkImport(SQLModel, table=True):

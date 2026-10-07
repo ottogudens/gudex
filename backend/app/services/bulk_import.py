@@ -26,7 +26,7 @@ COLUMNS = {
                  ("unit", "Unidad"), ("stock_quantity", "Stock"), ("minimum_quantity", "Stock mínimo"),
                  ("cost_clp", "Costo CLP"), ("price_clp", "Precio CLP"), ("active", "Activo"), ("version", "_version")],
     "services": [("id", "ID"), ("code", "Código"), ("name", "Nombre"), ("category", "Categoría"),
-                 ("description", "Descripción"), ("version", "_version")],
+                 ("description", "Descripción"), ("price_clp", "Precio CLP"), ("version", "_version")],
 }
 
 
@@ -174,7 +174,8 @@ def normalize(raw, kind):
             "category": text(raw["category"], "Categoría", 80, kind == "services")}
     if kind == "services":
         data.update(code=text(raw["code"], "Código", 40, True).upper(),
-                    description=text(raw["description"], "Descripción", 2000))
+                    description=text(raw["description"], "Descripción", 2000),
+                    price_clp=number(raw["price_clp"], "Precio CLP", True))
         ServiceInput.model_validate({**{k: v for k, v in data.items() if k != "category"}, "category_id": 1})
     else:
         active = raw["active"]

@@ -20,6 +20,7 @@ class ServiceInput(CategoryInput):
     code: str = Field(min_length=1, max_length=40)
     category_id: int = Field(gt=0)
     description: str = Field(default="", max_length=2000)
+    price_clp: int = Field(default=0, ge=0, le=2_147_483_647)
 
 
 def save(session, row):
