@@ -129,6 +129,9 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     final google = Map<String, dynamic>.from(_status?['google'] as Map? ?? {});
     final ai = Map<String, dynamic>.from(_status?['ai'] as Map? ?? {});
     final mercadoPago = Map<String, dynamic>.from(_status?['mercado_pago'] as Map? ?? {});
+    final social = Map<String, dynamic>.from(_status?['social'] as Map? ?? {});
+    final instagram = Map<String, dynamic>.from(social['instagram'] as Map? ?? {});
+    final facebook = Map<String, dynamic>.from(social['facebook'] as Map? ?? {});
     return Scaffold(appBar: AppBar(title: const Text('Integraciones'), actions: [IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh))]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet_outlined, color: GudexColors.primary),
@@ -156,7 +159,27 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
         Card(child: ListTile(leading: const Icon(Icons.auto_awesome), title: const Text('Asistente de IA'),
           subtitle: Text(ai['available'] == true ? 'Configurado: ' + ai['provider'].toString() + ' / ' + ai['model'].toString() : 'Falta configurar proveedor y clave en Railway'),
           trailing: ai['available'] == true ? OutlinedButton(onPressed: _busy ? null : _chooseAiModel, child: const Text('Cambiar modelo')) : null)),
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Redes sociales', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(social['credentials_present'] == true
+              ? (social['connected'] == true ? 'Meta configurado y con token disponible.' : 'Meta configurado; falta autorizar una cuenta.')
+              : 'Configura Meta OAuth en Railway para conectar Instagram y Facebook.'),
+          const SizedBox(height: 12),
+          _socialConnectionTile(Icons.camera_alt_outlined, 'Instagram', instagram['configured'] == true, social['connected'] == true),
+          _socialConnectionTile(Icons.facebook, 'Facebook', facebook['configured'] == true, social['connected'] == true),
+          const SizedBox(height: 8),
+          const Text('Variables requeridas: META_APP_ID, META_APP_SECRET, META_REDIRECT_URI, META_ACCESS_TOKEN y el ID de cada cuenta. Las publicaciones siguen requiriendo aprobación humana.'),
+        ]))),
         const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('La conexión OAuth y las claves del proveedor se administran en Railway. Esta pantalla muestra el estado y permite iniciar flujos autorizados.'))),
       ]));
   }
+
+  Widget _socialConnectionTile(IconData icon, String name, bool accountConfigured, bool tokenAvailable) => ListTile(
+    contentPadding: EdgeInsets.zero,
+    leading: Icon(icon),
+    title: Text(name),
+    subtitle: Text(accountConfigured && tokenAvailable ? 'Cuenta lista para conectar' : accountConfigured ? 'Cuenta identificada; falta autorización' : 'ID de cuenta no configurado'),
+    trailing: Icon(accountConfigured && tokenAvailable ? Icons.check_circle : Icons.warning_amber_outlined),
+  );
 }

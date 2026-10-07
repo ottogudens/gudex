@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     google_drive_folder_id: str | None = None
     google_calendar_id: str = "primary"
     google_gmail_query: str = "has:attachment filename:pdf newer_than:30d"
+    meta_app_id: str | None = None
+    meta_app_secret: str | None = None
+    meta_redirect_uri: str | None = None
+    meta_access_token: str | None = None
+    meta_instagram_account_id: str | None = None
+    meta_facebook_page_id: str | None = None
     customer_portal_url: str | None = None
     customer_access_token_hours: int = 24
     integration_encryption_key: str | None = None

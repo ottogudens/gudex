@@ -72,6 +72,14 @@ def integration_status(session: Session = Depends(get_session)):
                    "drive_folder_configured": bool(settings.google_drive_folder_id)},
         "ai": {"credentials_present": bool(settings.ai_provider and settings.ai_api_key), "provider": settings.ai_provider,
                "model": selected_ai_model(session), "available": bool(settings.ai_provider and settings.ai_api_key)},
+        "social": {
+            "provider": "meta",
+            "credentials_present": bool(settings.meta_app_id and settings.meta_app_secret and settings.meta_redirect_uri),
+            "connected": bool(settings.meta_access_token),
+            "instagram": {"configured": bool(settings.meta_instagram_account_id), "account_id": settings.meta_instagram_account_id},
+            "facebook": {"configured": bool(settings.meta_facebook_page_id), "page_id": settings.meta_facebook_page_id},
+            "redirect_uri": settings.meta_redirect_uri,
+        },
         "scanner": {"brand": "LAUNCH", "model": "X-431 PRO", "ingest": ["pdf_upload", "gmail", "drive"]},
     }
 
