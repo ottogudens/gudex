@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/constants.dart';
 import '../services/api_client.dart';
+import 'bulk_import_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({required this.api, required this.canManage, this.onCreateSocialPost, super.key});
@@ -233,6 +234,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final visible = _visibleProducts;
     return Stack(children: [
       Column(children: [
+        if (widget.canManage) Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Align(alignment: Alignment.centerRight, child: OutlinedButton.icon(
+        onPressed: () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => BulkImportScreen(api: widget.api, kind: 'products')));
+          if (mounted) await _refresh();
+        }, icon: const Icon(Icons.table_view_outlined), label: const Text('Carga masiva'),
+      ))),
         Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 4), child: TextField(
           controller: _search,
           decoration: InputDecoration(labelText: 'Buscar producto', prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(onPressed: () { _search.clear(); setState(() {}); }, icon: const Icon(Icons.clear))),

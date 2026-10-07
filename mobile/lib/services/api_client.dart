@@ -33,6 +33,7 @@ class ApiClient {
   Future<Uint8List> getBytes(String path) async {
     final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      _decode(response);
       throw Exception('Error HTTP ${response.statusCode}');
     }
     return response.bodyBytes;

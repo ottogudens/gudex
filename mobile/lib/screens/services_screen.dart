@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import 'bulk_import_screen.dart';
 
 class ServicesScreen extends StatefulWidget {
   const ServicesScreen({required this.api, super.key});
@@ -112,6 +113,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
         Column(children: [
           Padding(padding: const EdgeInsets.all(12), child: Column(children: [
             Row(children: [Expanded(child: Text('Catálogo de servicios', style: Theme.of(context).textTheme.titleMedium)),
+              IconButton(onPressed: _busy ? null : () async {
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => BulkImportScreen(api: widget.api, kind: 'services')));
+                if (mounted) await _load();
+              }, icon: const Icon(Icons.table_view_outlined), tooltip: 'Carga masiva'),
               IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh), tooltip: 'Actualizar'),
               FilledButton.icon(onPressed: _busy ? null : () => _edit(false), icon: const Icon(Icons.add), label: const Text('Agregar'))]),
             const SizedBox(height: 12),

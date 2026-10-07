@@ -370,3 +370,16 @@ class Service(SQLModel, table=True):
     name: str = Field(max_length=160)
     category_id: int = Field(foreign_key="servicecategory.id", index=True)
     description: str = Field(default="", max_length=2000)
+
+
+class BulkImport(SQLModel, table=True):
+    id: str = Field(primary_key=True, max_length=36)
+    kind: str = Field(max_length=16, index=True)
+    filename: str = Field(max_length=255)
+    created_by: str = Field(max_length=254)
+    status: str = Field(default="preview", max_length=24)
+    payload: str
+    summary: str
+    created_at: datetime = Field(default_factory=now_utc)
+    expires_at: datetime
+    confirmed_at: Optional[datetime] = None

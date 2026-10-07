@@ -79,3 +79,29 @@ externos que no estén importados o vinculados al vehículo. Solo el equipo del 
 Requiere `AI_PROVIDER=openai`, `AI_API_KEY` y un modelo compatible configurado en Integraciones.
 El diagnóstico utiliza un máximo de 3000 tokens de respuesta. Los documentos se envían al proveedor como
 contexto autorizado; las fuentes almacenadas en la auditoría incluyen metadatos, sin duplicar su texto.
+
+## Carga masiva de productos y servicios
+
+Administración dispone de **Carga masiva** en Inventario y Servicios. Descarga un Excel `.xlsx` con
+los registros actuales (también productos archivados), edita la hoja **Datos**, sube el archivo,
+revisa los cambios y confirma. Las filas nuevas llevan **ID** y la columna oculta **_version** vacíos.
+Conserva ambas columnas en las filas existentes. No cambies los encabezados. Eliminar filas del Excel
+no elimina registros. En productos, **Activo=No** archiva y **Activo=Sí** reactiva.
+
+- Productos: ID, SKU, Nombre, Categoría, Unidad, Stock, Stock mínimo, Costo CLP, Precio CLP, Activo.
+- Servicios: ID, Código, Nombre, Categoría, Descripción.
+- Códigos y SKU se escriben como texto para conservar ceros iniciales. Importes CLP: enteros sin símbolos;
+  cantidades: números no negativos. No se admiten fórmulas ni macros. Máximo 5000 filas y 5 MB.
+- La vista previa muestra errores por fila, valores anteriores/nuevos y categorías de servicios que se
+  crearán. Nada se modifica hasta confirmar; cualquier error bloquea la importación completa.
+- La referencia de versión detecta cambios desde la descarga. Al confirmar se vuelve a validar y se
+  bloquean los registros durante la transacción para no sobrescribir ventas o ajustes concurrentes.
+- Los cambios de stock generan movimientos `bulk_import` con referencia al ID de importación.
+- Las revisiones vencen en 30 minutos y solo su administrador autor puede confirmarlas. Repetir una
+  confirmación no duplica registros ni movimientos. El historial conserva autor, fecha, archivo y totales;
+  el backend conserva también el detalle de cambios, sin guardar el archivo Excel original.
+
+**Despliegue:** ejecutar `alembic -c alembic.ini upgrade head` desde el directorio del backend contra
+la misma base que usa la API. La nueva revisión es `20261007_0008` y crea el historial de importaciones.
+La ruta de predespliegue de Railway ya contiene este comando; verificar que se ejecute antes de iniciar
+la API, especialmente si el entorno aún tenía pendiente la migración del catálogo `20261006_0007`.
