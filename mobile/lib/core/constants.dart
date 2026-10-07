@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
 
+String formatClp(int amount) {
+  final digits = amount.abs().toString().replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]}.',
+  );
+  return '${amount < 0 ? '-' : ''}\$$digits CLP';
+}
+
 /// Brand colours used throughout the Gudex application.
 abstract final class GudexColors {
   static const ink = Color(0xFF242424);

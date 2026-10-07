@@ -30,6 +30,44 @@ class ApiClient {
     return _decode(response);
   }
 
+  /// Exhausts an offset-paginated list endpoint. Do not use for unpaged routes.
+  /// A failed page fails the whole load rather than returning partial search data.
+  Future<List<Map<String, dynamic>>> getAll(String path) async {
+    final uri = Uri.parse(path);
+    final records = <Map<String, dynamic>>[];
+    final seen = <Object>{};
+    var offset = 0;
+    while (true) {
+      final page = await get(
+        uri
+            .replace(
+              queryParameters: {
+                ...uri.queryParameters,
+                'limit': '200',
+                'offset': '$offset',
+              },
+            )
+            .toString(),
+      );
+      if (page is! List) throw const FormatException('Se esperaba una lista');
+      if (page.isEmpty) return records;
+      var added = 0;
+      for (final row in page) {
+        if (row is! Map || row['id'] == null) {
+          throw const FormatException('Registro sin identificador');
+        }
+        if (seen.add(row['id'] as Object)) {
+          records.add(Map<String, dynamic>.from(row));
+          added++;
+        }
+      }
+      if (added == 0) {
+        throw const FormatException('La API no avanzó a la siguiente página');
+      }
+      offset += page.length;
+    }
+  }
+
   Future<Uint8List> getBytes(String path) async {
     final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
     if (response.statusCode < 200 || response.statusCode >= 300) {

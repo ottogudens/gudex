@@ -1,5 +1,7 @@
 # Gestión de lubricentro
 
+Resumen de [arquitectura, estructura y stack tecnológico](docs/arquitectura-y-stack.md).
+
 Aplicación para administrar clientes, vehículos, inspecciones, diagnósticos, cotizaciones, órdenes de trabajo, scanner, ventas e inventario. La solución se desarrollará por etapas, con API Python y clientes Flutter para el personal y los clientes.
 
 ## Estado

@@ -41,17 +41,19 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     try {
       if (_isOrders) {
         final values = await Future.wait([
-          widget.api.get(widget.modulePath),
-          widget.api.get('/api/v1/customers'),
-          widget.api.get('/api/v1/vehicles'),
+          widget.modulePath == '/api/v1/work-orders'
+              ? widget.api.getAll(widget.modulePath)
+              : widget.api.get(widget.modulePath),
+          widget.api.getAll('/api/v1/customers'),
+          widget.api.getAll('/api/v1/vehicles'),
         ]);
         _records = _maps(values[0]);
         _customers = _maps(values[1]);
         _vehicles = _maps(values[2]);
       } else {
         final values = await Future.wait([
-          widget.api.get('/api/v1/customers'),
-          widget.api.get('/api/v1/vehicles'),
+          widget.api.getAll('/api/v1/customers'),
+          widget.api.getAll('/api/v1/vehicles'),
         ]);
         _customers = _maps(values[0]);
         _vehicles = _maps(values[1]);
