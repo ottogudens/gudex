@@ -138,6 +138,14 @@ class VehicleCreate(SQLModel):
     def clean_plate(cls, value: str) -> str:
         return normalize_plate(value)
 
+
+class MaintenancePlanCreate(SQLModel):
+    vehicle_id: int
+    name: str = Field(min_length=2, max_length=120)
+    interval_km: Optional[int] = Field(default=None, ge=1)
+    interval_days: Optional[int] = Field(default=None, ge=1)
+    last_service_km: Optional[int] = Field(default=None, ge=0)
+
     @field_validator("vin")
     @classmethod
     def clean_vin(cls, value: str | None) -> str | None:

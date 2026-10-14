@@ -97,6 +97,17 @@ class Vehicle(SQLModel, table=True):
     work_orders: list["WorkOrder"] = Relationship(back_populates="vehicle")
 
 
+class MaintenancePlan(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    name: str = Field(max_length=120)
+    interval_km: Optional[int] = Field(default=None, ge=1)
+    interval_days: Optional[int] = Field(default=None, ge=1)
+    last_service_km: Optional[int] = Field(default=None, ge=0)
+    last_service_at: datetime = Field(default_factory=now_utc)
+    active: bool = True
+
+
 class WorkOrder(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     code: str = Field(index=True, unique=True, max_length=24)

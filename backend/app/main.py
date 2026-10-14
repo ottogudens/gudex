@@ -22,11 +22,11 @@ from app.database import create_db_and_tables, engine, get_session, upgrade_sche
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyTransaction, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
-    StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
+    StockMovement, User, UserRole, Vehicle, MaintenancePlan, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
-    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
+    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -612,6 +612,33 @@ def vehicle_history(vehicle_id: int, session: Session = Depends(get_session)):
     if not vehicle:
         raise HTTPException(404, "Vehículo no encontrado")
     return vehicle_history_payload(session, vehicle)
+
+
+@app.post("/api/v1/maintenance-plans", response_model=MaintenancePlan, status_code=201, dependencies=[Depends(require_admin)])
+def create_maintenance_plan(data: MaintenancePlanCreate, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, data.vehicle_id)
+    if not vehicle:
+        raise HTTPException(404, "Vehículo no encontrado")
+    if not data.interval_km and not data.interval_days:
+        raise HTTPException(422, "Define un intervalo por kilometraje, tiempo o ambos")
+    plan = MaintenancePlan.model_validate(data, update={"last_service_km": data.last_service_km if data.last_service_km is not None else vehicle.current_mileage_km})
+    session.add(plan); session.commit(); session.refresh(plan)
+    return plan
+
+
+@app.get("/api/v1/maintenance-plans/due", dependencies=[Depends(require_staff)])
+def due_maintenance_plans(session: Session = Depends(get_session)):
+    now = datetime.now(timezone.utc)
+    due = []
+    for plan in session.exec(select(MaintenancePlan).where(MaintenancePlan.active == True)).all():  # noqa: E712
+        vehicle = session.get(Vehicle, plan.vehicle_id)
+        if not vehicle:
+            continue
+        km_due = plan.interval_km and vehicle.current_mileage_km is not None and plan.last_service_km is not None and vehicle.current_mileage_km >= plan.last_service_km + plan.interval_km
+        date_due = plan.interval_days and now >= plan.last_service_at + timedelta(days=plan.interval_days)
+        if km_due or date_due:
+            due.append({"plan": plan, "vehicle": vehicle, "customer": session.get(Customer, vehicle.customer_id), "due_by_km": bool(km_due), "due_by_date": bool(date_due)})
+    return due
 
 
 @app.get("/api/v1/dashboard", dependencies=[Depends(require_admin)])
