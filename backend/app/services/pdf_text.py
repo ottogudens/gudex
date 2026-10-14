@@ -5,9 +5,16 @@ import sys
 
 def main():
     # PDFs are user uploads: keep parser resource consumption outside the API worker.
-    import resource
-    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
-    resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
+    # ``resource`` is available on Unix (including Railway) but not on
+    # Windows. The subprocess isolation and parent timeout still protect local
+    # Windows development, while production retains the stricter OS limits.
+    try:
+        import resource
+    except ImportError:
+        resource = None
+    if resource is not None:
+        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+        resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
     from pypdf import PdfReader
     try:
         reader = PdfReader(sys.argv[1])
