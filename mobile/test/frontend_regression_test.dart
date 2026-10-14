@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lubricentro_mobile/core/theme.dart';
 import 'package:lubricentro_mobile/screens/dashboard_screen.dart';
+import 'package:lubricentro_mobile/screens/agenda_screen.dart';
 import 'package:lubricentro_mobile/screens/inventory_screen.dart';
 import 'package:lubricentro_mobile/screens/widgets/inventory_editor.dart';
 import 'package:lubricentro_mobile/screens/pos_screen.dart';
@@ -144,6 +145,20 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('Todo bajo control'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('agenda presents the weekly planning view on mobile',
+      (tester) async {
+    await mount(
+      tester,
+      AgendaScreen(api: FakeApi(), role: 'admin'),
+      size: const Size(360, 800),
+    );
+    expect(find.text('Agenda del taller'), findsOneWidget);
+    expect(find.text('Hoy'), findsOneWidget);
+    expect(find.byTooltip('Agendar cita'), findsOneWidget);
+    expect(find.text('Sin citas programadas'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
