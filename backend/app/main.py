@@ -21,7 +21,7 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, CustomerAccessToken, Inspection, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
+    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyTransaction, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
     StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus,
 )
 from app.schemas import (
@@ -967,6 +967,35 @@ def customer_portal_profile(request: Request, session: Session = Depends(get_ses
     return {"customer": customer, "vehicles": vehicles, "work_orders": orders}
 
 
+def award_loyalty_points(session: Session, sale: Sale) -> None:
+    """Awards one point per CLP 1,000, guarded by the unique sale ledger row."""
+    if not sale.customer_id or sale.total_clp <= 0:
+        return
+    if session.exec(select(LoyaltyTransaction).where(LoyaltyTransaction.sale_id == sale.id)).first():
+        return
+    points = sale.total_clp // 1000
+    if points:
+        session.add(LoyaltyTransaction(customer_id=sale.customer_id, sale_id=sale.id,
+                                       points=points, note=f"Compra {sale.receipt_code}"))
+
+
+@app.get("/api/v1/portal/loyalty")
+def customer_loyalty(request: Request, session: Session = Depends(get_session)):
+    rows = session.exec(select(LoyaltyTransaction).where(
+        LoyaltyTransaction.customer_id == request.state.customer_id
+    ).order_by(LoyaltyTransaction.created_at.desc())).all()
+    return {"points": sum(row.points for row in rows), "transactions": rows}
+
+
+@app.get("/api/v1/loyalty/customers/{customer_id}", dependencies=[Depends(require_admin)])
+def loyalty_balance(customer_id: int, session: Session = Depends(get_session)):
+    if not session.get(Customer, customer_id):
+        raise HTTPException(404, "Cliente no encontrado")
+    rows = session.exec(select(LoyaltyTransaction).where(LoyaltyTransaction.customer_id == customer_id)
+                        .order_by(LoyaltyTransaction.created_at.desc())).all()
+    return {"customer_id": customer_id, "points": sum(row.points for row in rows), "transactions": rows}
+
+
 def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: datetime,
                             exclude_appointment_id: int | None = None) -> None:
     if ends_at <= starts_at:
@@ -1362,11 +1391,14 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
     if data.method not in {"mercado_pago", "mercado_pago_checkout"} and paid + data.amount_clp == sale.total_clp:
         sale.status = "paid"
         session.add(sale)
+        award_loyalty_points(session, sale)
         if sale.work_order_id:
             order = session.get(WorkOrder, sale.work_order_id)
             if order and order.status == WorkStatus.ready:
                 order.status = WorkStatus.delivered
                 session.add(order)
+    if sale.status == "paid":
+        award_loyalty_points(session, sale)
     session.commit()
     session.refresh(payment)
     return payment
@@ -1552,6 +1584,7 @@ async def mercado_pago_webhook(request: Request, session: Session = Depends(get_
                                 status="recorded", provider_reference=provider_id))
         sale.status = "paid"
         session.add(sale)
+        award_loyalty_points(session, sale)
     elif pending and provider_status in {"rejected", "cancelled"} | REVERSAL_STATUSES:
         pending.status = "failed"
         session.add(pending)

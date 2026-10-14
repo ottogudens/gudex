@@ -277,6 +277,18 @@ class Payment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class LoyaltyTransaction(SQLModel, table=True):
+    """Immutable loyalty ledger; a sale can award points only once."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    customer_id: int = Field(foreign_key="customer.id", index=True)
+    sale_id: Optional[int] = Field(default=None, foreign_key="sale.id", index=True, unique=True)
+    points: int
+    kind: str = Field(default="earned", max_length=24)
+    note: Optional[str] = Field(default=None, max_length=250)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class IntegrationCredential(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str = Field(index=True, unique=True, max_length=32)
