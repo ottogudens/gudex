@@ -127,6 +127,17 @@ class WorkOrderAssignment(SQLModel, table=True):
     assigned_at: datetime = Field(default_factory=now_utc)
 
 
+class WorkSession(SQLModel, table=True):
+    """Time worked on an order, including pauses, for operational reporting."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    started_at: datetime = Field(default_factory=now_utc)
+    ended_at: Optional[datetime] = None
+    paused_at: Optional[datetime] = None
+    paused_seconds: int = Field(default=0, ge=0)
+
+
 class AIConfiguration(SQLModel, table=True):
     """Non-secret, administrator-selected model configuration."""
 

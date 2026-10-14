@@ -22,7 +22,7 @@ from app.database import create_db_and_tables, engine, get_session, upgrade_sche
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyTransaction, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
-    StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus,
+    StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
@@ -797,6 +797,79 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, se
     session.commit()
     session.refresh(order)
     return order
+
+
+def _work_session_actor(order_id: int, request: Request, session: Session) -> User:
+    user = session.exec(select(User).where(User.email == request.state.user_email)).first()
+    if not user:
+        raise HTTPException(401, "Usuario no encontrado")
+    if request.state.user_role == UserRole.mechanic.value:
+        assigned = session.exec(select(WorkOrderAssignment).where(
+            WorkOrderAssignment.work_order_id == order_id, WorkOrderAssignment.technician_user_id == user.id)).first()
+        if not assigned:
+            raise HTTPException(403, "Solo puedes registrar tiempo en órdenes asignadas")
+    return user
+
+
+@app.get("/api/v1/work-orders/{order_id}/work-sessions", dependencies=[Depends(require_staff)])
+def list_work_sessions(order_id: int, session: Session = Depends(get_session)):
+    if not session.get(WorkOrder, order_id):
+        raise HTTPException(404, "Orden de trabajo no encontrada")
+    rows = session.exec(select(WorkSession).where(WorkSession.work_order_id == order_id)
+                        .order_by(WorkSession.started_at.desc())).all()
+    now = datetime.now(timezone.utc)
+    total = sum(max(0, int(((row.ended_at or row.paused_at or now) - row.started_at).total_seconds()) - row.paused_seconds) for row in rows)
+    return {"total_seconds": total, "sessions": rows}
+
+
+@app.post("/api/v1/work-orders/{order_id}/work-sessions/start", dependencies=[Depends(require_staff)])
+def start_work_session(order_id: int, request: Request, session: Session = Depends(get_session)):
+    if not session.get(WorkOrder, order_id):
+        raise HTTPException(404, "Orden de trabajo no encontrada")
+    user = _work_session_actor(order_id, request, session)
+    active = session.exec(select(WorkSession).where(WorkSession.work_order_id == order_id, WorkSession.user_id == user.id, WorkSession.ended_at == None)).first()  # noqa: E711
+    if active:
+        raise HTTPException(409, "Ya tienes un registro de tiempo activo en esta orden")
+    row = WorkSession(work_order_id=order_id, user_id=user.id)
+    session.add(row); session.commit(); session.refresh(row)
+    return row
+
+
+@app.post("/api/v1/work-sessions/{session_id}/pause", dependencies=[Depends(require_staff)])
+def pause_work_session(session_id: int, request: Request, session: Session = Depends(get_session)):
+    row = session.get(WorkSession, session_id)
+    if not row or row.ended_at:
+        raise HTTPException(404, "Registro activo no encontrado")
+    _work_session_actor(row.work_order_id, request, session)
+    if row.paused_at:
+        raise HTTPException(409, "El registro ya está en pausa")
+    row.paused_at = datetime.now(timezone.utc); session.add(row); session.commit(); session.refresh(row)
+    return row
+
+
+@app.post("/api/v1/work-sessions/{session_id}/resume", dependencies=[Depends(require_staff)])
+def resume_work_session(session_id: int, request: Request, session: Session = Depends(get_session)):
+    row = session.get(WorkSession, session_id)
+    if not row or row.ended_at or not row.paused_at:
+        raise HTTPException(409, "El registro no está pausado")
+    _work_session_actor(row.work_order_id, request, session)
+    row.paused_seconds += int((datetime.now(timezone.utc) - row.paused_at).total_seconds())
+    row.paused_at = None; session.add(row); session.commit(); session.refresh(row)
+    return row
+
+
+@app.post("/api/v1/work-sessions/{session_id}/stop", dependencies=[Depends(require_staff)])
+def stop_work_session(session_id: int, request: Request, session: Session = Depends(get_session)):
+    row = session.get(WorkSession, session_id)
+    if not row or row.ended_at:
+        raise HTTPException(409, "El registro ya está finalizado")
+    _work_session_actor(row.work_order_id, request, session)
+    now = datetime.now(timezone.utc)
+    if row.paused_at:
+        row.paused_seconds += int((now - row.paused_at).total_seconds())
+        row.paused_at = None
+    row.ended_at = now; session.add(row); session.commit(); session.refresh(row)
+    return row
 
 
 @app.delete("/api/v1/work-orders/{order_id}", dependencies=[Depends(require_admin)])
