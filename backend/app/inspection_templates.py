@@ -53,6 +53,12 @@ DEFAULT_TEMPLATES = [
 
 
 def seed_default_inspection_templates() -> None:
+    # These templates are seeded during startup. Keep the initialization
+    # recoverable for databases created before this feature had an Alembic
+    # revision, while the migration remains the normal schema path.
+    InspectionTemplate.__table__.create(engine, checkfirst=True)
+    InspectionTemplateItem.__table__.create(engine, checkfirst=True)
+
     with Session(engine) as session:
         for definition in DEFAULT_TEMPLATES:
             existing = session.exec(
