@@ -1214,6 +1214,20 @@ def create_marketing_campaign(data: MarketingCampaignCreate, session: Session = 
     return campaign
 
 
+@app.put("/api/v1/marketing/campaigns/{campaign_id}", response_model=MarketingCampaign, dependencies=[Depends(require_admin)])
+def edit_marketing_campaign(campaign_id: int, data: MarketingCampaignCreate, session: Session = Depends(get_session)):
+    campaign = session.get(MarketingCampaign, campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaña no encontrada")
+    if campaign.status != "draft":
+        raise HTTPException(409, "Solo se pueden editar campañas en borrador")
+    if data.ends_at and data.starts_at and data.ends_at <= data.starts_at:
+        raise HTTPException(422, "La fecha final debe ser posterior al inicio")
+    campaign.sqlmodel_update(data.model_dump())
+    session.add(campaign); session.commit(); session.refresh(campaign)
+    return campaign
+
+
 @app.post("/api/v1/marketing/campaigns/{campaign_id}/status", dependencies=[Depends(require_admin)])
 def update_campaign_status(campaign_id: int, status: str, session: Session = Depends(get_session)):
     if status not in {"draft", "active", "paused", "completed"}:
