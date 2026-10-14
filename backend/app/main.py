@@ -433,10 +433,13 @@ def create_customer(data: CustomerCreate, session: Session = Depends(get_session
 
 
 @app.get("/api/v1/customers", response_model=list[Customer], dependencies=[Depends(require_staff)])
-def list_customers(q: str | None = None, limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
+def list_customers(q: str | None = None, include_archived: bool = False,
+                   limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
                    session: Session = Depends(get_session)):
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     statement = select(Customer).order_by(Customer.full_name).offset(offset).limit(limit)
+    if not include_archived:
+        statement = statement.where(Customer.archived_at == None)  # noqa: E711
     if q:
         statement = statement.where(Customer.full_name.contains(q))
     return session.exec(statement).all()
@@ -447,6 +450,8 @@ def update_customer(customer_id: int, data: CustomerUpdate, session: Session = D
     customer = session.get(Customer, customer_id)
     if not customer:
         raise HTTPException(404, "Cliente no encontrado")
+    if customer.archived_at:
+        raise HTTPException(409, "El cliente está archivado y no puede modificarse")
     changes = data.model_dump(exclude_unset=True)
     for field in ("rut", "email"):
         value = changes.get(field)
@@ -463,18 +468,30 @@ def delete_customer(customer_id: int, session: Session = Depends(get_session)):
     customer = session.get(Customer, customer_id)
     if not customer:
         raise HTTPException(404, "Cliente no encontrado")
-    if session.exec(select(Vehicle).where(Vehicle.customer_id == customer_id)).first() or session.exec(select(WorkOrder).where(WorkOrder.customer_id == customer_id)).first():
-        raise HTTPException(409, "No se puede eliminar un cliente que tiene vehículos u órdenes; conserva su historial")
+    if customer.archived_at:
+        return {"deleted": False, "archived": True}
+    now = datetime.now(timezone.utc)
+    customer.archived_at = now
+    session.add(customer)
     for user in session.exec(select(User).where(User.customer_id == customer_id)).all():
         user.active = False; user.token_version += 1; session.add(user)
-    session.delete(customer); session.commit()
-    return {"deleted": True}
+    for access_token in session.exec(select(CustomerAccessToken).where(
+        CustomerAccessToken.customer_id == customer_id,
+        CustomerAccessToken.used_at == None,  # noqa: E711
+    )).all():
+        access_token.used_at = now
+        session.add(access_token)
+    session.commit()
+    return {"deleted": False, "archived": True}
 
 
 @app.post("/api/v1/vehicles", response_model=Vehicle, status_code=201, dependencies=[Depends(require_admin)])
 def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session)):
-    if not session.get(Customer, data.customer_id):
+    customer = session.get(Customer, data.customer_id)
+    if not customer:
         raise HTTPException(404, "Cliente no encontrado")
+    if customer.archived_at:
+        raise HTTPException(409, "No se pueden registrar vehículos para un cliente archivado")
     if session.exec(select(Vehicle).where(Vehicle.plate == data.plate)).first():
         raise HTTPException(409, "Ya existe un vehículo con esa patente")
     if data.vin and session.exec(select(Vehicle).where(Vehicle.vin == data.vin)).first():
@@ -620,8 +637,11 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
 @app.post("/api/v1/work-orders", response_model=WorkOrder, status_code=201, dependencies=[Depends(require_admin)])
 def create_work_order(data: WorkOrderCreate, session: Session = Depends(get_session)):
     vehicle = session.get(Vehicle, data.vehicle_id)
-    if not session.get(Customer, data.customer_id) or not vehicle:
+    customer = session.get(Customer, data.customer_id)
+    if not customer or not vehicle:
         raise HTTPException(404, "Cliente o vehículo no encontrado")
+    if customer.archived_at:
+        raise HTTPException(409, "No se pueden crear órdenes para un cliente archivado")
     if vehicle.customer_id != data.customer_id:
         raise HTTPException(409, "El vehículo no pertenece al cliente indicado")
     code = f"OT-{datetime.now():%y%m%d}-{uuid4().hex[:6].upper()}"
@@ -886,14 +906,18 @@ def customer_portal_profile(request: Request, session: Session = Depends(get_ses
     return {"customer": customer, "vehicles": vehicles, "work_orders": orders}
 
 
-def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: datetime) -> None:
+def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: datetime,
+                            exclude_appointment_id: int | None = None) -> None:
     if ends_at <= starts_at:
         raise HTTPException(422, "La hora de término debe ser posterior al inicio")
-    conflict = session.exec(select(Appointment).where(
+    statement = select(Appointment).where(
         Appointment.status.in_(["requested", "confirmed"]),
         Appointment.starts_at < ends_at,
         Appointment.ends_at > starts_at,
-    )).first()
+    )
+    if exclude_appointment_id is not None:
+        statement = statement.where(Appointment.id != exclude_appointment_id)
+    conflict = session.exec(statement).first()
     if conflict:
         raise HTTPException(409, "Ese horario ya tiene una cita solicitada o confirmada")
 
@@ -902,8 +926,11 @@ def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: date
 def create_appointment(data: AppointmentCreate, session: Session = Depends(get_session)):
     ensure_appointment_slot(session, data.starts_at, data.ends_at)
     customer_id = data.customer_id
-    if not customer_id or not session.get(Customer, customer_id):
+    customer = session.get(Customer, customer_id) if customer_id else None
+    if not customer:
         raise HTTPException(404, "Cliente no encontrado")
+    if customer.archived_at:
+        raise HTTPException(409, "No se pueden agendar citas para un cliente archivado")
     if data.vehicle_id and (not session.get(Vehicle, data.vehicle_id) or session.get(Vehicle, data.vehicle_id).customer_id != customer_id):
         raise HTTPException(404, "Vehículo no encontrado")
     appointment = Appointment.model_validate(data, update={"customer_id": customer_id, "status": "confirmed"})
@@ -951,7 +978,7 @@ def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Se
         raise HTTPException(422, "El vehículo no pertenece al cliente de la cita")
     starts_at, ends_at = changes.get("starts_at", appointment.starts_at), changes.get("ends_at", appointment.ends_at)
     if starts_at != appointment.starts_at or ends_at != appointment.ends_at:
-        ensure_appointment_slot(session, starts_at, ends_at)
+        ensure_appointment_slot(session, starts_at, ends_at, exclude_appointment_id=appointment_id)
     if changes.get("status") and changes["status"] not in {"requested", "confirmed", "cancelled", "completed"}:
         raise HTTPException(422, "Estado de cita inválido")
     for key, value in changes.items():

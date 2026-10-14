@@ -76,6 +76,9 @@ class Customer(SQLModel, table=True):
     phone: Optional[str] = Field(default=None, max_length=30)
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=now_utc)
+    # Los clientes se archivan para conservar trazabilidad comercial y técnica.
+    # No se eliminan físicamente las órdenes, vehículos ni evidencias asociadas.
+    archived_at: Optional[datetime] = Field(default=None, index=True)
     vehicles: list["Vehicle"] = Relationship(back_populates="customer")
 
 
