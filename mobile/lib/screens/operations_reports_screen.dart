@@ -108,6 +108,21 @@ class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
     }
   }
 
+  Future<void> _completePlan(Map plan) async {
+    try {
+      await widget.api.post('/api/v1/maintenance-plans/${plan['id']}/complete');
+      if (mounted) {
+        setState(() => _data = _load());
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Mantención registrada; el ciclo se reinició.')));
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) =>
       FutureBuilder<List<Map<String, dynamic>>>(
@@ -158,7 +173,13 @@ class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
                                 : '${vehicle?['plate'] ?? 'Vehículo'} · ${plan?['name'] ?? 'Mantención'}'),
                             subtitle: Text(widget.productivity
                                 ? '${((row['net_seconds'] ?? 0) / 3600).toStringAsFixed(1)} h netas · ${row['active_orders']} órdenes activas'
-                                : '${customer?['full_name'] ?? 'Cliente'} · ${row['due_by_km'] == true ? 'Kilometraje vencido' : 'Fecha vencida'}')));
+                                : '${customer?['full_name'] ?? 'Cliente'} · ${row['due_by_km'] == true ? 'Kilometraje vencido' : 'Fecha vencida'}'),
+                            trailing:
+                                !widget.productivity && plan?['id'] != null
+                                    ? FilledButton(
+                                        onPressed: () => _completePlan(plan!),
+                                        child: const Text('Completar'))
+                                    : null));
                   }),
                 ]));
           });

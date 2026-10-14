@@ -641,6 +641,20 @@ def due_maintenance_plans(session: Session = Depends(get_session)):
     return due
 
 
+@app.post("/api/v1/maintenance-plans/{plan_id}/complete", response_model=MaintenancePlan, dependencies=[Depends(require_admin)])
+def complete_maintenance_plan(plan_id: int, mileage_km: int | None = None, session: Session = Depends(get_session)):
+    plan = session.get(MaintenancePlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Plan de mantención no encontrado")
+    vehicle = session.get(Vehicle, plan.vehicle_id)
+    if mileage_km is not None and mileage_km < 0:
+        raise HTTPException(422, "El kilometraje no puede ser negativo")
+    plan.last_service_at = datetime.now(timezone.utc)
+    plan.last_service_km = mileage_km if mileage_km is not None else (vehicle.current_mileage_km if vehicle else plan.last_service_km)
+    session.add(plan); session.commit(); session.refresh(plan)
+    return plan
+
+
 @app.get("/api/v1/dashboard", dependencies=[Depends(require_admin)])
 def workshop_dashboard(session: Session = Depends(get_session)):
     now = datetime.now(timezone.utc)
