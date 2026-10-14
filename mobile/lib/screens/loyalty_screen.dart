@@ -17,8 +17,45 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
   }
 
   Future<Map<String, dynamic>> _load() async {
-    final raw = await widget.api.get('/api/v1/portal/loyalty');
-    return raw is Map ? Map<String, dynamic>.from(raw) : {};
+    final values = await Future.wait([
+      widget.api.get('/api/v1/portal/loyalty'),
+      widget.api.get('/api/v1/portal/rewards')
+    ]);
+    final data = values[0] is Map
+        ? Map<String, dynamic>.from(values[0] as Map)
+        : <String, dynamic>{};
+    data['rewards'] = values[1];
+    return data;
+  }
+
+  Future<void> _redeem(Map reward) async {
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+                title: const Text('Solicitar canje'),
+                content: Text(
+                    '¿Quieres solicitar “${reward['name']}” por ${reward['points_cost']} puntos? El taller confirmará la entrega.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Volver')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Solicitar'))
+                ]));
+    if (confirmed != true) return;
+    try {
+      await widget.api.post('/api/v1/portal/rewards/${reward['id']}/redeem');
+      if (mounted) {
+        setState(() => _data = _load());
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Canje solicitado al taller.')));
+      }
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    }
   }
 
   @override
@@ -37,6 +74,10 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
         final transactions = data['transactions'] is List
             ? data['transactions'] as List
             : const [];
+        final rewards =
+            data['rewards'] is List ? data['rewards'] as List : const [];
+        final points =
+            data['points'] is num ? (data['points'] as num).toInt() : 0;
         return RefreshIndicator(
             onRefresh: () async => setState(() => _data = _load()),
             child: ListView(padding: const EdgeInsets.all(16), children: [
@@ -50,7 +91,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
                       children: [
                         const Text('Beneficios Gudex'),
                         const SizedBox(height: 8),
-                        Text('${data['points'] ?? 0}',
+                        Text('$points',
                             style: Theme.of(context)
                                 .textTheme
                                 .displaySmall
@@ -58,8 +99,26 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
                         const Text('puntos disponibles'),
                         const SizedBox(height: 12),
                         const Text(
-                            'Tus puntos se generan automáticamente con tus compras pagadas. Próximamente podrás canjearlos por beneficios del taller.'),
+                            'Tus puntos se generan automáticamente con tus compras pagadas y puedes canjearlos por beneficios disponibles.'),
                       ])),
+              const SizedBox(height: 24),
+              Text('Recompensas disponibles',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              if (rewards.isEmpty)
+                const Text('El taller aún no ha publicado beneficios.'),
+              ...rewards.whereType<Map>().map((reward) => Card(
+                  child: ListTile(
+                      leading: const Icon(Icons.card_giftcard_outlined),
+                      title: Text('${reward['name']}'),
+                      subtitle: Text(
+                          '${reward['description'] ?? 'Beneficio Gudex'} · ${reward['points_cost']} puntos'),
+                      trailing: FilledButton(
+                          onPressed:
+                              points >= (reward['points_cost'] as num? ?? 0)
+                                  ? () => _redeem(reward)
+                                  : null,
+                          child: const Text('Canjear'))))),
               const SizedBox(height: 24),
               Text('Historial de puntos',
                   style: Theme.of(context).textTheme.titleLarge),
