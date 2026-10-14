@@ -13,6 +13,7 @@ class OperationsReportsScreen extends StatefulWidget {
 
 class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
   late Future<List<Map<String, dynamic>>> _data;
+  int _days = 0;
   @override
   void initState() {
     super.initState();
@@ -20,8 +21,11 @@ class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
+    final range = _days == 0
+        ? ''
+        : '?from_date=${DateTime.now().toUtc().subtract(Duration(days: _days)).toIso8601String()}';
     final raw = await widget.api.get(widget.productivity
-        ? '/api/v1/team/productivity'
+        ? '/api/v1/team/productivity$range'
         : '/api/v1/maintenance-plans/due');
     return raw is List
         ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
@@ -143,6 +147,22 @@ class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
                   Text(widget.productivity
                       ? 'Horas netas y carga activa por mecánico.'
                       : 'Vehículos que requieren atención por kilometraje o fecha.'),
+                  if (widget.productivity)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: SegmentedButton<int>(
+                            segments: const [
+                              ButtonSegment(value: 7, label: Text('7 días')),
+                              ButtonSegment(value: 30, label: Text('30 días')),
+                              ButtonSegment(value: 0, label: Text('Todo'))
+                            ],
+                            selected: {
+                              _days
+                            },
+                            onSelectionChanged: (value) => setState(() {
+                                  _days = value.first;
+                                  _data = _load();
+                                }))),
                   if (!widget.productivity)
                     Align(
                         alignment: Alignment.centerRight,
