@@ -311,6 +311,23 @@ class LoyaltyTransaction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class LoyaltyReward(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=120)
+    description: Optional[str] = Field(default=None, max_length=400)
+    points_cost: int = Field(ge=1)
+    active: bool = True
+
+
+class LoyaltyRedemption(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    customer_id: int = Field(foreign_key="customer.id", index=True)
+    reward_id: int = Field(foreign_key="loyaltyreward.id", index=True)
+    points_cost: int = Field(ge=1)
+    status: str = Field(default="requested", max_length=24)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class IntegrationCredential(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str = Field(index=True, unique=True, max_length=32)

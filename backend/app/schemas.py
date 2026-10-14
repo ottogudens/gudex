@@ -425,6 +425,12 @@ class PaymentCreate(SQLModel):
     provider_reference: Optional[str] = None
 
 
+class LoyaltyRewardCreate(SQLModel):
+    name: str = Field(min_length=2, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=400)
+    points_cost: int = Field(ge=1)
+
+
 class GoogleImportRequest(SQLModel):
     source: str
     external_id: str

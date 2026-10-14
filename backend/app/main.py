@@ -21,12 +21,12 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyTransaction, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
+    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
-    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
+    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, LoyaltyRewardCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -1104,6 +1104,34 @@ def customer_loyalty(request: Request, session: Session = Depends(get_session)):
         LoyaltyTransaction.customer_id == request.state.customer_id
     ).order_by(LoyaltyTransaction.created_at.desc())).all()
     return {"points": sum(row.points for row in rows), "transactions": rows}
+
+
+@app.get("/api/v1/portal/rewards")
+def customer_rewards(session: Session = Depends(get_session)):
+    return session.exec(select(LoyaltyReward).where(LoyaltyReward.active == True).order_by(LoyaltyReward.points_cost)).all()  # noqa: E712
+
+
+@app.post("/api/v1/portal/rewards/{reward_id}/redeem", status_code=201)
+def redeem_reward(reward_id: int, request: Request, session: Session = Depends(get_session)):
+    reward = session.get(LoyaltyReward, reward_id)
+    if not reward or not reward.active:
+        raise HTTPException(404, "Beneficio no disponible")
+    customer_id = request.state.customer_id
+    balance = sum(row.points for row in session.exec(select(LoyaltyTransaction).where(LoyaltyTransaction.customer_id == customer_id)).all())
+    if balance < reward.points_cost:
+        raise HTTPException(409, "No tienes puntos suficientes para este beneficio")
+    redemption = LoyaltyRedemption(customer_id=customer_id, reward_id=reward.id, points_cost=reward.points_cost)
+    session.add(redemption)
+    session.add(LoyaltyTransaction(customer_id=customer_id, points=-reward.points_cost, kind="redeemed", note=f"Canje solicitado: {reward.name}"))
+    session.commit(); session.refresh(redemption)
+    return redemption
+
+
+@app.post("/api/v1/loyalty/rewards", response_model=LoyaltyReward, status_code=201, dependencies=[Depends(require_admin)])
+def create_loyalty_reward(data: LoyaltyRewardCreate, session: Session = Depends(get_session)):
+    reward = LoyaltyReward.model_validate(data)
+    session.add(reward); session.commit(); session.refresh(reward)
+    return reward
 
 
 @app.get("/api/v1/loyalty/customers/{customer_id}", dependencies=[Depends(require_admin)])
