@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.config import settings
@@ -10,6 +12,24 @@ elif database_url.startswith("postgresql://"):
 
 connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
 engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
+
+
+def upgrade_schema() -> None:
+    """Apply the versioned schema before accepting production traffic.
+
+    Railway may retain a service-level start command that predates the
+    repository manifest. Running Alembic here is a safe fallback: the
+    migrations remain the only schema authority and a failed migration stops
+    the process instead of serving against a partial schema.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    backend_root = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "alembic"))
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    command.upgrade(config, "head")
 
 
 def create_db_and_tables() -> None:
