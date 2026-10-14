@@ -706,6 +706,25 @@ def list_mechanics(session: Session = Depends(get_session)):
     ]
 
 
+@app.get("/api/v1/team/productivity", dependencies=[Depends(require_admin)])
+def mechanic_productivity(session: Session = Depends(get_session)):
+    """Net worked time and active workload, derived from the immutable session log."""
+    now = datetime.now(timezone.utc)
+    mechanics = session.exec(select(User).where(User.role == UserRole.mechanic, User.active == True)
+                             .order_by(User.full_name)).all()  # noqa: E712
+    rows = []
+    for mechanic in mechanics:
+        sessions = session.exec(select(WorkSession).where(WorkSession.user_id == mechanic.id)).all()
+        net_seconds = sum(max(0, int(((item.ended_at or item.paused_at or now) - item.started_at).total_seconds()) - item.paused_seconds) for item in sessions)
+        active = [item for item in sessions if item.ended_at is None]
+        assignments = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.technician_user_id == mechanic.id)).all()
+        active_orders = sum(1 for assignment in assignments if (order := session.get(WorkOrder, assignment.work_order_id)) and order.status not in {WorkStatus.delivered, WorkStatus.cancelled})
+        rows.append({"user_id": mechanic.id, "full_name": mechanic.full_name, "net_seconds": net_seconds,
+                     "completed_sessions": sum(1 for item in sessions if item.ended_at),
+                     "active_sessions": len(active), "active_orders": active_orders})
+    return rows
+
+
 @app.get("/api/v1/work-orders/mine", response_model=list[WorkOrder], dependencies=[Depends(require_staff)])
 def my_work_orders(request: Request, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.email == request.state.user_email)).first()
