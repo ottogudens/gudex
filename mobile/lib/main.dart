@@ -24,6 +24,7 @@ import 'screens/workshop_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/integration_settings_screen.dart';
 import 'screens/module_list_screen.dart';
+import 'screens/operations_reports_screen.dart';
 
 part 'quotes_screen.dart';
 part 'social_screen.dart';
@@ -249,6 +250,14 @@ class _HomePageState extends ConsumerState<HomePage> {
           icon: Icons.build_circle_outlined,
           path: '/api/v1/services'),
       AppModule(
+          title: 'Mantenciones',
+          icon: Icons.car_repair_outlined,
+          path: '/api/v1/maintenance-plans/due'),
+      AppModule(
+          title: 'Productividad',
+          icon: Icons.query_stats_outlined,
+          path: '/api/v1/team/productivity'),
+      AppModule(
           title: 'Contenido y redes',
           icon: Icons.campaign_outlined,
           path: '/api/v1/social/posts'),
@@ -330,52 +339,57 @@ class _HomePageState extends ConsumerState<HomePage> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 12),
                                     child: modules[selected].path ==
-                                            '/api/v1/portal/profile'
-                                        ? CustomerPortalHomeScreen(api: api)
+                                            '/api/v1/maintenance-plans/due'
+                                        ? OperationsReportsScreen(
+                                            api: api, productivity: false)
                                         : modules[selected].path ==
-                                                '/api/v1/sales'
-                                            ? PosScreen(api: api)
+                                                '/api/v1/team/productivity'
+                                            ? OperationsReportsScreen(
+                                                api: api, productivity: true)
                                             : modules[selected].path ==
-                                                    '/api/v1/services'
-                                                ? ServicesScreen(api: api)
+                                                    '/api/v1/portal/profile'
+                                                ? CustomerPortalHomeScreen(
+                                                    api: api)
                                                 : modules[selected].path ==
-                                                        '/api/v1/social/posts'
-                                                    ? _SocialScreen(api: api)
+                                                        '/api/v1/sales'
+                                                    ? PosScreen(api: api)
                                                     : modules[selected].path ==
-                                                            '/api/v1/quotes'
-                                                        ? _QuotesScreen(
+                                                            '/api/v1/services'
+                                                        ? ServicesScreen(
                                                             api: api)
-                                                        : modules[selected].path ==
-                                                                '/api/v1/dashboard'
-                                                            ? DashboardScreen(
-                                                                api: api,
-                                                                onOpenModule: (index) =>
-                                                                    setState(() =>
-                                                                        _selected =
-                                                                            index))
+                                                        : modules[selected]
+                                                                    .path ==
+                                                                '/api/v1/social/posts'
+                                                            ? _SocialScreen(
+                                                                api: api)
                                                             : modules[selected]
                                                                         .path ==
-                                                                    '/api/v1/users'
-                                                                ? UsersScreen(
+                                                                    '/api/v1/quotes'
+                                                                ? _QuotesScreen(
                                                                     api: api)
-                                                                : modules[selected].path ==
-                                                                        '/api/v1/products'
-                                                                    ? InventoryScreen(
+                                                                : modules[selected]
+                                                                            .path ==
+                                                                        '/api/v1/dashboard'
+                                                                    ? DashboardScreen(
                                                                         api:
                                                                             api,
-                                                                        canManage: widget.role ==
-                                                                            'admin',
-                                                                        onCreateSocialPost: (product) =>
-                                                                            Navigator.push(context, MaterialPageRoute(builder: (_) => _SocialEditor(api: api, product: product))))
-                                                                    : modules[selected].path == '/api/v1/appointments'
-                                                                        ? AgendaScreen(api: api, role: widget.role)
-                                                                        : modules[selected].path == '/api/v1/portal/appointments'
-                                                                            ? CustomerAppointmentsScreen(api: api)
-                                                                            : modules[selected].path == '/api/v1/scanner-reports'
-                                                                                ? ScannerScreen(api: api, role: widget.role)
-                                                                                : {'/api/v1/work-orders', '/api/v1/work-orders/mine', '/api/v1/customers'}.contains(modules[selected].path)
-                                                                                    ? WorkshopScreen(api: api, modulePath: modules[selected].path, role: widget.role)
-                                                                                    : ModuleList(api: api, module: modules[selected], role: widget.role),
+                                                                        onOpenModule: (index) => setState(() => _selected =
+                                                                            index))
+                                                                    : modules[selected].path ==
+                                                                            '/api/v1/users'
+                                                                        ? UsersScreen(
+                                                                            api: api)
+                                                                        : modules[selected].path == '/api/v1/products'
+                                                                            ? InventoryScreen(api: api, canManage: widget.role == 'admin', onCreateSocialPost: (product) => Navigator.push(context, MaterialPageRoute(builder: (_) => _SocialEditor(api: api, product: product))))
+                                                                            : modules[selected].path == '/api/v1/appointments'
+                                                                                ? AgendaScreen(api: api, role: widget.role)
+                                                                                : modules[selected].path == '/api/v1/portal/appointments'
+                                                                                    ? CustomerAppointmentsScreen(api: api)
+                                                                                    : modules[selected].path == '/api/v1/scanner-reports'
+                                                                                        ? ScannerScreen(api: api, role: widget.role)
+                                                                                        : {'/api/v1/work-orders', '/api/v1/work-orders/mine', '/api/v1/customers'}.contains(modules[selected].path)
+                                                                                            ? WorkshopScreen(api: api, modulePath: modules[selected].path, role: widget.role)
+                                                                                            : ModuleList(api: api, module: modules[selected], role: widget.role),
                                   ),
                                 ),
                               ),
