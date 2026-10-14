@@ -1334,6 +1334,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
   late Future<List<Map<String, dynamic>>> _templates;
   late Future<List<Map<String, dynamic>>> _evidence;
   late Future<Map<String, dynamic>> _report;
+  late Future<Map<String, dynamic>> _workSessions;
   bool _saving = false;
   bool _restoringDraft = true;
   String? _error;
@@ -1402,6 +1403,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     _templates = _loadList('/api/v1/inspection-templates');
     _evidence = _loadList('/api/v1/work-orders/${widget.order['id']}/evidence');
     _report = _loadReport();
+    _workSessions = _loadWorkSessions();
     _restoreDraft();
   }
 
@@ -1449,6 +1451,28 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     return result is Map
         ? Map<String, dynamic>.from(result)
         : <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> _loadWorkSessions() async {
+    final result = await widget.api
+        .get('/api/v1/work-orders/${widget.order['id']}/work-sessions');
+    return result is Map
+        ? Map<String, dynamic>.from(result)
+        : <String, dynamic>{};
+  }
+
+  Future<void> _workTimer(String action, [int? sessionId]) async {
+    try {
+      final path = action == 'start'
+          ? '/api/v1/work-orders/${widget.order['id']}/work-sessions/start'
+          : '/api/v1/work-sessions/$sessionId/$action';
+      await widget.api.post(path);
+      if (mounted) setState(() => _workSessions = _loadWorkSessions());
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    }
   }
 
   int? get _orderId => int.tryParse('${widget.order['id']}');
@@ -2217,6 +2241,67 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
             const SizedBox(height: 4),
             Text('Recepción: ${widget.order['initial_notes']}'),
           ],
+          const SizedBox(height: 14),
+          FutureBuilder<Map<String, dynamic>>(
+            future: _workSessions,
+            builder: (context, snapshot) {
+              final data = snapshot.data ?? <String, dynamic>{};
+              final sessions = data['sessions'] is List
+                  ? (data['sessions'] as List)
+                      .whereType<Map>()
+                      .map((item) => Map<String, dynamic>.from(item))
+                      .toList()
+                  : <Map<String, dynamic>>[];
+              final activeRows =
+                  sessions.where((item) => item['ended_at'] == null).toList();
+              final active = activeRows.isEmpty ? null : activeRows.first;
+              final seconds = data['total_seconds'] is num
+                  ? (data['total_seconds'] as num).toInt()
+                  : 0;
+              final time =
+                  '${(seconds ~/ 3600).toString().padLeft(2, '0')}:${((seconds % 3600) ~/ 60).toString().padLeft(2, '0')}';
+              return Card(
+                  child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(children: [
+                        const Icon(Icons.timer_outlined),
+                        const SizedBox(width: 10),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              const Text('Tiempo de trabajo'),
+                              Text('$time acumulado',
+                                  style: Theme.of(context).textTheme.bodySmall)
+                            ])),
+                        if (active == null)
+                          FilledButton.icon(
+                              onPressed:
+                                  _saving ? null : () => _workTimer('start'),
+                              icon: const Icon(Icons.play_arrow),
+                              label: const Text('Iniciar'))
+                        else ...[
+                          IconButton(
+                              onPressed: () => _workTimer(
+                                  active['paused_at'] == null
+                                      ? 'pause'
+                                      : 'resume',
+                                  active['id'] as int?),
+                              icon: Icon(active['paused_at'] == null
+                                  ? Icons.pause_outlined
+                                  : Icons.play_arrow),
+                              tooltip: active['paused_at'] == null
+                                  ? 'Pausar'
+                                  : 'Reanudar'),
+                          IconButton(
+                              onPressed: () =>
+                                  _workTimer('stop', active['id'] as int?),
+                              icon: const Icon(Icons.stop_outlined),
+                              tooltip: 'Finalizar registro'),
+                        ],
+                      ])));
+            },
+          ),
           const SizedBox(height: 18),
           DropdownButtonFormField<String>(
             key: ValueKey('work-order-status-$_status-${widget.role}'),
