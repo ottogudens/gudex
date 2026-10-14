@@ -453,12 +453,41 @@ def update_customer(customer_id: int, data: CustomerUpdate, session: Session = D
     if customer.archived_at:
         raise HTTPException(409, "El cliente está archivado y no puede modificarse")
     changes = data.model_dump(exclude_unset=True)
+    portal_users = session.exec(select(User).where(
+        User.customer_id == customer_id, User.role == UserRole.customer,
+    )).all()
     for field in ("rut", "email"):
         value = changes.get(field)
         if value and session.exec(select(Customer).where(getattr(Customer, field) == value, Customer.id != customer_id)).first():
             raise HTTPException(409, f"Ya existe un cliente con ese {field}")
+    if "email" in changes and portal_users:
+        new_email = changes["email"]
+        if not new_email:
+            raise HTTPException(422, "No se puede quitar el correo de un cliente con acceso al portal")
+        portal_user_ids = [user.id for user in portal_users]
+        email_owner = session.exec(select(User).where(
+            User.email == new_email, User.id.notin_(portal_user_ids),
+        )).first()
+        if email_owner:
+            raise HTTPException(409, "El correo del cliente ya pertenece a otro usuario")
     for key, value in changes.items():
         setattr(customer, key, value)
+    if portal_users:
+        email_changed = "email" in changes
+        now = datetime.now(timezone.utc)
+        for user in portal_users:
+            if email_changed:
+                user.email = customer.email
+                user.token_version += 1
+                for access_token in session.exec(select(CustomerAccessToken).where(
+                    CustomerAccessToken.user_id == user.id,
+                    CustomerAccessToken.used_at == None,  # noqa: E711
+                )).all():
+                    access_token.used_at = now
+                    session.add(access_token)
+            if "full_name" in changes:
+                user.full_name = customer.full_name
+            session.add(user)
     session.add(customer); session.commit(); session.refresh(customer)
     return customer
 

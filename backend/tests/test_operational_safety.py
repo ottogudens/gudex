@@ -117,3 +117,42 @@ def test_archiving_customer_preserves_history_and_revokes_portal_access():
             update_customer(customer.id, CustomerUpdate(phone="+56912345678"), session)
         assert error.value.status_code == 409
         assert session.exec(select(CustomerAccessToken).where(CustomerAccessToken.id == token.id)).one().used_at is not None
+
+
+def test_customer_identity_update_keeps_portal_account_in_sync_and_revokes_tokens():
+    create_db_and_tables()
+    with Session(engine) as session:
+        suffix = uuid4().hex[:8]
+        old_email = f"before-{suffix}@example.com"
+        new_email = f"after-{suffix}@example.com"
+        customer = Customer(full_name=f"Nombre Inicial {suffix}", email=old_email)
+        session.add(customer)
+        session.commit()
+        session.refresh(customer)
+        user = User(
+            email=old_email,
+            full_name=customer.full_name,
+            password_hash=hash_password("clave-segura-portal"),
+            role=UserRole.customer,
+            customer_id=customer.id,
+            active=True,
+            token_version=3,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        _, token = _issue_customer_access_token(session, user, customer, "reset")
+
+        updated = update_customer(
+            customer.id,
+            CustomerUpdate(full_name=f"Nombre Actualizado {suffix}", email=new_email),
+            session,
+        )
+
+        session.refresh(user)
+        session.refresh(token)
+        assert updated.email == new_email
+        assert user.email == new_email
+        assert user.full_name == f"Nombre Actualizado {suffix}"
+        assert user.token_version == 4
+        assert token.used_at is not None
