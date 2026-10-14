@@ -774,14 +774,20 @@ def list_mechanics(session: Session = Depends(get_session)):
 
 
 @app.get("/api/v1/team/productivity", dependencies=[Depends(require_admin)])
-def mechanic_productivity(session: Session = Depends(get_session)):
+def mechanic_productivity(from_date: datetime | None = None, to_date: datetime | None = None,
+                         session: Session = Depends(get_session)):
     """Net worked time and active workload, derived from the immutable session log."""
     now = datetime.now(timezone.utc)
     mechanics = session.exec(select(User).where(User.role == UserRole.mechanic, User.active == True)
                              .order_by(User.full_name)).all()  # noqa: E712
     rows = []
     for mechanic in mechanics:
-        sessions = session.exec(select(WorkSession).where(WorkSession.user_id == mechanic.id)).all()
+        statement = select(WorkSession).where(WorkSession.user_id == mechanic.id)
+        if from_date:
+            statement = statement.where(WorkSession.started_at >= from_date)
+        if to_date:
+            statement = statement.where(WorkSession.started_at < to_date)
+        sessions = session.exec(statement).all()
         net_seconds = sum(max(0, int(((item.ended_at or item.paused_at or now) - item.started_at).total_seconds()) - item.paused_seconds) for item in sessions)
         active = [item for item in sessions if item.ended_at is None]
         assignments = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.technician_user_id == mechanic.id)).all()
