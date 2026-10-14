@@ -26,6 +26,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
   List<Map<String, dynamic>> _customers = [];
   List<Map<String, dynamic>> _vehicles = [];
   int _customerSection = 0;
+  bool _kanbanView = true;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -930,6 +931,28 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                   _records = _customerSection == 0 ? _customers : _vehicles;
                 }),
               )),
+        if (_isOrders)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.view_kanban_outlined),
+                      label: Text('Tablero')),
+                  ButtonSegment(
+                      value: false,
+                      icon: Icon(Icons.view_list_outlined),
+                      label: Text('Lista')),
+                ],
+                selected: {_kanbanView},
+                onSelectionChanged: (value) =>
+                    setState(() => _kanbanView = value.first),
+              ),
+            ),
+          ),
         Expanded(
             child: _records.isEmpty
                 ? RefreshIndicator(
@@ -960,18 +983,21 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                         Theme.of(context).textTheme.bodySmall)
                               ])))
                     ]))
-                : RefreshIndicator(
-                    onRefresh: _refresh,
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-                      itemCount: _records.length,
-                      itemBuilder: (context, index) {
-                        final item = _records[index];
-                        if (_isOrders) return _workOrderTile(item);
-                        if (_customerSection == 0) return _customerTile(item);
-                        return _vehicleTile(item);
-                      },
-                    ))),
+                : _isOrders && _kanbanView
+                    ? _kanbanBoard()
+                    : RefreshIndicator(
+                        onRefresh: _refresh,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+                          itemCount: _records.length,
+                          itemBuilder: (context, index) {
+                            final item = _records[index];
+                            if (_isOrders) return _workOrderTile(item);
+                            if (_customerSection == 0)
+                              return _customerTile(item);
+                            return _vehicleTile(item);
+                          },
+                        ))),
       ]),
       if (_canCreate)
         Positioned(
@@ -1133,6 +1159,78 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           ]),
       onTap: () => _openOrder(item),
     ));
+  }
+
+  Widget _kanbanBoard() {
+    const columns = [
+      (
+        'Recepción',
+        <String>{'received', 'inspecting'},
+        Icons.assignment_outlined
+      ),
+      (
+        'Cotización',
+        <String>{'quoted', 'awaiting_approval', 'approved', 'quote_rejected'},
+        Icons.request_quote_outlined
+      ),
+      ('En taller', <String>{'in_progress'}, Icons.build_outlined),
+      ('Entrega', <String>{'ready', 'delivered'}, Icons.task_alt_outlined),
+    ];
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: LayoutBuilder(builder: (context, constraints) {
+        final columnWidth = constraints.maxWidth >= 960
+            ? (constraints.maxWidth - 48) / 4
+            : 300.0;
+        return ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+          children: columns.map((column) {
+            final orders = _records
+                .where((order) => column.$2.contains('${order['status']}'))
+                .toList();
+            return SizedBox(
+              width: columnWidth,
+              child: Card(
+                margin: const EdgeInsets.only(right: 12),
+                color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Icon(column.$3, size: 18),
+                          const SizedBox(width: 7),
+                          Expanded(
+                              child: Text(column.$1,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800))),
+                          _StatusPill(
+                              label: '${orders.length}',
+                              color: Theme.of(context).colorScheme.primary)
+                        ]),
+                        const SizedBox(height: 8),
+                        Expanded(
+                            child: orders.isEmpty
+                                ? Center(
+                                    child: Text('Sin órdenes',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall))
+                                : ListView(
+                                    children:
+                                        orders.map(_workOrderTile).toList())),
+                      ]),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      }),
+    );
   }
 }
 
