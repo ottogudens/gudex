@@ -44,7 +44,7 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                               decoration:
                                   const InputDecoration(labelText: 'Mensaje')),
                           DropdownButtonFormField<String>(
-                              value: audience,
+                            initialValue: audience,
                               items: const [
                                 DropdownMenuItem(
                                     value: 'all', child: Text('Todos')),
