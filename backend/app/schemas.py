@@ -165,6 +165,13 @@ class MaintenancePlanCreate(SQLModel):
     last_service_km: Optional[int] = Field(default=None, ge=0)
 
 
+class MaintenancePlanUpdate(SQLModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    interval_km: Optional[int] = Field(default=None, ge=1)
+    interval_days: Optional[int] = Field(default=None, ge=1)
+    active: Optional[bool] = None
+
+
 class VehicleUpdate(SQLModel):
     customer_id: Optional[int] = None
     plate: Optional[str] = None

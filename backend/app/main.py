@@ -26,7 +26,7 @@ from app.models import (
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
-    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
+    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, MaintenancePlanUpdate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -624,6 +624,32 @@ def create_maintenance_plan(data: MaintenancePlanCreate, session: Session = Depe
     plan = MaintenancePlan.model_validate(data, update={"last_service_km": data.last_service_km if data.last_service_km is not None else vehicle.current_mileage_km})
     session.add(plan); session.commit(); session.refresh(plan)
     return plan
+
+
+@app.get("/api/v1/maintenance-plans", dependencies=[Depends(require_staff)])
+def list_maintenance_plans(session: Session = Depends(get_session)):
+    return session.exec(select(MaintenancePlan).order_by(MaintenancePlan.active.desc(), MaintenancePlan.name)).all()
+
+
+@app.patch("/api/v1/maintenance-plans/{plan_id}", response_model=MaintenancePlan, dependencies=[Depends(require_admin)])
+def update_maintenance_plan(plan_id: int, data: MaintenancePlanUpdate, session: Session = Depends(get_session)):
+    plan = session.get(MaintenancePlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Plan de mantención no encontrado")
+    plan.sqlmodel_update(data.model_dump(exclude_unset=True))
+    if not plan.interval_km and not plan.interval_days:
+        raise HTTPException(422, "Define un intervalo por kilometraje, tiempo o ambos")
+    session.add(plan); session.commit(); session.refresh(plan)
+    return plan
+
+
+@app.delete("/api/v1/maintenance-plans/{plan_id}", dependencies=[Depends(require_admin)])
+def archive_maintenance_plan(plan_id: int, session: Session = Depends(get_session)):
+    plan = session.get(MaintenancePlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Plan de mantención no encontrado")
+    plan.active = False; session.add(plan); session.commit()
+    return {"archived": True}
 
 
 @app.get("/api/v1/maintenance-plans/due", dependencies=[Depends(require_staff)])
@@ -1319,6 +1345,14 @@ def request_appointment(data: AppointmentCreate, request: Request, session: Sess
 def customer_appointments(request: Request, session: Session = Depends(get_session)):
     return session.exec(select(Appointment).where(Appointment.customer_id == request.state.customer_id)
                         .order_by(Appointment.starts_at.desc())).all()
+
+
+@app.get("/api/v1/portal/maintenance-plans")
+def customer_maintenance_plans(request: Request, session: Session = Depends(get_session)):
+    vehicle_ids = [item.id for item in session.exec(select(Vehicle).where(Vehicle.customer_id == request.state.customer_id)).all()]
+    if not vehicle_ids:
+        return []
+    return session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id.in_(vehicle_ids), MaintenancePlan.active == True)).all()  # noqa: E712
 
 
 @app.patch("/api/v1/portal/appointments/{appointment_id}", response_model=Appointment)
