@@ -431,6 +431,14 @@ class LoyaltyRewardCreate(SQLModel):
     points_cost: int = Field(ge=1)
 
 
+class MarketingCampaignCreate(SQLModel):
+    title: str = Field(min_length=3, max_length=140)
+    message: str = Field(min_length=5, max_length=1200)
+    audience: Literal["all", "inactive", "maintenance_due", "loyalty"] = "all"
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+
+
 class GoogleImportRequest(SQLModel):
     source: str
     external_id: str

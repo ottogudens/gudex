@@ -328,6 +328,17 @@ class LoyaltyRedemption(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class MarketingCampaign(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(max_length=140)
+    message: str = Field(max_length=1200)
+    audience: str = Field(default="all", max_length=48)
+    status: str = Field(default="draft", max_length=24)
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class IntegrationCredential(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str = Field(index=True, unique=True, max_length=32)

@@ -21,12 +21,12 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
+    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
-    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, LoyaltyRewardCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
+    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -1172,6 +1172,31 @@ def update_loyalty_redemption(redemption_id: int, status: str, session: Session 
         session.add(LoyaltyTransaction(customer_id=row.customer_id, points=row.points_cost, kind="refund", note=f"Canje rechazado: {reward.name if reward else 'beneficio'}"))
     row.status = status; session.add(row); session.commit(); session.refresh(row)
     return row
+
+
+@app.get("/api/v1/marketing/campaigns", dependencies=[Depends(require_admin)])
+def list_marketing_campaigns(session: Session = Depends(get_session)):
+    return session.exec(select(MarketingCampaign).order_by(MarketingCampaign.created_at.desc())).all()
+
+
+@app.post("/api/v1/marketing/campaigns", response_model=MarketingCampaign, status_code=201, dependencies=[Depends(require_admin)])
+def create_marketing_campaign(data: MarketingCampaignCreate, session: Session = Depends(get_session)):
+    if data.ends_at and data.starts_at and data.ends_at <= data.starts_at:
+        raise HTTPException(422, "La fecha final debe ser posterior al inicio")
+    campaign = MarketingCampaign.model_validate(data)
+    session.add(campaign); session.commit(); session.refresh(campaign)
+    return campaign
+
+
+@app.post("/api/v1/marketing/campaigns/{campaign_id}/status", dependencies=[Depends(require_admin)])
+def update_campaign_status(campaign_id: int, status: str, session: Session = Depends(get_session)):
+    if status not in {"draft", "active", "paused", "completed"}:
+        raise HTTPException(422, "Estado de campaña inválido")
+    campaign = session.get(MarketingCampaign, campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaña no encontrada")
+    campaign.status = status; session.add(campaign); session.commit(); session.refresh(campaign)
+    return campaign
 
 
 @app.get("/api/v1/loyalty/customers/{customer_id}", dependencies=[Depends(require_admin)])
