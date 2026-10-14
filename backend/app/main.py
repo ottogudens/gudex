@@ -1134,6 +1134,32 @@ def create_loyalty_reward(data: LoyaltyRewardCreate, session: Session = Depends(
     return reward
 
 
+@app.get("/api/v1/loyalty/redemptions", dependencies=[Depends(require_admin)])
+def list_loyalty_redemptions(session: Session = Depends(get_session)):
+    rows = session.exec(select(LoyaltyRedemption).order_by(LoyaltyRedemption.created_at.desc())).all()
+    return [{**row.model_dump(), "customer_name": (session.get(Customer, row.customer_id).full_name if session.get(Customer, row.customer_id) else "Cliente"), "reward_name": (session.get(LoyaltyReward, row.reward_id).name if session.get(LoyaltyReward, row.reward_id) else "Beneficio")} for row in rows]
+
+
+@app.post("/api/v1/loyalty/redemptions/{redemption_id}/{status}", dependencies=[Depends(require_admin)])
+def update_loyalty_redemption(redemption_id: int, status: str, session: Session = Depends(get_session)):
+    if status not in {"approved", "rejected", "delivered"}:
+        raise HTTPException(422, "Estado de canje inválido")
+    row = session.get(LoyaltyRedemption, redemption_id)
+    if not row:
+        raise HTTPException(404, "Canje no encontrado")
+    if status == "approved" and row.status != "requested":
+        raise HTTPException(409, "Solo se pueden aprobar solicitudes pendientes")
+    if status == "delivered" and row.status != "approved":
+        raise HTTPException(409, "El beneficio debe aprobarse antes de entregarlo")
+    if status == "rejected" and row.status == "delivered":
+        raise HTTPException(409, "No se puede rechazar un beneficio entregado")
+    if status == "rejected" and row.status == "requested":
+        reward = session.get(LoyaltyReward, row.reward_id)
+        session.add(LoyaltyTransaction(customer_id=row.customer_id, points=row.points_cost, kind="refund", note=f"Canje rechazado: {reward.name if reward else 'beneficio'}"))
+    row.status = status; session.add(row); session.commit(); session.refresh(row)
+    return row
+
+
 @app.get("/api/v1/loyalty/customers/{customer_id}", dependencies=[Depends(require_admin)])
 def loyalty_balance(customer_id: int, session: Session = Depends(get_session)):
     if not session.get(Customer, customer_id):
