@@ -1109,6 +1109,46 @@ def customer_appointments(request: Request, session: Session = Depends(get_sessi
                         .order_by(Appointment.starts_at.desc())).all()
 
 
+@app.patch("/api/v1/portal/appointments/{appointment_id}", response_model=Appointment)
+def update_customer_appointment(appointment_id: int, data: AppointmentUpdate, request: Request,
+                                session: Session = Depends(get_session)):
+    appointment = session.get(Appointment, appointment_id)
+    if not appointment or appointment.customer_id != request.state.customer_id:
+        raise HTTPException(404, "Cita no encontrada")
+    if appointment.status in {"cancelled", "completed"}:
+        raise HTTPException(409, "Esta cita ya no se puede modificar")
+    changes = data.model_dump(exclude_unset=True)
+    allowed = {"starts_at", "ends_at", "service_type", "notes", "vehicle_id"}
+    if set(changes) - allowed:
+        raise HTTPException(403, "Solo puedes modificar los datos de tu solicitud")
+    if changes.get("vehicle_id"):
+        vehicle = session.get(Vehicle, changes["vehicle_id"])
+        if not vehicle or vehicle.customer_id != appointment.customer_id:
+            raise HTTPException(422, "El vehículo no pertenece a tu cuenta")
+    starts_at, ends_at = changes.get("starts_at", appointment.starts_at), changes.get("ends_at", appointment.ends_at)
+    if starts_at != appointment.starts_at or ends_at != appointment.ends_at:
+        ensure_appointment_slot(session, starts_at, ends_at, exclude_appointment_id=appointment_id)
+    for key, value in changes.items():
+        setattr(appointment, key, value)
+    appointment.status = "requested"
+    appointment.sync_status = "pending"
+    session.add(appointment); session.commit(); session.refresh(appointment)
+    return appointment
+
+
+@app.delete("/api/v1/portal/appointments/{appointment_id}")
+def cancel_customer_appointment(appointment_id: int, request: Request, session: Session = Depends(get_session)):
+    appointment = session.get(Appointment, appointment_id)
+    if not appointment or appointment.customer_id != request.state.customer_id:
+        raise HTTPException(404, "Cita no encontrada")
+    if appointment.status in {"cancelled", "completed"}:
+        raise HTTPException(409, "Esta cita ya no se puede cancelar")
+    appointment.status = "cancelled"
+    appointment.sync_status = "pending"
+    session.add(appointment); session.commit()
+    return {"cancelled": True}
+
+
 @app.get("/api/v1/portal/quotes")
 def customer_portal_quotes(request: Request, session: Session = Depends(get_session)):
     orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == request.state.customer_id)).all()
