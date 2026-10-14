@@ -28,6 +28,86 @@ class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
         : [];
   }
 
+  Future<void> _createPlan() async {
+    final vehicles = await widget.api.getAll('/api/v1/vehicles');
+    if (!mounted || vehicles.isEmpty) return;
+    var vehicleId = vehicles.first['id'] as int;
+    final name = TextEditingController(text: 'Mantención preventiva');
+    final km = TextEditingController();
+    final days = TextEditingController();
+    final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+                title: const Text('Nuevo plan preventivo'),
+                content: StatefulBuilder(
+                    builder: (context, update) => SingleChildScrollView(
+                            child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                              DropdownButtonFormField<int>(
+                                  initialValue: vehicleId,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Vehículo'),
+                                  items: vehicles
+                                      .map((v) => DropdownMenuItem(
+                                          value: v['id'] as int,
+                                          child: Text(
+                                              '${v['plate']} · ${v['make']} ${v['model']}')))
+                                      .toList(),
+                                  onChanged: (v) =>
+                                      update(() => vehicleId = v!)),
+                              TextField(
+                                  controller: name,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Plan / servicio')),
+                              TextField(
+                                  controller: km,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                      labelText:
+                                          'Intervalo kilometraje (opcional)')),
+                              TextField(
+                                  controller: days,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Intervalo días (opcional)')),
+                            ]))),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancelar')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, {
+                            'vehicle_id': vehicleId,
+                            'name': name.text.trim(),
+                            if (int.tryParse(km.text) != null)
+                              'interval_km': int.parse(km.text),
+                            if (int.tryParse(days.text) != null)
+                              'interval_days': int.parse(days.text)
+                          }),
+                      child: const Text('Crear plan'))
+                ]));
+    name.dispose();
+    km.dispose();
+    days.dispose();
+    if (data == null ||
+        data['name'].toString().length < 2 ||
+        (!data.containsKey('interval_km') &&
+            !data.containsKey('interval_days'))) return;
+    try {
+      await widget.api.postJson('/api/v1/maintenance-plans', data);
+      if (mounted) {
+        setState(() => _data = _load());
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Plan preventivo creado.')));
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) =>
       FutureBuilder<List<Map<String, dynamic>>>(
@@ -48,6 +128,13 @@ class _OperationsReportsScreenState extends State<OperationsReportsScreen> {
                   Text(widget.productivity
                       ? 'Horas netas y carga activa por mecánico.'
                       : 'Vehículos que requieren atención por kilometraje o fecha.'),
+                  if (!widget.productivity)
+                    Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton.icon(
+                            onPressed: _createPlan,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Nuevo plan'))),
                   const SizedBox(height: 18),
                   if (rows.isEmpty)
                     Padding(
