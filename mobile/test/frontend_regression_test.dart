@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lubricentro_mobile/core/theme.dart';
 import 'package:lubricentro_mobile/screens/dashboard_screen.dart';
 import 'package:lubricentro_mobile/screens/agenda_screen.dart';
+import 'package:lubricentro_mobile/screens/customer_portal_home_screen.dart';
 import 'package:lubricentro_mobile/screens/inventory_screen.dart';
 import 'package:lubricentro_mobile/screens/widgets/inventory_editor.dart';
 import 'package:lubricentro_mobile/screens/pos_screen.dart';
@@ -38,6 +39,29 @@ class FakeApi extends ApiClient {
         'urgent_orders': <Map<String, dynamic>>[],
         'today_schedule': <Map<String, dynamic>>[],
         'low_stock_items': <Map<String, dynamic>>[],
+      };
+    }
+    if (uri.path == '/api/v1/portal/profile') {
+      return {
+        'customer': {'full_name': 'Cliente Portal'},
+        'vehicles': [
+          {
+            'id': 7,
+            'plate': 'TEST01',
+            'make': 'Toyota',
+            'model': 'Yaris',
+            'year': 2024,
+            'current_mileage_km': 12000
+          },
+        ],
+        'work_orders': [
+          {
+            'id': 9,
+            'code': 'OT-009',
+            'status': 'inspecting',
+            'reported_symptoms': 'Ruido en frenos'
+          },
+        ],
       };
     }
     if (uri.path == '/api/v1/sales' && unpaidSale)
@@ -159,6 +183,20 @@ void main() {
     expect(find.text('Hoy'), findsOneWidget);
     expect(find.byTooltip('Agendar cita'), findsOneWidget);
     expect(find.text('Sin citas programadas'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('customer portal presents vehicles and active workshop progress',
+      (tester) async {
+    await mount(
+      tester,
+      CustomerPortalHomeScreen(api: FakeApi()),
+      size: const Size(360, 800),
+    );
+    expect(find.text('Hola, Cliente Portal'), findsOneWidget);
+    expect(find.text('Atenciones activas'), findsOneWidget);
+    expect(find.textContaining('TEST01'), findsOneWidget);
+    expect(find.text('En inspección'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

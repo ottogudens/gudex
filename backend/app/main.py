@@ -760,8 +760,37 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, se
     if not order:
         raise HTTPException(404, "Orden de trabajo no encontrada")
     changes = data.model_dump(exclude_unset=True)
-    if request.state.user_role == UserRole.mechanic.value and "total_clp" in changes:
-        raise HTTPException(403, "Solo administración puede modificar el total de una orden")
+    is_mechanic = request.state.user_role == UserRole.mechanic.value
+    if is_mechanic:
+        user = session.exec(select(User).where(User.email == request.state.user_email)).first()
+        assignment = user and session.exec(select(WorkOrderAssignment).where(
+            WorkOrderAssignment.work_order_id == order_id,
+            WorkOrderAssignment.technician_user_id == user.id,
+        )).first()
+        if not assignment:
+            raise HTTPException(403, "Solo puedes registrar avances en órdenes que te fueron asignadas")
+        restricted_fields = set(changes) - {"status", "diagnosis", "mileage_km"}
+        if restricted_fields:
+            raise HTTPException(403, "El mecánico solo puede registrar diagnóstico, kilometraje y avance de su orden")
+
+    if "status" in changes:
+        target = changes["status"]
+        allowed_transitions = {
+            WorkStatus.received: {WorkStatus.inspecting, WorkStatus.cancelled},
+            WorkStatus.inspecting: {WorkStatus.quoted, WorkStatus.awaiting_approval, WorkStatus.approved, WorkStatus.in_progress, WorkStatus.cancelled},
+            WorkStatus.quoted: {WorkStatus.awaiting_approval, WorkStatus.approved, WorkStatus.quote_rejected, WorkStatus.cancelled},
+            WorkStatus.awaiting_approval: {WorkStatus.approved, WorkStatus.quote_rejected, WorkStatus.cancelled},
+            WorkStatus.quote_rejected: {WorkStatus.inspecting, WorkStatus.quoted, WorkStatus.cancelled},
+            WorkStatus.approved: {WorkStatus.in_progress, WorkStatus.cancelled},
+            WorkStatus.in_progress: {WorkStatus.ready, WorkStatus.cancelled},
+            WorkStatus.ready: {WorkStatus.in_progress, WorkStatus.delivered, WorkStatus.cancelled},
+            WorkStatus.delivered: set(),
+            WorkStatus.cancelled: set(),
+        }
+        if target != order.status and target not in allowed_transitions[order.status]:
+            raise HTTPException(409, f"No se puede cambiar una orden de {order.status.value} a {target.value}")
+        if is_mechanic and target not in {WorkStatus.inspecting, WorkStatus.in_progress, WorkStatus.ready}:
+            raise HTTPException(403, "El mecánico no puede cerrar, cancelar ni modificar etapas comerciales de una orden")
     for key, value in changes.items():
         setattr(order, key, value)
     session.add(order)
