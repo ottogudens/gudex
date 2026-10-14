@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lubricentro_mobile/core/theme.dart';
+import 'package:lubricentro_mobile/screens/dashboard_screen.dart';
 import 'package:lubricentro_mobile/screens/inventory_screen.dart';
 import 'package:lubricentro_mobile/screens/widgets/inventory_editor.dart';
 import 'package:lubricentro_mobile/screens/pos_screen.dart';
@@ -23,7 +24,31 @@ class FakeApi extends ApiClient {
   Future<dynamic> get(String path) async {
     final uri = Uri.parse(path);
     calls.add(uri);
-    if (uri.path == '/api/v1/sales' && unpaidSale) return [{'id': 42, 'receipt_code': 'V-42', 'total_clp': 2000, 'status': 'open', 'payments': []}];
+    if (uri.path == '/api/v1/dashboard') {
+      return {
+        'metrics': {
+          'active_orders': 3,
+          'overdue_orders': 0,
+          'today_appointments': 2,
+          'requested_appointments': 1,
+          'low_stock': 0,
+          'sales_today_clp': 25000,
+        },
+        'urgent_orders': <Map<String, dynamic>>[],
+        'today_schedule': <Map<String, dynamic>>[],
+        'low_stock_items': <Map<String, dynamic>>[],
+      };
+    }
+    if (uri.path == '/api/v1/sales' && unpaidSale)
+      return [
+        {
+          'id': 42,
+          'receipt_code': 'V-42',
+          'total_clp': 2000,
+          'status': 'open',
+          'payments': []
+        }
+      ];
     if (uri.path != '/api/v1/products') return <Map<String, dynamic>>[];
     final offset = int.parse(uri.queryParameters['offset'] ?? '0');
     if (offset == failOffset) throw Exception('Error de red');
@@ -98,6 +123,30 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('dashboard presents a responsive operational control center',
+      (tester) async {
+    var selectedModule = -1;
+    await mount(
+      tester,
+      DashboardScreen(
+        api: FakeApi(),
+        onOpenModule: (index) => selectedModule = index,
+      ),
+      size: const Size(360, 800),
+    );
+    expect(find.text('Centro de control'), findsOneWidget);
+    expect(find.text('Órdenes activas'), findsOneWidget);
+    await tester.tap(find.text('Ver agenda').first);
+    expect(selectedModule, 4);
+    await tester.scrollUntilVisible(
+      find.text('Todo bajo control'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Todo bajo control'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('failed save retains fields and retry saves the same product',
       (tester) async {
     final api = FakeApi()..failSave = true;
@@ -155,8 +204,11 @@ void main() {
     expect(button.onPressed, isNull);
     expect(tester.takeException(), isNull);
   });
-  testWidgets('POS recovery records payment against the existing sale only', (tester) async {
-    final api = FakeApi()..count = 1..unpaidSale = true;
+  testWidgets('POS recovery records payment against the existing sale only',
+      (tester) async {
+    final api = FakeApi()
+      ..count = 1
+      ..unpaidSale = true;
     await mount(tester, PosScreen(api: api), size: const Size(1280, 1100));
     await tester.tap(find.byTooltip('Ver ventas y recuperar cobro'));
     await tester.pumpAndSettle();
@@ -170,7 +222,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('archived product remains removable in cart after refresh', (tester) async {
+  testWidgets('archived product remains removable in cart after refresh',
+      (tester) async {
     final api = FakeApi()..count = 1;
     await mount(tester, PosScreen(api: api), size: const Size(1280, 1100));
     await tester.tap(find.text('Agregar').first);
@@ -178,14 +231,16 @@ void main() {
     api.count = 0;
     await tester.tap(find.byTooltip('Actualizar datos'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Producto 1 × 1 · Revisar stock'), findsOneWidget);
+    expect(
+        find.textContaining('Producto 1 × 1 · Revisar stock'), findsOneWidget);
     await tester.tap(find.byTooltip('Quitar producto'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Producto 1 × 1'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('inventory retains searchable data after refresh failure', (tester) async {
+  testWidgets('inventory retains searchable data after refresh failure',
+      (tester) async {
     final api = FakeApi();
     await mount(tester, InventoryScreen(api: api, canManage: false));
     await tester.enterText(find.byType(TextField), 'SKU-250');
@@ -194,12 +249,14 @@ void main() {
     await tester.tap(find.byTooltip('Actualizar inventario'));
     await tester.pumpAndSettle();
     expect(find.text('Producto 251'), findsOneWidget);
-    expect(find.text('Se muestran los últimos datos disponibles.'), findsOneWidget);
+    expect(find.text('Se muestran los últimos datos disponibles.'),
+        findsOneWidget);
     expect(find.text('Nuevo producto'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('POS keeps cart and persistent summary when resized to mobile', (tester) async {
+  testWidgets('POS keeps cart and persistent summary when resized to mobile',
+      (tester) async {
     final api = FakeApi()..count = 1;
     await mount(tester, PosScreen(api: api), size: const Size(1280, 1100));
     await tester.tap(find.text('Agregar').first);
@@ -212,5 +269,4 @@ void main() {
     expect(find.textContaining('Producto 1 × 1'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
-
 }
