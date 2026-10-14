@@ -91,9 +91,10 @@ def on_startup() -> None:
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
     if _is_production:
-        # En producción la BD debe estar al día con Alembic (railway.json preDeployCommand).
-        # create_db_and_tables() solo se usa en desarrollo y tests.
-        logger.info("Producción: se omite create_db_and_tables(); Alembic es el único mecanismo de migración.")
+        # Alembic es el mecanismo normal de migración. Este respaldo idempotente
+        # evita que una base recién creada falle antes de ejecutar migraciones.
+        logger.warning("Producción: verificando esquema base antes de iniciar la aplicación.")
+        create_db_and_tables()
     else:
         create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
