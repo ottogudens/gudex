@@ -5,7 +5,7 @@ import hashlib
 import secrets
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
@@ -87,7 +87,12 @@ async def _available_ai_models() -> list[str]:
 
 
 @router.get("/api/v1/integrations/status", dependencies=[Depends(require_admin)])
-def integration_status(session: Session = Depends(get_session)):
+def integration_status(response: Response, session: Session = Depends(get_session)):
+    # Integration state includes live connectivity configuration. Never let a
+    # browser, CDN or intermediary serve an earlier state after an admin
+    # enables/disables a connector.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
     mp_token = settings.mercadopago_access_token
     return {

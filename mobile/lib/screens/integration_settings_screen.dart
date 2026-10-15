@@ -26,7 +26,13 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
   void initState() { super.initState(); _refresh(); }
 
   Future<void> _refresh() async {
-    try { final data = Map<String, dynamic>.from(await widget.api.get('/api/v1/integrations/status') as Map); if (mounted) setState(() => _status = data); }
+    try {
+      // A distinct URL prevents an intermediary cache from keeping an older
+      // connector state after an administrator changes Railway variables.
+      final nonce = DateTime.now().microsecondsSinceEpoch;
+      final data = Map<String, dynamic>.from(await widget.api.get('/api/v1/integrations/status?refresh=$nonce') as Map);
+      if (mounted) setState(() => _status = data);
+    }
     catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); }
   }
 
