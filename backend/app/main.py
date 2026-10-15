@@ -40,6 +40,7 @@ from app.routers.vehicle_technical import router as vehicle_technical_router, te
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
+from app.services.work_orders import editable_order, transition_order
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -743,6 +744,9 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
     if not vehicle or vehicle.customer_id != request.state.customer_id:
         raise HTTPException(404, "Vehículo no encontrado")
     data = vehicle_history_payload(session, vehicle)
+    data["quotes"] = [quote for quote in data["quotes"] if quote.status != "draft"]
+    data["work_orders"] = [order.model_dump(exclude={"initial_notes", "technician_name", "total_clp"})
+                           for order in data["work_orders"]]
     data["technical"] = technical_payload(session, vehicle_id, portal=True)
     for report in data["scanner_reports"]:
         report["download_url"] = f"/api/v1/portal/scanner-reports/{report['id']}/file"
@@ -864,41 +868,16 @@ def get_work_order(order_id: int, session: Session = Depends(get_session)):
 
 @app.patch("/api/v1/work-orders/{order_id}", response_model=WorkOrder, dependencies=[Depends(require_staff)])
 def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, session: Session = Depends(get_session)):
-    order = session.get(WorkOrder, order_id)
-    if not order:
-        raise HTTPException(404, "Orden de trabajo no encontrada")
+    order = editable_order(session, order_id, request)
     changes = data.model_dump(exclude_unset=True)
     is_mechanic = request.state.user_role == UserRole.mechanic.value
     if is_mechanic:
-        user = session.exec(select(User).where(User.email == request.state.user_email)).first()
-        assignment = user and session.exec(select(WorkOrderAssignment).where(
-            WorkOrderAssignment.work_order_id == order_id,
-            WorkOrderAssignment.technician_user_id == user.id,
-        )).first()
-        if not assignment:
-            raise HTTPException(403, "Solo puedes registrar avances en órdenes que te fueron asignadas")
         restricted_fields = set(changes) - {"status", "diagnosis", "mileage_km"}
         if restricted_fields:
             raise HTTPException(403, "El mecánico solo puede registrar diagnóstico, kilometraje y avance de su orden")
 
     if "status" in changes:
-        target = changes["status"]
-        allowed_transitions = {
-            WorkStatus.received: {WorkStatus.inspecting, WorkStatus.cancelled},
-            WorkStatus.inspecting: {WorkStatus.quoted, WorkStatus.awaiting_approval, WorkStatus.approved, WorkStatus.in_progress, WorkStatus.cancelled},
-            WorkStatus.quoted: {WorkStatus.awaiting_approval, WorkStatus.approved, WorkStatus.quote_rejected, WorkStatus.cancelled},
-            WorkStatus.awaiting_approval: {WorkStatus.approved, WorkStatus.quote_rejected, WorkStatus.cancelled},
-            WorkStatus.quote_rejected: {WorkStatus.inspecting, WorkStatus.quoted, WorkStatus.cancelled},
-            WorkStatus.approved: {WorkStatus.in_progress, WorkStatus.cancelled},
-            WorkStatus.in_progress: {WorkStatus.ready, WorkStatus.cancelled},
-            WorkStatus.ready: {WorkStatus.in_progress, WorkStatus.delivered, WorkStatus.cancelled},
-            WorkStatus.delivered: set(),
-            WorkStatus.cancelled: set(),
-        }
-        if target != order.status and target not in allowed_transitions[order.status]:
-            raise HTTPException(409, f"No se puede cambiar una orden de {order.status.value} a {target.value}")
-        if is_mechanic and target not in {WorkStatus.inspecting, WorkStatus.in_progress, WorkStatus.ready}:
-            raise HTTPException(403, "El mecánico no puede cerrar, cancelar ni modificar etapas comerciales de una orden")
+        transition_order(order, changes["status"], request.state.user_role)
     for key, value in changes.items():
         setattr(order, key, value)
     session.add(order)
@@ -1001,9 +980,8 @@ def delete_work_order(order_id: int, session: Session = Depends(get_session)):
 
 
 @app.post("/api/v1/work-orders/{order_id}/inspections", response_model=Inspection, status_code=201, dependencies=[Depends(require_staff)])
-def add_inspection(order_id: int, data: InspectionCreate, session: Session = Depends(get_session)):
-    if not session.get(WorkOrder, order_id):
-        raise HTTPException(404, "Orden de trabajo no encontrada")
+def add_inspection(order_id: int, data: InspectionCreate, request: Request, session: Session = Depends(get_session)):
+    editable_order(session, order_id, request)
     inspection = Inspection.model_validate(data, update={"work_order_id": order_id})
     session.add(inspection)
     session.commit()
@@ -1019,10 +997,11 @@ def list_inspections(order_id: int, session: Session = Depends(get_session)):
 
 
 @app.delete("/api/v1/inspections/{inspection_id}", dependencies=[Depends(require_staff)])
-def delete_inspection(inspection_id: int, session: Session = Depends(get_session)):
+def delete_inspection(inspection_id: int, request: Request, session: Session = Depends(get_session)):
     inspection = session.get(Inspection, inspection_id)
     if not inspection:
         raise HTTPException(404, "Inspección no encontrada")
+    editable_order(session, inspection.work_order_id, request)
     session.delete(inspection); session.commit()
     return {"deleted": True}
 
@@ -1175,6 +1154,7 @@ def customer_rewards(session: Session = Depends(get_session)):
 
 @app.post("/api/v1/portal/rewards/{reward_id}/redeem", status_code=201)
 def redeem_reward(reward_id: int, request: Request, session: Session = Depends(get_session)):
+    session.exec(select(Customer).where(Customer.id == request.state.customer_id).with_for_update()).first()
     reward = session.get(LoyaltyReward, reward_id)
     if not reward or not reward.active:
         raise HTTPException(404, "Beneficio no disponible")
@@ -1206,16 +1186,20 @@ def list_loyalty_redemptions(session: Session = Depends(get_session)):
 def update_loyalty_redemption(redemption_id: int, status: str, session: Session = Depends(get_session)):
     if status not in {"approved", "rejected", "delivered"}:
         raise HTTPException(422, "Estado de canje inválido")
-    row = session.get(LoyaltyRedemption, redemption_id)
+    row = session.exec(select(LoyaltyRedemption).where(LoyaltyRedemption.id == redemption_id)
+                       .with_for_update().execution_options(populate_existing=True)).first()
     if not row:
         raise HTTPException(404, "Canje no encontrado")
+    session.exec(select(Customer).where(Customer.id == row.customer_id).with_for_update()).first()
+    if row.status == status:
+        return row
     if status == "approved" and row.status != "requested":
         raise HTTPException(409, "Solo se pueden aprobar solicitudes pendientes")
     if status == "delivered" and row.status != "approved":
         raise HTTPException(409, "El beneficio debe aprobarse antes de entregarlo")
     if status == "rejected" and row.status == "delivered":
         raise HTTPException(409, "No se puede rechazar un beneficio entregado")
-    if status == "rejected" and row.status == "requested":
+    if status == "rejected" and row.status in {"requested", "approved"}:
         reward = session.get(LoyaltyReward, row.reward_id)
         session.add(LoyaltyTransaction(customer_id=row.customer_id, points=row.points_cost, kind="refund", note=f"Canje rechazado: {reward.name if reward else 'beneficio'}"))
     row.status = status; session.add(row); session.commit(); session.refresh(row)
@@ -1272,6 +1256,10 @@ def loyalty_balance(customer_id: int, session: Session = Depends(get_session)):
 
 def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: datetime,
                             exclude_appointment_id: int | None = None) -> None:
+    # Serialize reservations for the current single-capacity workshop on Postgres.
+    # The lock lives only until commit/rollback and does not require an extension.
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text("SELECT pg_advisory_xact_lock(714205124)"))
     if ends_at <= starts_at:
         raise HTTPException(422, "La hora de término debe ser posterior al inicio")
     statement = select(Appointment).where(
@@ -1324,6 +1312,8 @@ def update_appointment_status(appointment_id: int, status: str, session: Session
     appointment = session.get(Appointment, appointment_id)
     if not appointment:
         raise HTTPException(404, "Cita no encontrada")
+    if status == "confirmed":
+        ensure_appointment_slot(session, appointment.starts_at, appointment.ends_at, appointment_id)
     appointment.status = status
     appointment.sync_status = "pending"
     session.add(appointment)
@@ -1341,7 +1331,7 @@ def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Se
     if changes.get("vehicle_id") and (not session.get(Vehicle, changes["vehicle_id"]) or session.get(Vehicle, changes["vehicle_id"]).customer_id != appointment.customer_id):
         raise HTTPException(422, "El vehículo no pertenece al cliente de la cita")
     starts_at, ends_at = changes.get("starts_at", appointment.starts_at), changes.get("ends_at", appointment.ends_at)
-    if starts_at != appointment.starts_at or ends_at != appointment.ends_at:
+    if starts_at != appointment.starts_at or ends_at != appointment.ends_at or changes.get("status") in {"requested", "confirmed"}:
         ensure_appointment_slot(session, starts_at, ends_at, exclude_appointment_id=appointment_id)
     if changes.get("status") and changes["status"] not in {"requested", "confirmed", "cancelled", "completed"}:
         raise HTTPException(422, "Estado de cita inválido")
@@ -1731,7 +1721,8 @@ def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
 
 @app.post("/api/v1/sales/{sale_id}/payments", response_model=PaymentRead, status_code=201, dependencies=[Depends(require_admin)])
 def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends(get_session)):
-    sale = session.get(Sale, sale_id)
+    sale = session.exec(select(Sale).where(Sale.id == sale_id).with_for_update()
+                        .execution_options(populate_existing=True)).first()
     if not sale:
         raise HTTPException(404, "Venta no encontrada")
     if data.amount_clp <= 0:
@@ -1909,7 +1900,8 @@ async def mercado_pago_webhook(request: Request, session: Session = Depends(get_
         sale_id = int(payment_data.get("external_reference", ""))
     except (TypeError, ValueError):
         return {"received": True}
-    sale = session.get(Sale, sale_id)
+    sale = session.exec(select(Sale).where(Sale.id == sale_id).with_for_update()
+                        .execution_options(populate_existing=True)).first()
     amount = round(float(payment_data.get("transaction_amount") or 0))
     if not sale or payment_data.get("currency_id") != "CLP" or amount != sale.total_clp:
         raise HTTPException(409, "El pago no coincide con el monto o la moneda de la venta")
@@ -1926,6 +1918,11 @@ async def mercado_pago_webhook(request: Request, session: Session = Depends(get_
             if was_recorded:
                 sale.status = "refunded"
                 session.add(sale)
+                earned = session.exec(select(LoyaltyTransaction).where(LoyaltyTransaction.sale_id == sale.id)).first()
+                if earned:
+                    session.exec(select(Customer).where(Customer.id == earned.customer_id).with_for_update()).first()
+                    session.add(LoyaltyTransaction(customer_id=earned.customer_id, points=-earned.points,
+                        kind="payment_reversal", note=f"Reversión de puntos de venta {sale.receipt_code}"))
             session.commit()
         return {"received": True}
     pending = session.exec(select(Payment).where(Payment.sale_id == sale_id,

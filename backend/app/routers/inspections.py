@@ -18,6 +18,7 @@ from app.schemas import (
 )
 from app.security import require_admin, require_staff
 from app.services.documents import inspection_report_pdf
+from app.services.work_orders import editable_order
 
 router = APIRouter(prefix="/api/v1", tags=["inspecciones"], dependencies=[Depends(require_staff)])
 portal_router = APIRouter(prefix="/api/v1/portal", tags=["portal de inspecciones"])
@@ -63,8 +64,8 @@ def create_template(data: InspectionTemplateCreate, session: Session = Depends(g
 
 
 @router.post("/work-orders/{order_id}/inspection-templates/{template_id}/apply", status_code=201)
-def apply_template(order_id: int, template_id: int, session: Session = Depends(get_session)):
-    _order(session, order_id)
+def apply_template(order_id: int, template_id: int, request: Request, session: Session = Depends(get_session)):
+    editable_order(session, order_id, request)
     template = session.get(InspectionTemplate, template_id)
     if not template or not template.active:
         raise HTTPException(status_code=404, detail="Plantilla no encontrada")
@@ -88,10 +89,11 @@ def apply_template(order_id: int, template_id: int, session: Session = Depends(g
 
 
 @router.patch("/inspections/{inspection_id}", response_model=Inspection)
-def update_inspection(inspection_id: int, data: InspectionUpdate, session: Session = Depends(get_session)):
+def update_inspection(inspection_id: int, data: InspectionUpdate, request: Request, session: Session = Depends(get_session)):
     inspection = session.get(Inspection, inspection_id)
     if not inspection:
         raise HTTPException(status_code=404, detail="Inspección no encontrada")
+    editable_order(session, inspection.work_order_id, request)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(inspection, key, value)
     session.add(inspection)
@@ -107,8 +109,8 @@ def get_reception(order_id: int, session: Session = Depends(get_session)):
 
 
 @router.put("/work-orders/{order_id}/reception", response_model=WorkOrderReception)
-def save_reception(order_id: int, data: WorkOrderReceptionUpdate, session: Session = Depends(get_session)):
-    _order(session, order_id)
+def save_reception(order_id: int, data: WorkOrderReceptionUpdate, request: Request, session: Session = Depends(get_session)):
+    editable_order(session, order_id, request)
     reception = session.exec(select(WorkOrderReception).where(WorkOrderReception.work_order_id == order_id)).first()
     if not reception:
         reception = WorkOrderReception(work_order_id=order_id)
@@ -128,7 +130,7 @@ async def upload_evidence(
     order_id: int, request: Request, file: UploadFile = File(...), inspection_id: int | None = Form(None),
     kind: str = Form("evidence"), caption: str | None = Form(None), session: Session = Depends(get_session),
 ):
-    _order(session, order_id)
+    editable_order(session, order_id, request)
     content_type = file.content_type or "application/octet-stream"
     if content_type == "application/octet-stream":
         extension = Path(file.filename or "").suffix.lower()

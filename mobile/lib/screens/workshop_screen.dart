@@ -59,12 +59,22 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         _customers = _maps(values[1]);
         _vehicles = _maps(values[2]);
       } else {
-        final values = await Future.wait([
-          widget.api.getAll('/api/v1/customers'),
-          widget.api.getAll('/api/v1/vehicles'),
+        final errors = <String>[];
+        Future<void> load(String path, String label,
+            void Function(List<Map<String, dynamic>>) accept) async {
+          try {
+            accept(await widget.api.getAll(path));
+          } catch (error) {
+            errors.add(
+                '$label: ${error.toString().replaceFirst('Exception: ', '')}');
+          }
+        }
+
+        await Future.wait([
+          load('/api/v1/customers', 'Clientes', (rows) => _customers = rows),
+          load('/api/v1/vehicles', 'Vehículos', (rows) => _vehicles = rows),
         ]);
-        _customers = _maps(values[0]);
-        _vehicles = _maps(values[1]);
+        _error = errors.isEmpty ? null : errors.join('\n');
         _records = _customerSection == 0 ? _customers : _vehicles;
       }
     } catch (error) {
@@ -875,7 +885,8 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null)
+    if (_error != null &&
+        (_isOrders || (_customers.isEmpty && _vehicles.isEmpty)))
       return Center(
           child: Padding(
               padding: const EdgeInsets.all(24),
@@ -899,6 +910,14 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         .length;
     return Stack(children: [
       Column(children: [
+        if (_error != null)
+          MaterialBanner(
+            content: Text(
+                'Carga incompleta. Los datos anteriores se conservan.\n$_error'),
+            actions: [
+              TextButton(onPressed: _refresh, child: const Text('Reintentar'))
+            ],
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
           child: _OperationalHeader(
@@ -972,7 +991,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                     color:
                                         Theme.of(context).colorScheme.outline),
                                 const SizedBox(height: 12),
-                                Text('No hay $label registrados.'),
+                                Text(_error != null
+                                    ? 'No se pudo confirmar el listado de $label.'
+                                    : 'No hay $label registrados.'),
                                 const SizedBox(height: 4),
                                 Text(
                                     _isOrders

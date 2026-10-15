@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 
-
 class ApiClient {
   ApiClient(this.baseUrl, {this.token});
   final String baseUrl;
@@ -26,7 +25,11 @@ class ApiClient {
   }
 
   Future<dynamic> get(String path) async {
-    final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
+    final response = await http
+        .get(Uri.parse('$baseUrl$path'), headers: _headers)
+        .timeout(const Duration(seconds: 30),
+            onTimeout: () => throw Exception(
+                'La consulta tardó demasiado. Revisa tu conexión y reintenta.'));
     return _decode(response);
   }
 
@@ -39,15 +42,13 @@ class ApiClient {
     var offset = 0;
     while (true) {
       final page = await get(
-        uri
-            .replace(
-              queryParameters: {
-                ...uri.queryParameters,
-                'limit': '200',
-                'offset': '$offset',
-              },
-            )
-            .toString(),
+        uri.replace(
+          queryParameters: {
+            ...uri.queryParameters,
+            'limit': '200',
+            'offset': '$offset',
+          },
+        ).toString(),
       );
       if (page is! List) throw const FormatException('Se esperaba una lista');
       if (page.isEmpty) return records;
@@ -69,7 +70,8 @@ class ApiClient {
   }
 
   Future<Uint8List> getBytes(String path) async {
-    final response = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
+    final response =
+        await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _decode(response);
       throw Exception('Error HTTP ${response.statusCode}');
@@ -78,7 +80,8 @@ class ApiClient {
   }
 
   Future<dynamic> post(String path) async {
-    final response = await http.post(Uri.parse('$baseUrl$path'), headers: _headers);
+    final response =
+        await http.post(Uri.parse('$baseUrl$path'), headers: _headers);
     return _decode(response);
   }
 
@@ -110,24 +113,38 @@ class ApiClient {
   }
 
   Future<dynamic> delete(String path) async {
-    final response = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
+    final response =
+        await http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
     return _decode(response);
   }
 
-  Future<dynamic> uploadBytes(String path, List<int> bytes, String filename, {String? contentType}) async {
+  Future<dynamic> uploadBytes(String path, List<int> bytes, String filename,
+      {String? contentType}) async {
     final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
     request.headers.addAll(_headers);
-    request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    request.files
+        .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
     return _decode(response);
   }
 
   dynamic _decode(http.Response response) {
-    final body = response.body.isEmpty ? null : jsonDecode(response.body);
+    if (response.statusCode == 401) {
+      throw Exception(
+          'Tu sesión venció o no es válida. Vuelve a iniciar sesión.');
+    }
+    dynamic body;
+    try {
+      body = response.body.isEmpty ? null : jsonDecode(response.body);
+    } on FormatException {
+      throw Exception(
+          'El servidor devolvió una respuesta no válida (HTTP ${response.statusCode}). Reintenta.');
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final message = body is Map ? body['detail'] : null;
-      throw Exception(message?.toString() ?? 'Error HTTP ${response.statusCode}');
+      throw Exception(
+          message?.toString() ?? 'Error HTTP ${response.statusCode}');
     }
     return body;
   }

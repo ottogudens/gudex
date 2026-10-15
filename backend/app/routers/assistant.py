@@ -10,6 +10,7 @@ from app.models import (AIInteraction, Appointment, Customer, Inspection, Produc
 from app.schemas import AssistantConfirmation, AssistantQuery
 from app.services.ai import generate_answer, DIAGNOSTIC_PROMPT
 from app.services.diagnostics import diagnostic_context
+from app.services.work_orders import editable_order, transition_order
 from starlette.concurrency import run_in_threadpool
 from app.routers.integrations import selected_ai_model
 
@@ -195,7 +196,8 @@ async def customer_assistant_query(query: AssistantQuery, request: Request, sess
 @router.post("/api/v1/assistant/interactions/{interaction_id}/confirm")
 def confirm_assistant_action(interaction_id: int, data: AssistantConfirmation, request: Request,
                              session: Session = Depends(get_session)):
-    interaction = session.get(AIInteraction, interaction_id)
+    interaction = session.exec(select(AIInteraction).where(AIInteraction.id == interaction_id)
+                               .with_for_update().execution_options(populate_existing=True)).first()
     if not interaction or interaction.requested_by_email != request.state.user_email:
         raise HTTPException(404, "Propuesta no encontrada")
     if interaction.user_role != request.state.user_role:
@@ -213,15 +215,15 @@ def confirm_assistant_action(interaction_id: int, data: AssistantConfirmation, r
     if interaction.user_role not in {UserRole.admin.value, UserRole.mechanic.value} or interaction.proposed_action_type != "update_work_order_status":
         raise HTTPException(403, "Acción no permitida para este perfil")
     payload = json.loads(interaction.proposed_action_payload or "{}")
-    order = session.get(WorkOrder, payload.get("work_order_id"))
-    if not order or payload.get("status") not in {s.value for s in WorkStatus}:
+    if payload.get("status") not in {s.value for s in WorkStatus}:
         raise HTTPException(409, "La orden o el estado propuesto ya no son válidos")
+    order = editable_order(session, payload.get("work_order_id"), request)
     if interaction.user_role == UserRole.mechanic.value and payload["status"] not in {
         WorkStatus.inspecting.value, WorkStatus.in_progress.value, WorkStatus.ready.value,
     }:
         raise HTTPException(403, "El rol mecánico no puede aplicar ese estado")
     old_status = order.status
-    order.status = WorkStatus(payload["status"])
+    transition_order(order, WorkStatus(payload["status"]), interaction.user_role)
     session.add(order)
     interaction.status = "executed"
     interaction.result_summary = f"Orden {order.code}: {old_status.value} → {order.status.value} tras confirmación"

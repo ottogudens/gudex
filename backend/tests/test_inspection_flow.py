@@ -46,21 +46,21 @@ async def test_templates_reception_evidence_and_customer_report():
         registered_customer_id, order_id = customer.id, order.id
 
         template = session.exec(select(InspectionTemplate).where(InspectionTemplate.key == "mantencion-preventiva")).first()
-        applied = apply_template(order_id, template.id, session)
+        applied = apply_template(order_id, template.id, _request(UserRole.admin), session)
         assert applied["created_count"] > 0
         inspection_id = applied["inspections"][0].id
         updated = update_inspection(
-            inspection_id, InspectionUpdate(result="observation", notes="Revisar durante el servicio"), session,
+            inspection_id, InspectionUpdate(result="observation", notes="Revisar durante el servicio"), _request(UserRole.admin), session,
         )
         assert updated.result == "observation"
 
         reception = save_reception(order_id, WorkOrderReceptionUpdate(
             fuel_level_percent=50, visible_damage="Rayón lateral", terms_accepted=True,
             accepted_by_name="Cliente Prueba",
-        ), session)
+        ), _request(UserRole.admin), session)
         assert reception.accepted_at is not None
 
-        evidence = await upload_evidence(order_id, _request(UserRole.mechanic), _Upload(), None, "evidence", None, session)
+        evidence = await upload_evidence(order_id, _request(UserRole.admin), _Upload(), None, "evidence", None, session)
         assert evidence["filename"] == "foto.jpg"
 
         report = _report(session, session.get(WorkOrder, order_id))
