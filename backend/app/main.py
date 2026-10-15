@@ -1425,6 +1425,27 @@ def customer_portal_quotes(request: Request, session: Session = Depends(get_sess
                         .order_by(Quote.created_at.desc())).all()
 
 
+@app.get("/api/v1/portal/documents")
+def customer_documents(request: Request, session: Session = Depends(get_session)):
+    orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == request.state.customer_id)).all()
+    docs = []
+    for order in orders:
+        for quote in session.exec(select(Quote).where(Quote.work_order_id == order.id, Quote.status != "draft")).all():
+            docs.append({"type": "quote", "title": f"Cotización {quote.id}", "created_at": quote.created_at, "url": f"/api/v1/portal/quotes/{quote.id}/pdf"})
+        docs.append({"type": "inspection", "title": f"Informe de inspección {order.code}", "created_at": order.opened_at, "url": f"/api/v1/portal/work-orders/{order.id}/inspection-report.pdf"})
+    return docs
+
+
+@app.get("/api/v1/portal/quotes/{quote_id}/pdf")
+def customer_quote_pdf(quote_id: int, request: Request, session: Session = Depends(get_session)):
+    quote = session.get(Quote, quote_id)
+    order = session.get(WorkOrder, quote.work_order_id) if quote else None
+    if not quote or not order or order.customer_id != request.state.customer_id or quote.status == "draft":
+        raise HTTPException(404, "Cotización no encontrada")
+    customer = session.get(Customer, order.customer_id); vehicle = session.get(Vehicle, order.vehicle_id)
+    return Response(content=quote_pdf(quote, order, customer, vehicle), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="cotizacion-{quote.id}.pdf"', "Cache-Control": "private, no-store"})
+
+
 @app.get("/api/v1/portal/work-orders")
 def customer_portal_work_orders(request: Request, session: Session = Depends(get_session)):
     return session.exec(select(WorkOrder).where(WorkOrder.customer_id == request.state.customer_id)
