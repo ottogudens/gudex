@@ -30,6 +30,8 @@ for key, label in [("version", "Versión"), ("engine_code", "Código de motor"),
                    ("market", "Mercado de origen")]:
     field("information", key, label)
 field("care", "summary", "Características y cuidados específicos")
+field("care", "features", "Características técnicas documentadas")
+field("care", "specific_care", "Cuidados específicos del fabricante")
 field("care", "usage", "Condiciones de uso normal o severo")
 field("care", "research_status", "Estado de búsqueda técnica")
 for kind, label in [("oil", "Aceite"), ("air", "Aire"), ("fuel", "Combustible"), ("cabin", "Habitáculo")]:
