@@ -14,12 +14,41 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_session
 from app.models import AIConfiguration, Appointment, Customer, ExternalImport, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WorkOrder
-from app.schemas import AIModelUpdate, GoogleImportRequest
+from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest
 from app.security import require_admin
 from app.services import google
 from app.services.crypto import decrypt_secret
 
 router = APIRouter()
+
+
+def _baileys_bridge_url() -> str:
+    if not settings.baileys_service_url or not settings.baileys_bridge_token:
+        raise HTTPException(503, "Baileys de pruebas no está configurado. Define BAILEYS_SERVICE_URL y BAILEYS_BRIDGE_TOKEN.")
+    return settings.baileys_service_url.rstrip("/")
+
+
+async def _baileys_request(method: str, path: str, payload: dict | None = None) -> dict:
+    """Call the private bridge without leaking its token or transport details."""
+    url = _baileys_bridge_url()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.request(
+                method,
+                f"{url}{path}",
+                headers={"x-gudex-bridge-token": settings.baileys_bridge_token},
+                json=payload,
+            )
+    except httpx.HTTPError:
+        raise HTTPException(503, "No se pudo conectar al servicio Baileys de pruebas")
+    if response.status_code in {401, 403}:
+        raise HTTPException(503, "El servicio Baileys rechazó la credencial interna")
+    if response.status_code == 409:
+        raise HTTPException(409, response.json().get("detail", "La sesión Baileys no está lista"))
+    if response.is_error:
+        raise HTTPException(502, "El servicio Baileys no pudo completar la operación")
+    data = response.json()
+    return data if isinstance(data, dict) else {}
 
 
 def selected_ai_model(session: Session) -> str:
@@ -80,8 +109,36 @@ def integration_status(session: Session = Depends(get_session)):
             "facebook": {"configured": bool(settings.meta_facebook_page_id), "page_id": settings.meta_facebook_page_id},
             "redirect_uri": settings.meta_redirect_uri,
         },
+        "whatsapp": {
+            "business": {"provider": "official", "configured": False},
+            "baileys_test": {
+                "configured": bool(settings.baileys_service_url and settings.baileys_bridge_token),
+                "enabled": settings.baileys_test_enabled,
+                "purpose": "testing_only",
+            },
+        },
         "scanner": {"brand": "LAUNCH", "model": "X-431 PRO", "ingest": ["pdf_upload", "gmail", "drive"]},
     }
+
+
+@router.get("/api/v1/integrations/whatsapp/baileys/status", dependencies=[Depends(require_admin)])
+async def baileys_status():
+    """Return pairing state only to administrators; QR data never reaches public clients."""
+    return await _baileys_request("GET", "/session/status")
+
+
+@router.post("/api/v1/integrations/whatsapp/baileys/connect", dependencies=[Depends(require_admin)])
+async def connect_baileys():
+    if not settings.baileys_test_enabled:
+        raise HTTPException(409, "Baileys está deshabilitado. Define BAILEYS_TEST_ENABLED=true solo para pruebas controladas.")
+    return await _baileys_request("POST", "/session/connect")
+
+
+@router.post("/api/v1/integrations/whatsapp/baileys/test-message", dependencies=[Depends(require_admin)])
+async def send_baileys_test_message(data: BaileysTestMessage):
+    if not settings.baileys_test_enabled:
+        raise HTTPException(409, "Baileys está deshabilitado. Este canal es exclusivo para pruebas.")
+    return await _baileys_request("POST", "/messages/test", data.model_dump())
 
 
 @router.get("/api/v1/integrations/ai/models", dependencies=[Depends(require_admin)])

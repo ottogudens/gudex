@@ -454,6 +454,21 @@ class GoogleImportRequest(SQLModel):
     work_order_id: Optional[int] = None
 
 
+class BaileysTestMessage(SQLModel):
+    """A deliberately small, opt-in surface for validating a Baileys session."""
+
+    phone: str = Field(min_length=8, max_length=24)
+    message: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value: str) -> str:
+        digits = "".join(character for character in value if character.isdigit())
+        if len(digits) < 8 or len(digits) > 15:
+            raise ValueError("Ingresa un número internacional válido, por ejemplo 56912345678")
+        return digits
+
+
 class AssistantQuery(SQLModel):
     mode: Literal["general", "diagnostic"] = "general"
     message: str = Field(min_length=2, max_length=2000)

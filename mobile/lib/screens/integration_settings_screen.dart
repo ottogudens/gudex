@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_client.dart';
@@ -17,6 +20,7 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
   List<dynamic> _candidates = [];
   String _candidateSource = 'gmail';
   bool _busy = false;
+  Map<String, dynamic>? _baileysSession;
 
   @override
   void initState() { super.initState(); _refresh(); }
@@ -67,6 +71,45 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
       await _refresh();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cuenta Google desconectada')));
     } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); }
+  }
+
+  Future<Map<String, dynamic>> _baileysStatus() async {
+    final result = await widget.api.get('/api/v1/integrations/whatsapp/baileys/status');
+    final session = Map<String, dynamic>.from(result as Map);
+    if (mounted) setState(() => _baileysSession = session);
+    return session;
+  }
+
+  Future<void> _startBaileysPairing() async {
+    setState(() => _busy = true);
+    try {
+      await widget.api.post('/api/v1/integrations/whatsapp/baileys/connect');
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (dialogContext) => _BaileysPairingDialog(loadStatus: _baileysStatus));
+      await _refresh();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _sendBaileysTest() async {
+    final phone = TextEditingController();
+    final message = TextEditingController(text: 'Prueba de conexión Gudex.');
+    final payload = await showDialog<Map<String, String>>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Enviar mensaje de prueba'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Solo se permiten números definidos en BAILEYS_TEST_RECIPIENTS.'),
+        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Número internacional')),
+        TextField(controller: message, maxLength: 1000, maxLines: 3, decoration: const InputDecoration(labelText: 'Mensaje')),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, {'phone': phone.text, 'message': message.text}), child: const Text('Enviar prueba'))],
+    ));
+    if (payload == null) return;
+    try {
+      await widget.api.postJson('/api/v1/integrations/whatsapp/baileys/test-message', payload);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mensaje de prueba aceptado por Baileys.')));
+    } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
   }
 
   Future<void> _chooseAiModel() async {
@@ -132,6 +175,8 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     final social = Map<String, dynamic>.from(_status?['social'] as Map? ?? {});
     final instagram = Map<String, dynamic>.from(social['instagram'] as Map? ?? {});
     final facebook = Map<String, dynamic>.from(social['facebook'] as Map? ?? {});
+    final whatsapp = Map<String, dynamic>.from(_status?['whatsapp'] as Map? ?? {});
+    final baileys = Map<String, dynamic>.from(whatsapp['baileys_test'] as Map? ?? {});
     return Scaffold(appBar: AppBar(title: const Text('Integraciones'), actions: [IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh))]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet_outlined, color: GudexColors.primary),
@@ -171,6 +216,22 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
           const SizedBox(height: 8),
           const Text('Variables requeridas: META_APP_ID, META_APP_SECRET, META_REDIRECT_URI, META_ACCESS_TOKEN y el ID de cada cuenta. Las publicaciones siguen requiriendo aprobación humana.'),
         ]))),
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('WhatsApp: puente Baileys de pruebas', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          const Text('Canal no oficial y limitado a pruebas. Para atención real de clientes, automatizaciones y campañas debe utilizarse WhatsApp Business Platform.'),
+          const SizedBox(height: 10),
+          Text(baileys['configured'] == true
+              ? (baileys['enabled'] == true ? 'Servicio de pruebas configurado.' : 'Servicio configurado, pero deshabilitado por seguridad.')
+              : 'Falta configurar el bridge interno en Railway.'),
+          if (_baileysSession != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Sesión: ${_baileysSession!['status'] ?? 'sin estado'}')),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton.icon(onPressed: _busy || baileys['enabled'] != true ? null : _startBaileysPairing, icon: const Icon(Icons.qr_code_2), label: const Text('Emparejar teléfono de prueba')),
+            OutlinedButton(onPressed: _busy || _baileysSession?['connected'] != true ? null : _sendBaileysTest, child: const Text('Enviar mensaje de prueba')),
+            TextButton(onPressed: _busy || baileys['configured'] != true ? null : () async { try { await _baileysStatus(); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); } }, child: const Text('Actualizar sesión')),
+          ]),
+        ]))),
         const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('La conexión OAuth y las claves del proveedor se administran en Railway. Esta pantalla muestra el estado y permite iniciar flujos autorizados.'))),
       ]));
   }
@@ -182,4 +243,52 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     subtitle: Text(accountConfigured && tokenAvailable ? 'Cuenta lista para conectar' : accountConfigured ? 'Cuenta identificada; falta autorización' : 'ID de cuenta no configurado'),
     trailing: Icon(accountConfigured && tokenAvailable ? Icons.check_circle : Icons.warning_amber_outlined),
   );
+}
+
+class _BaileysPairingDialog extends StatefulWidget {
+  const _BaileysPairingDialog({required this.loadStatus});
+  final Future<Map<String, dynamic>> Function() loadStatus;
+
+  @override
+  State<_BaileysPairingDialog> createState() => _BaileysPairingDialogState();
+}
+
+class _BaileysPairingDialogState extends State<_BaileysPairingDialog> {
+  Timer? _timer;
+  Map<String, dynamic>? _session;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _load());
+  }
+
+  Future<void> _load() async {
+    try {
+      final session = await widget.loadStatus();
+      if (mounted) setState(() { _session = session; _error = null; });
+    } catch (_) { if (mounted) setState(() => _error = 'No se pudo actualizar el estado de emparejamiento.'); }
+  }
+
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final qr = _session?['qr']?.toString();
+    final connected = _session?['connected'] == true;
+    return AlertDialog(
+      title: const Text('Emparejar WhatsApp de prueba'),
+      content: SizedBox(width: 330, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (qr != null && qr.isNotEmpty) QrImageView(data: qr, size: 240, errorCorrectionLevel: QrErrorCorrectLevel.M),
+        if (connected) const Icon(Icons.check_circle, color: Colors.green, size: 64),
+        const SizedBox(height: 12),
+        Text(connected ? 'Teléfono conectado para pruebas.' : (qr != null && qr.isNotEmpty ? 'En WhatsApp, abre Dispositivos vinculados y escanea este código.' : 'Generando un código QR seguro…'), textAlign: TextAlign.center),
+        if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
+    );
+  }
 }

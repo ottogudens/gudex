@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     ai_max_output_tokens: int = 900
     ai_audit_retention_days: int = 90
     sentry_dsn: str | None = None
+    # Baileys is an unofficial, test-only WhatsApp connector. Its credentials
+    # live in the bridge service's persistent volume, never in Gudex's DB.
+    baileys_service_url: str | None = None
+    baileys_bridge_token: str | None = None
+    baileys_test_enabled: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

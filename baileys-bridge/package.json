@@ -1,0 +1,16 @@
+{
+  "name": "gudex-baileys-test-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs",
+    "check": "node --check index.mjs"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "express": "5.3.0",
+    "pino": "9.9.5",
+    "qrcode": "1.5.4"
+  }
+}
