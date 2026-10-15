@@ -92,8 +92,11 @@ Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(se
    | Variable | Valor |
    |---|---|
    | `FLUTTER_VERSION` | `3.47.3` (opcional; es el valor predeterminado del script) |
+   | `API_URL` | `https://bknd.gudex.cl` (URL pública del backend, sin `/api/v1`) |
 
-   La aplicación se compila con la API fija `https://bknd.gudex.cl`; no necesitas ni debes definir `API_BASE_URL` en Vercel. No pongas credenciales de Railway, Google, IA o Mercado Pago en Vercel.
+   El script pasa la URL a Flutter mediante `--dart-define=API_URL=...`. La prioridad es `API_URL`, luego `API_BASE_URL` como alias compatible, y finalmente `https://bknd.gudex.cl` si ambas están vacías o ausentes. Cambiar la variable requiere un nuevo despliegue: no modifica el JavaScript ya compilado. Para Preview usa el backend de pruebas correspondiente. No pongas credenciales de Railway, Google, IA, Baileys o Mercado Pago en Flutter.
+
+   Baileys se conecta exclusivamente desde el backend Railway mediante `BAILEYS_SERVICE_URL`, `BAILEYS_BRIDGE_TOKEN` y `BAILEYS_TEST_ENABLED`. No requiere variables Baileys en Vercel. Consulta [la configuración del bridge](../baileys-bridge/README.md).
 
 5. Despliega desde `main` y copia el dominio HTTPS asignado por Vercel, por ejemplo `https://<proyecto>.vercel.app`.
 6. Vuelve a Railway y cambia `CORS_ORIGINS` a ese origen exacto. Para permitir más de un origen, sepáralos con comas, sin comodines, por ejemplo:

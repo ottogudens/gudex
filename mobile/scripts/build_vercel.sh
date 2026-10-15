@@ -2,6 +2,10 @@
 set -euo pipefail
 
 flutter_version="${FLUTTER_VERSION:-3.47.3}"
+# Flutter reads compile-time definitions, not the build process environment.
+# Only this public URL is embedded; bridge tokens must remain in Railway.
+api_url="${API_URL:-${API_BASE_URL:-https://bknd.gudex.cl}}"
+api_url="${api_url%/}"
 build_tmp="$(mktemp -d)"
 trap 'rm -rf "$build_tmp"' EXIT
 archive_url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${flutter_version}-stable.tar.xz"
@@ -18,4 +22,4 @@ git config --global --add safe.directory "$build_tmp/flutter"
 "$flutter_bin" config --no-analytics
 "$flutter_bin" precache --web
 "$flutter_bin" pub get
-"$flutter_bin" build web --release
+"$flutter_bin" build web --release --dart-define="API_URL=$api_url"
