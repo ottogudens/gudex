@@ -238,7 +238,10 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
             // behind a status card that may be stale after a config redeploy.
             FilledButton.icon(onPressed: _busy ? null : _startBaileysPairing, icon: const Icon(Icons.qr_code_2), label: const Text('Emparejar teléfono de prueba')),
             OutlinedButton(onPressed: _busy || _baileysSession?['connected'] != true ? null : _sendBaileysTest, child: const Text('Enviar mensaje de prueba')),
-            TextButton(onPressed: _busy || baileys['configured'] != true ? null : () async { try { await _baileysStatus(); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); } }, child: const Text('Actualizar sesión')),
+            // Keep the status refresh available even if the initial integration
+            // status is stale. The bridge endpoint returns the authoritative
+            // result (or a clear configuration error) to the administrator.
+            TextButton(onPressed: _busy ? null : () async { try { await _baileysStatus(); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); } }, child: const Text('Actualizar sesión')),
           ]),
         ]))),
         const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('La conexión OAuth y las claves del proveedor se administran en Railway. Esta pantalla muestra el estado y permite iniciar flujos autorizados.'))),
