@@ -1436,6 +1436,27 @@ def customer_documents(request: Request, session: Session = Depends(get_session)
     return docs
 
 
+@app.get("/api/v1/portal/notifications")
+def customer_notifications(request: Request, session: Session = Depends(get_session)):
+    customer_id = request.state.customer_id
+    notices = []
+    orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == customer_id)).all()
+    for order in orders:
+        for quote in session.exec(select(Quote).where(Quote.work_order_id == order.id, Quote.status == "sent")).all():
+            notices.append({"type": "quote", "title": "Cotización pendiente", "message": f"Tienes una cotización pendiente para la orden {order.code}.", "created_at": quote.created_at})
+    for appointment in session.exec(select(Appointment).where(Appointment.customer_id == customer_id, Appointment.status == "requested")).all():
+        notices.append({"type": "appointment", "title": "Cita solicitada", "message": f"Tu solicitud de {appointment.service_type} está pendiente de confirmación.", "created_at": appointment.created_at})
+    vehicle_ids = [vehicle.id for vehicle in session.exec(select(Vehicle).where(Vehicle.customer_id == customer_id)).all()]
+    now = datetime.now(timezone.utc)
+    for plan in session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id.in_(vehicle_ids), MaintenancePlan.active == True)).all() if vehicle_ids else []:  # noqa: E712
+        vehicle = session.get(Vehicle, plan.vehicle_id)
+        due_date = plan.interval_days and now >= plan.last_service_at + timedelta(days=plan.interval_days)
+        due_km = plan.interval_km and vehicle and vehicle.current_mileage_km is not None and plan.last_service_km is not None and vehicle.current_mileage_km >= plan.last_service_km + plan.interval_km
+        if due_date or due_km:
+            notices.append({"type": "maintenance", "title": "Mantención recomendada", "message": f"{plan.name} para {vehicle.plate if vehicle else 'tu vehículo'} requiere atención.", "created_at": plan.last_service_at})
+    return sorted(notices, key=lambda item: item["created_at"], reverse=True)
+
+
 @app.get("/api/v1/portal/quotes/{quote_id}/pdf")
 def customer_quote_pdf(quote_id: int, request: Request, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
