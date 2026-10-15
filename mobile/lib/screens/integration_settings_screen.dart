@@ -229,11 +229,14 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
           const SizedBox(height: 10),
           Text(baileys['configured'] == true
               ? (baileys['enabled'] == true ? 'Servicio de pruebas configurado.' : 'Servicio configurado, pero deshabilitado por seguridad.')
-              : 'Falta configurar el bridge interno en Railway.'),
+              : 'No se pudo confirmar el estado del bridge. Puedes iniciar el emparejamiento; el backend lo validará de forma segura.'),
           if (_baileysSession != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Sesión: ${_baileysSession!['status'] ?? 'sin estado'}')),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            FilledButton.icon(onPressed: _busy || baileys['enabled'] != true ? null : _startBaileysPairing, icon: const Icon(Icons.qr_code_2), label: const Text('Emparejar teléfono de prueba')),
+            // The endpoint is the source of truth and enforces test mode and
+            // administrator permissions. Do not lock the only recovery action
+            // behind a status card that may be stale after a config redeploy.
+            FilledButton.icon(onPressed: _busy ? null : _startBaileysPairing, icon: const Icon(Icons.qr_code_2), label: const Text('Emparejar teléfono de prueba')),
             OutlinedButton(onPressed: _busy || _baileysSession?['connected'] != true ? null : _sendBaileysTest, child: const Text('Enviar mensaje de prueba')),
             TextButton(onPressed: _busy || baileys['configured'] != true ? null : () async { try { await _baileysStatus(); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); } }, child: const Text('Actualizar sesión')),
           ]),
