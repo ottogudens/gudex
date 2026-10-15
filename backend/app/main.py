@@ -10,7 +10,7 @@ from uuid import uuid4
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, update
@@ -36,6 +36,7 @@ from app.routers.assistant import router as assistant_router
 from app.routers.social import router as social_router
 from app.routers.catalog import router as catalog_router
 from app.routers.bulk_import import router as bulk_import_router
+from app.routers.vehicle_technical import router as vehicle_technical_router, technical_payload, enrich_vehicle
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
@@ -82,6 +83,7 @@ app.include_router(assistant_router)
 app.include_router(social_router)
 app.include_router(catalog_router)
 app.include_router(bulk_import_router)
+app.include_router(vehicle_technical_router)
 
 
 def on_startup() -> None:
@@ -518,7 +520,7 @@ def delete_customer(customer_id: int, session: Session = Depends(get_session)):
 
 
 @app.post("/api/v1/vehicles", response_model=Vehicle, status_code=201, dependencies=[Depends(require_admin)])
-def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session)):
+def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session), background_tasks: BackgroundTasks = None):
     customer = session.get(Customer, data.customer_id)
     if not customer:
         raise HTTPException(404, "Cliente no encontrado")
@@ -532,6 +534,8 @@ def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session))
     session.add(vehicle)
     session.commit()
     session.refresh(vehicle)
+    if background_tasks is not None:
+        background_tasks.add_task(enrich_vehicle, vehicle.id, session.get_bind())
     return vehicle
 
 
@@ -554,6 +558,12 @@ def update_vehicle(vehicle_id: int, data: VehicleUpdate, session: Session = Depe
     if not vehicle:
         raise HTTPException(404, "Vehículo no encontrado")
     changes = data.model_dump(exclude_unset=True)
+    from pydantic import ValidationError
+    try:
+        validated = VehicleCreate.model_validate({**vehicle.model_dump(), **changes})
+    except ValidationError:
+        raise HTTPException(422, "Revisa patente, VIN, año, kilometraje y datos obligatorios del vehículo")
+    changes = {key: getattr(validated, key) for key in changes}
     if changes.get("customer_id") and not session.get(Customer, changes["customer_id"]):
         raise HTTPException(422, "Cliente no encontrado")
     for field in ("plate", "vin"):
@@ -571,6 +581,9 @@ def delete_vehicle(vehicle_id: int, session: Session = Depends(get_session)):
     vehicle = session.get(Vehicle, vehicle_id)
     if not vehicle:
         raise HTTPException(404, "Vehículo no encontrado")
+    from app.models import VehicleTechnicalEntry
+    if session.exec(select(VehicleTechnicalEntry).where(VehicleTechnicalEntry.vehicle_id == vehicle_id)).first():
+        raise HTTPException(409, "No se puede eliminar un vehículo con ficha técnica registrada")
     if (session.exec(select(WorkOrder).where(WorkOrder.vehicle_id == vehicle_id)).first()
             or session.exec(select(ScannerReport).where(ScannerReport.vehicle_id == vehicle_id)).first()
             or session.exec(select(Appointment).where(Appointment.vehicle_id == vehicle_id)).first()):
@@ -592,6 +605,8 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
                           .order_by(Quote.created_at.desc())).all() if order_ids else []
     return {
         "vehicle": vehicle,
+        "technical": technical_payload(session, vehicle.id),
+        "maintenance_plans": session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id == vehicle.id)).all(),
         "customer": session.get(Customer, vehicle.customer_id),
         "work_orders": orders,
         "quotes": quotes,
@@ -728,6 +743,7 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
     if not vehicle or vehicle.customer_id != request.state.customer_id:
         raise HTTPException(404, "Vehículo no encontrado")
     data = vehicle_history_payload(session, vehicle)
+    data["technical"] = technical_payload(session, vehicle_id, portal=True)
     for report in data["scanner_reports"]:
         report["download_url"] = f"/api/v1/portal/scanner-reports/{report['id']}/file"
     return data

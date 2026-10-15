@@ -97,6 +97,20 @@ class Vehicle(SQLModel, table=True):
     work_orders: list["WorkOrder"] = Relationship(back_populates="vehicle")
 
 
+class VehicleTechnicalEntry(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("vehicle_id", "key", "revision"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    key: str = Field(max_length=80)
+    value: str
+    source: str = ""
+    status: str = "draft"
+    revision: int = 1
+    changed_by: str
+    identity_signature: str = ""
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class MaintenancePlan(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     vehicle_id: int = Field(foreign_key="vehicle.id", index=True)

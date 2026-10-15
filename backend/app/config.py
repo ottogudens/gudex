@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     ai_provider: str | None = None
     ai_api_key: str | None = None
     ai_model: str = "gpt-5-mini"
+    vehicle_research_model: str = "gpt-5-mini"
     ai_base_url: str = "https://api.openai.com/v1"
     ai_max_output_tokens: int = 900
     ai_audit_retention_days: int = 90
