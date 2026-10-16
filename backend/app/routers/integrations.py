@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 import hashlib
 import secrets
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -25,7 +26,19 @@ router = APIRouter()
 def _baileys_bridge_url() -> str:
     if not settings.baileys_service_url or not settings.baileys_bridge_token:
         raise HTTPException(503, "Baileys de pruebas no está configurado. Define BAILEYS_SERVICE_URL y BAILEYS_BRIDGE_TOKEN.")
-    return settings.baileys_service_url.rstrip("/")
+    value = settings.baileys_service_url.strip()
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        parsed, port = None, None
+    if (parsed is None or parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username or parsed.password or parsed.query or parsed.fragment):
+        raise HTTPException(503, "BAILEYS_SERVICE_URL debe ser una URL HTTP(S) válida del bridge")
+    # Force validation of malformed ports such as `host::3000`.
+    if port is None and ":" in parsed.netloc.rsplit("@", 1)[-1].split("]", 1)[-1]:
+        raise HTTPException(503, "BAILEYS_SERVICE_URL contiene un puerto inválido")
+    return value.rstrip("/")
 
 
 async def _baileys_request(method: str, path: str, payload: dict | None = None) -> dict:
@@ -39,15 +52,22 @@ async def _baileys_request(method: str, path: str, payload: dict | None = None) 
                 headers={"x-gudex-bridge-token": settings.baileys_bridge_token},
                 json=payload,
             )
-    except httpx.HTTPError:
+    except (httpx.HTTPError, httpx.InvalidURL):
         raise HTTPException(503, "No se pudo conectar al servicio Baileys de pruebas")
     if response.status_code in {401, 403}:
         raise HTTPException(503, "El servicio Baileys rechazó la credencial interna")
     if response.status_code == 409:
-        raise HTTPException(409, response.json().get("detail", "La sesión Baileys no está lista"))
+        try:
+            detail = response.json().get("detail", "La sesión Baileys no está lista")
+        except (ValueError, AttributeError):
+            detail = "La sesión Baileys no está lista"
+        raise HTTPException(409, detail)
     if response.is_error:
         raise HTTPException(502, "El servicio Baileys no pudo completar la operación")
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError:
+        raise HTTPException(502, "El servicio Baileys devolvió una respuesta no válida")
     return data if isinstance(data, dict) else {}
 
 
