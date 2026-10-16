@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -438,12 +439,197 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
         .toList();
   }
 
+  Future<void> _maintenanceEditor(Map<String, dynamic> data,
+      {Map<String, dynamic>? plan}) async {
+    final completing = plan != null;
+    final name = TextEditingController();
+    final km = TextEditingController(
+        text: completing
+            ? '${_map(data['vehicle'])['current_mileage_km'] ?? ''}'
+            : '');
+    final days = TextEditingController();
+    final materials = TextEditingController();
+    final notes = TextEditingController();
+    final requestKey = List.generate(
+            24,
+            (_) =>
+                Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'))
+        .join();
+    int? orderId;
+    bool saving = false, saved = false;
+    String? error;
+    final orders = _maps(data['work_orders'])
+        .where(
+            (o) => {'in_progress', 'ready', 'delivered'}.contains(o['status']))
+        .toList();
+    await _showEditor(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+            builder: (context, update) => PopScope(
+                canPop: !saving,
+                child: AlertDialog(
+                  title: Text(completing
+                      ? 'Registrar mantención realizada'
+                      : 'Nuevo plan de mantención'),
+                  content: SizedBox(
+                      width: 460,
+                      child: SingleChildScrollView(
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                        if (!completing)
+                          const Text(
+                              'Define los intervalos según el fabricante y el uso del vehículo; Gudex no los deduce automáticamente.'),
+                        if (!completing)
+                          TextField(
+                              controller: name,
+                              enabled: !saving,
+                              decoration: const InputDecoration(
+                                  labelText: 'Nombre del plan *')),
+                        TextField(
+                            controller: km,
+                            enabled: !saving,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                                labelText: completing
+                                    ? 'Kilometraje realizado *'
+                                    : 'Intervalo en kilómetros')),
+                        if (!completing)
+                          TextField(
+                              controller: days,
+                              enabled: !saving,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                  labelText: 'Intervalo en días')),
+                        if (completing) ...[
+                          DropdownButtonFormField<int>(
+                              initialValue: orderId,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                  labelText: 'Orden asociada (opcional)'),
+                              items: orders
+                                  .map((o) => DropdownMenuItem<int>(
+                                      value: o['id'] as int,
+                                      child: Text('${o['code']}')))
+                                  .toList(),
+                              onChanged: saving
+                                  ? null
+                                  : (id) => update(() => orderId = id)),
+                          TextField(
+                              controller: materials,
+                              enabled: !saving,
+                              maxLines: 3,
+                              decoration: const InputDecoration(
+                                  labelText:
+                                      'Filtros y fluidos realmente utilizados',
+                                  helperText:
+                                      'Registro descriptivo; no descuenta inventario.')),
+                          TextField(
+                              controller: notes,
+                              enabled: !saving,
+                              maxLines: 3,
+                              decoration: const InputDecoration(
+                                  labelText:
+                                      'Observaciones visibles para el cliente')),
+                        ],
+                        if (error != null)
+                          Text(error!,
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error)),
+                      ]))),
+                  actions: [
+                    TextButton(
+                        onPressed:
+                            saving ? null : () => Navigator.pop(dialogContext),
+                        child: const Text('Cancelar')),
+                    FilledButton(
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                final mileage = int.tryParse(km.text.trim());
+                                final intervalDays =
+                                    int.tryParse(days.text.trim());
+                                if ((km.text.trim().isNotEmpty &&
+                                        mileage == null) ||
+                                    (!completing &&
+                                        days.text.trim().isNotEmpty &&
+                                        intervalDays == null) ||
+                                    (completing &&
+                                        (mileage == null || mileage < 0)) ||
+                                    (!completing &&
+                                        (name.text.trim().length < 2 ||
+                                            (mileage == null &&
+                                                intervalDays == null) ||
+                                            (mileage != null && mileage <= 0) ||
+                                            (intervalDays != null &&
+                                                intervalDays <= 0)))) {
+                                  update(() => error =
+                                      'Revisa el nombre, kilometraje e intervalos.');
+                                  return;
+                                }
+                                update(() {
+                                  saving = true;
+                                  error = null;
+                                });
+                                try {
+                                  await widget.api.postJson(
+                                      completing
+                                          ? '/api/v1/maintenance-plans/${plan['id']}/executions'
+                                          : '/api/v1/maintenance-plans',
+                                      completing
+                                          ? {
+                                              'request_key': requestKey,
+                                              'mileage_km': mileage,
+                                              'work_order_id': orderId,
+                                              'materials':
+                                                  materials.text.trim(),
+                                              'notes': notes.text.trim(),
+                                            }
+                                          : {
+                                              'vehicle_id': widget.vehicleId,
+                                              'name': name.text.trim(),
+                                              'interval_km': mileage,
+                                              'interval_days': intervalDays
+                                            });
+                                  saved = true;
+                                  if (dialogContext.mounted)
+                                    Navigator.pop(dialogContext);
+                                } catch (e) {
+                                  if (dialogContext.mounted)
+                                    update(() {
+                                      saving = false;
+                                      error = '$e';
+                                    });
+                                }
+                              },
+                        child: Text(saving ? 'Guardando…' : 'Guardar')),
+                  ],
+                ))));
+    for (final controller in [name, km, days, materials, notes]) {
+      controller.dispose();
+    }
+    if (saved && mounted) {
+      try {
+        await _refresh();
+      } catch (e) {
+        _error(e);
+      }
+    }
+  }
+
   Widget _maintenance(Map<String, dynamic> data) {
     final plans = _maps(data['maintenance_plans']);
     final orders = _maps(data['work_orders']);
     final reports = _maps(data['scanner_reports']);
     return _page([
       _heading('Próximas mantenciones'),
+      if (_canEdit)
+        Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+                onPressed: () => _maintenanceEditor(data),
+                icon: const Icon(Icons.add),
+                label: const Text('Crear plan'))),
       const Text(
           'Vence por fecha o kilometraje, lo que ocurra primero. Los planes se administran desde el módulo de mantenciones.'),
       if (plans.isEmpty)
@@ -459,11 +645,30 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
         return Card(
             child: ListTile(
                 leading: const Icon(Icons.event_repeat),
+                trailing: _canEdit && p['active'] == true
+                    ? IconButton(
+                        tooltip: 'Registrar mantención',
+                        icon: const Icon(Icons.playlist_add_check),
+                        onPressed: () => _maintenanceEditor(data, plan: p))
+                    : null,
                 title: Text(
                     '${p['name']}${p['active'] == true ? '' : ' · Inactivo'}'),
                 subtitle: Text(
                     'Última: ${_date(p['last_service_at'])} · ${p['last_service_km'] ?? '—'} km\nPróxima: ${nextDate == null ? 'sin fecha' : _date(nextDate)} · ${nextKm ?? '—'} km')));
       }),
+      _heading('Registro de mantenciones realizadas'),
+      if (_maps(data['maintenance_executions']).isEmpty)
+        const ListTile(
+            title: Text('Sin ejecuciones registradas'),
+            subtitle: Text(
+                'Los planes anteriores conservan su última fecha; no se inventa historial previo.')),
+      ..._maps(data['maintenance_executions']).map((e) => Card(
+              child: ListTile(
+            leading: const Icon(Icons.fact_check_outlined),
+            title: Text('${e['plan_name']} · ${e['mileage_km']} km'),
+            subtitle: Text(
+                '${_date(e['performed_at'])}\n${e['materials'] ?? ''}\n${e['notes'] ?? ''}'),
+          ))),
       _heading('Mantenciones y trabajos registrados'),
       if (orders.isEmpty)
         const ListTile(title: Text('Sin trabajos registrados')),

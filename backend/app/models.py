@@ -122,6 +122,24 @@ class MaintenancePlan(SQLModel, table=True):
     active: bool = True
 
 
+class MaintenanceExecution(SQLModel, table=True):
+    """Append-only record; later plan edits never rewrite performed services."""
+    __table_args__ = (UniqueConstraint("plan_id", "request_key"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    plan_id: int = Field(foreign_key="maintenanceplan.id", index=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    work_order_id: Optional[int] = Field(default=None, foreign_key="workorder.id", index=True)
+    request_key: str = Field(max_length=80)
+    plan_name: str = Field(max_length=120)
+    mileage_km: int = Field(ge=0)
+    interval_km: Optional[int] = None
+    interval_days: Optional[int] = None
+    materials: str = Field(default="", max_length=4000)
+    notes: str = Field(default="", max_length=4000)
+    recorded_by: str = Field(max_length=254)
+    performed_at: datetime = Field(default_factory=now_utc)
+
+
 class WorkOrder(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     code: str = Field(index=True, unique=True, max_length=24)

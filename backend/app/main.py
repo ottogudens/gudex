@@ -22,7 +22,7 @@ from app.database import create_db_and_tables, engine, get_session, upgrade_sche
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
-    StockMovement, User, UserRole, Vehicle, MaintenancePlan, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
+    StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
@@ -41,6 +41,7 @@ from app.security import AuthenticationMiddleware, authenticate, create_access_t
 from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
 from app.services.work_orders import editable_order, transition_order
+from app.routers.maintenance import router as maintenance_router, Completion, record_completion
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -85,6 +86,7 @@ app.include_router(social_router)
 app.include_router(catalog_router)
 app.include_router(bulk_import_router)
 app.include_router(vehicle_technical_router)
+app.include_router(maintenance_router)
 
 
 def on_startup() -> None:
@@ -585,6 +587,8 @@ def delete_vehicle(vehicle_id: int, session: Session = Depends(get_session)):
     from app.models import VehicleTechnicalEntry
     if session.exec(select(VehicleTechnicalEntry).where(VehicleTechnicalEntry.vehicle_id == vehicle_id)).first():
         raise HTTPException(409, "No se puede eliminar un vehículo con ficha técnica registrada")
+    if session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id == vehicle_id)).first():
+        raise HTTPException(409, "No se puede eliminar un vehículo con planes o historial de mantención")
     if (session.exec(select(WorkOrder).where(WorkOrder.vehicle_id == vehicle_id)).first()
             or session.exec(select(ScannerReport).where(ScannerReport.vehicle_id == vehicle_id)).first()
             or session.exec(select(Appointment).where(Appointment.vehicle_id == vehicle_id)).first()):
@@ -608,6 +612,8 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
         "vehicle": vehicle,
         "technical": technical_payload(session, vehicle.id),
         "maintenance_plans": session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id == vehicle.id)).all(),
+        "maintenance_executions": session.exec(select(MaintenanceExecution).where(
+            MaintenanceExecution.vehicle_id == vehicle.id).order_by(MaintenanceExecution.performed_at.desc())).all(),
         "customer": session.get(Customer, vehicle.customer_id),
         "work_orders": orders,
         "quotes": quotes,
@@ -684,16 +690,16 @@ def due_maintenance_plans(session: Session = Depends(get_session)):
 
 
 @app.post("/api/v1/maintenance-plans/{plan_id}/complete", response_model=MaintenancePlan, dependencies=[Depends(require_admin)])
-def complete_maintenance_plan(plan_id: int, mileage_km: int | None = None, session: Session = Depends(get_session)):
+def complete_maintenance_plan(plan_id: int, request: Request, mileage_km: int | None = None, session: Session = Depends(get_session)):
     plan = session.get(MaintenancePlan, plan_id)
     if not plan:
         raise HTTPException(404, "Plan de mantención no encontrado")
     vehicle = session.get(Vehicle, plan.vehicle_id)
-    if mileage_km is not None and mileage_km < 0:
-        raise HTTPException(422, "El kilometraje no puede ser negativo")
-    plan.last_service_at = datetime.now(timezone.utc)
-    plan.last_service_km = mileage_km if mileage_km is not None else (vehicle.current_mileage_km if vehicle else plan.last_service_km)
-    session.add(plan); session.commit(); session.refresh(plan)
+    mileage = mileage_km if mileage_km is not None else (vehicle.current_mileage_km if vehicle else None)
+    if mileage is None or mileage < 0:
+        raise HTTPException(422, "Registra un kilometraje válido para completar la mantención")
+    record_completion(session, plan_id, Completion(request_key=uuid4().hex, mileage_km=mileage), request.state.user_email)
+    session.refresh(plan)
     return plan
 
 
@@ -748,6 +754,8 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
     data["work_orders"] = [order.model_dump(exclude={"initial_notes", "technician_name", "total_clp"})
                            for order in data["work_orders"]]
     data["technical"] = technical_payload(session, vehicle_id, portal=True)
+    data["maintenance_executions"] = [row.model_dump(exclude={"recorded_by", "request_key"})
+                                      for row in data["maintenance_executions"]]
     for report in data["scanner_reports"]:
         report["download_url"] = f"/api/v1/portal/scanner-reports/{report['id']}/file"
     return data
@@ -961,6 +969,8 @@ def stop_work_session(session_id: int, request: Request, session: Session = Depe
 
 @app.delete("/api/v1/work-orders/{order_id}", dependencies=[Depends(require_admin)])
 def delete_work_order(order_id: int, session: Session = Depends(get_session)):
+    if session.exec(select(MaintenanceExecution).where(MaintenanceExecution.work_order_id == order_id)).first():
+        raise HTTPException(409, "La orden tiene mantenciones registradas y debe conservarse")
     order = session.get(WorkOrder, order_id)
     if not order:
         raise HTTPException(404, "Orden de trabajo no encontrada")

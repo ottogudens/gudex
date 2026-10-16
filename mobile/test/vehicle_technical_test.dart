@@ -13,13 +13,17 @@ class CardAuth extends AuthNotifier {
 class CardApi extends ApiClient {
   CardApi() : super('https://example.invalid');
   Map<String, dynamic>? saved;
+  bool hasPlan = false;
+  bool failOnce = false;
+  final requestKeys = <String>[];
   @override
   Future<dynamic> get(String path) async => {
         'vehicle': {
           'plate': 'ABCD12',
           'make': 'Marca',
           'model': 'Modelo',
-          'year': 2020
+          'year': 2020,
+          'current_mileage_km': 30000
         },
         'technical': {
           'fields': [
@@ -33,13 +37,24 @@ class CardApi extends ApiClient {
         },
         'work_orders': [
           {
+            'id': 9,
             'code': 'OT-TEST',
             'status': 'delivered',
             'opened_at': '2026-01-01',
             'mileage_km': 20000
           }
         ],
-        'maintenance_plans': [],
+        'maintenance_plans': hasPlan
+            ? [
+                {
+                  'id': 3,
+                  'name': 'Aceite',
+                  'active': true,
+                  'interval_km': 10000,
+                  'last_service_km': 20000
+                }
+              ]
+            : [],
         'scanner_reports': [],
         'appointments': [],
       };
@@ -48,9 +63,70 @@ class CardApi extends ApiClient {
     saved = body;
     return {};
   }
+
+  @override
+  Future<dynamic> postJson(String path, Map<String, dynamic> body) async {
+    saved = body;
+    if (body['request_key'] is String)
+      requestKeys.add(body['request_key'] as String);
+    if (failOnce) {
+      failOnce = false;
+      throw Exception('Error temporal de prueba');
+    }
+    return {};
+  }
 }
 
 void main() {
+  testWidgets('Mantención conserva campos y clave de solicitud al reintentar',
+      (tester) async {
+    final api = CardApi()
+      ..hasPlan = true
+      ..failOnce = true;
+    await tester.pumpWidget(ProviderScope(
+        overrides: [authProvider.overrideWith(CardAuth.new)],
+        child: MaterialApp(
+            home:
+                VehicleHistoryScreen(api: api, vehicleId: 1, portal: false))));
+    await tester.pumpAndSettle();
+    DefaultTabController.of(tester.element(find.byType(TabBar))).animateTo(4);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Registrar mantención'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(1), 'Filtro documentado');
+    await tester.tap(find.text('Guardar'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Error temporal'), findsOneWidget);
+    expect(find.text('Filtro documentado'), findsOneWidget);
+    await tester.tap(find.text('Guardar'));
+    await tester.pumpAndSettle();
+    expect(api.saved?['mileage_km'], 30000);
+    expect(api.requestKeys.length, 2);
+    expect(api.requestKeys[0], api.requestKeys[1]);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('Administrador crea un plan desde la ficha', (tester) async {
+    final api = CardApi();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [authProvider.overrideWith(CardAuth.new)],
+        child: MaterialApp(
+            home:
+                VehicleHistoryScreen(api: api, vehicleId: 1, portal: false))));
+    await tester.pumpAndSettle();
+    DefaultTabController.of(tester.element(find.byType(TabBar))).animateTo(4);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Crear plan'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Aceite motor');
+    await tester.enterText(find.byType(TextField).at(1), '10000');
+    await tester.enterText(find.byType(TextField).at(2), '365');
+    await tester.tap(find.text('Guardar'));
+    await tester.pumpAndSettle();
+    expect(api.saved?['vehicle_id'], 1);
+    expect(api.saved?['interval_km'], 10000);
+    expect(api.saved?['interval_days'], 365);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
       'Ficha móvil: pestañas, validación de fuente y guardado versionado',
       (tester) async {
@@ -101,6 +177,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('OT-TEST'), findsOneWidget);
     expect(find.byTooltip('Historial de cambios'), findsNothing);
+    expect(find.text('Crear plan'), findsNothing);
+    expect(find.byTooltip('Registrar mantención'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

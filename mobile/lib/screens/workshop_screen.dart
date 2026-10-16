@@ -30,6 +30,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  String _query = '';
 
   bool get _isOrders => widget.modulePath.startsWith('/api/v1/work-orders');
   bool get _canCreate => widget.role == 'admin';
@@ -901,6 +902,29 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
               ])));
 
     final isCustomerPage = !_isOrders;
+    final query = _query.trim().toLowerCase();
+    final visibleRecords = _isOrders || query.isEmpty
+        ? _records
+        : _records.where((row) {
+            final owner =
+                _customers.where((c) => c['id'] == row['customer_id']);
+            return [
+                  'full_name',
+                  'rut',
+                  'email',
+                  'phone',
+                  'plate',
+                  'make',
+                  'model',
+                  'vin'
+                ]
+                    .map((key) => '${row[key] ?? ''}')
+                    .join(' ')
+                    .toLowerCase()
+                    .contains(query) ||
+                owner.any(
+                    (c) => '${c['full_name']}'.toLowerCase().contains(query));
+          }).toList();
     final label = _isOrders
         ? 'órdenes de trabajo'
         : (_customerSection == 0 ? 'clientes' : 'vehículos');
@@ -950,6 +974,15 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                   _records = _customerSection == 0 ? _customers : _vehicles;
                 }),
               )),
+        if (isCustomerPage)
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: TextField(
+                decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    labelText: 'Buscar cliente, patente, marca o VIN'),
+                onChanged: (value) => setState(() => _query = value),
+              )),
         if (_isOrders)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
@@ -973,7 +1006,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
             ),
           ),
         Expanded(
-            child: _records.isEmpty
+            child: visibleRecords.isEmpty
                 ? RefreshIndicator(
                     onRefresh: _refresh,
                     child: ListView(children: [
@@ -991,9 +1024,11 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                     color:
                                         Theme.of(context).colorScheme.outline),
                                 const SizedBox(height: 12),
-                                Text(_error != null
-                                    ? 'No se pudo confirmar el listado de $label.'
-                                    : 'No hay $label registrados.'),
+                                Text(query.isNotEmpty
+                                    ? 'No hay coincidencias para la búsqueda.'
+                                    : _error != null
+                                        ? 'No se pudo confirmar el listado de $label.'
+                                        : 'No hay $label registrados.'),
                                 const SizedBox(height: 4),
                                 Text(
                                     _isOrders
@@ -1010,9 +1045,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                         onRefresh: _refresh,
                         child: ListView.builder(
                           padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-                          itemCount: _records.length,
+                          itemCount: visibleRecords.length,
                           itemBuilder: (context, index) {
-                            final item = _records[index];
+                            final item = visibleRecords[index];
                             if (_isOrders) return _workOrderTile(item);
                             if (_customerSection == 0)
                               return _customerTile(item);
