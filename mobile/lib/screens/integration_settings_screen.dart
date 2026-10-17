@@ -91,11 +91,19 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     try {
       await widget.api.post('/api/v1/integrations/whatsapp/baileys/connect');
       if (!mounted) return;
-      await showDialog<void>(context: context, builder: (dialogContext) => _BaileysPairingDialog(loadStatus: _baileysStatus));
+      await showDialog<void>(context: context, builder: (dialogContext) => _BaileysPairingDialog(
+        loadStatus: _baileysStatus,
+        restartPairing: _restartBaileysPairing,
+      ));
       await _refresh();
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
     } finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _restartBaileysPairing() async {
+    final session = Map<String, dynamic>.from(await widget.api.post('/api/v1/integrations/whatsapp/baileys/reset') as Map);
+    if (mounted) setState(() => _baileysSession = session);
   }
 
   Future<void> _sendBaileysTest() async {
@@ -302,8 +310,9 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
 }
 
 class _BaileysPairingDialog extends StatefulWidget {
-  const _BaileysPairingDialog({required this.loadStatus});
+  const _BaileysPairingDialog({required this.loadStatus, required this.restartPairing});
   final Future<Map<String, dynamic>> Function() loadStatus;
+  final Future<void> Function() restartPairing;
 
   @override
   State<_BaileysPairingDialog> createState() => _BaileysPairingDialogState();
@@ -313,6 +322,7 @@ class _BaileysPairingDialogState extends State<_BaileysPairingDialog> {
   Timer? _timer;
   Map<String, dynamic>? _session;
   String? _error;
+  bool _restarting = false;
 
   @override
   void initState() {
@@ -328,6 +338,19 @@ class _BaileysPairingDialogState extends State<_BaileysPairingDialog> {
     } catch (_) { if (mounted) setState(() => _error = 'No se pudo actualizar el estado de emparejamiento.'); }
   }
 
+  Future<void> _restart() async {
+    if (_restarting) return;
+    setState(() { _restarting = true; _error = null; });
+    try {
+      await widget.restartPairing();
+      await _load();
+    } catch (_) {
+      if (mounted) setState(() => _error = 'No se pudo reiniciar la sesión de pruebas.');
+    } finally {
+      if (mounted) setState(() => _restarting = false);
+    }
+  }
+
   @override
   void dispose() { _timer?.cancel(); super.dispose(); }
 
@@ -335,16 +358,32 @@ class _BaileysPairingDialogState extends State<_BaileysPairingDialog> {
   Widget build(BuildContext context) {
     final qr = _session?['qr']?.toString();
     final connected = _session?['connected'] == true;
+    final status = _session?['status']?.toString() ?? 'connecting';
+    final needsRestart = status == 'logged_out' || status == 'disconnected';
+    final message = connected
+        ? 'Teléfono conectado para pruebas.'
+        : (qr != null && qr.isNotEmpty
+            ? 'En WhatsApp, abre Dispositivos vinculados y escanea este código.'
+            : (needsRestart
+                ? 'La sesión anterior dejó de ser válida. Reiníciala para generar un código QR nuevo.'
+                : 'Generando un código QR seguro…'));
     return AlertDialog(
       title: const Text('Emparejar WhatsApp de prueba'),
       content: SizedBox(width: 330, child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (qr != null && qr.isNotEmpty) QrImageView(data: qr, size: 240, errorCorrectionLevel: QrErrorCorrectLevel.M),
         if (connected) const Icon(Icons.check_circle, color: Colors.green, size: 64),
         const SizedBox(height: 12),
-        Text(connected ? 'Teléfono conectado para pruebas.' : (qr != null && qr.isNotEmpty ? 'En WhatsApp, abre Dispositivos vinculados y escanea este código.' : 'Generando un código QR seguro…'), textAlign: TextAlign.center),
+        Text(message, textAlign: TextAlign.center),
         if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
       ])),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
+      actions: [
+        if (needsRestart) FilledButton.icon(
+          onPressed: _restarting ? null : _restart,
+          icon: _restarting ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.restart_alt),
+          label: const Text('Reiniciar emparejamiento'),
+        ),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar')),
+      ],
     );
   }
 }

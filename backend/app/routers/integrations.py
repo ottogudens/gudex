@@ -224,6 +224,14 @@ async def connect_baileys():
     return await _baileys_request("POST", "/session/connect")
 
 
+@router.post("/api/v1/integrations/whatsapp/baileys/reset", dependencies=[Depends(require_admin)])
+async def reset_baileys():
+    """Discard an invalid test-only Baileys auth state and request a fresh QR."""
+    if not settings.baileys_test_enabled:
+        raise HTTPException(409, "Baileys está deshabilitado. Define BAILEYS_TEST_ENABLED=true solo para pruebas controladas.")
+    return await _baileys_request("POST", "/session/reset")
+
+
 @router.post("/api/v1/integrations/whatsapp/baileys/test-message", dependencies=[Depends(require_admin)])
 async def send_baileys_test_message(data: BaileysTestMessage):
     if not settings.baileys_test_enabled:

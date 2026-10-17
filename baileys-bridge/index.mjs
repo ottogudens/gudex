@@ -6,6 +6,8 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
+import { mkdir, rm } from 'node:fs/promises';
+import path from 'node:path';
 
 const app = express();
 app.use(express.json({ limit: '32kb' }));
@@ -23,6 +25,7 @@ let status = 'disconnected';
 let phone = null;
 let qr = null;
 let connecting = null;
+let connectionGeneration = 0;
 
 function internalOnly(request, response, next) {
   if (!bridgeToken || request.get('x-gudex-bridge-token') !== bridgeToken) {
@@ -43,11 +46,50 @@ function publicStatus() {
   };
 }
 
-async function connect() {
+function resetPublicState(nextStatus = 'disconnected') {
+  socket = undefined;
+  connecting = null;
+  status = nextStatus;
+  phone = null;
+  qr = null;
+}
+
+function validatedAuthDir() {
+  const resolved = path.resolve(authDir);
+  // BAILEYS_AUTH_DIR holds only a disposable test session. Still, never allow
+  // an incorrectly configured value to erase a filesystem root.
+  if (resolved === path.parse(resolved).root || resolved.length < 5) {
+    throw new Error('BAILEYS_AUTH_DIR no es un directorio seguro para reiniciar la sesión');
+  }
+  return resolved;
+}
+
+async function resetSession() {
+  const previousSocket = socket;
+  connectionGeneration += 1;
+  resetPublicState();
+  try {
+    previousSocket?.end?.(new Error('La sesión de pruebas fue reiniciada por un administrador'));
+  } catch {
+    // The old connection is already invalidated by connectionGeneration.
+  }
+  const directory = validatedAuthDir();
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory, { recursive: true });
+  return publicStatus();
+}
+
+async function connect({ resetInvalidSession = true } = {}) {
   if (status === 'connected') return publicStatus();
+  // A logged-out credential set cannot emit a new QR. Remove only the bridge's
+  // own persisted auth directory before starting a fresh WhatsApp session.
+  if (status === 'logged_out' && resetInvalidSession) await resetSession();
   if (connecting) return connecting;
+  const generation = ++connectionGeneration;
   connecting = (async () => {
     status = 'connecting';
+    qr = null;
+    phone = null;
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
     socket = makeWASocket({
@@ -59,8 +101,11 @@ async function connect() {
       markOnlineOnConnect: false,
       syncFullHistory: false,
     });
-    socket.ev.on('creds.update', saveCreds);
+    socket.ev.on('creds.update', (...args) => {
+      if (generation === connectionGeneration) saveCreds(...args);
+    });
     socket.ev.on('connection.update', async (update) => {
+      if (generation !== connectionGeneration) return;
       if (update.qr) {
         qr = update.qr;
         status = 'awaiting_qr_scan';
@@ -95,6 +140,18 @@ app.post('/session/connect', internalOnly, async (_request, response, next) => {
   try {
     await connect();
     // QR arrives asynchronously; the admin client polls status while pairing.
+    return response.status(202).json(publicStatus());
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/session/reset', internalOnly, async (_request, response, next) => {
+  if (!testEnabled) return response.status(409).json({ detail: 'Baileys test mode is disabled' });
+  try {
+    await resetSession();
+    await connect({ resetInvalidSession: false });
+    // QR arrives asynchronously; the administrator polls /session/status.
     return response.status(202).json(publicStatus());
   } catch (error) {
     return next(error);
