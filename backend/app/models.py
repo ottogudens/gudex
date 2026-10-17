@@ -383,6 +383,20 @@ class IntegrationCredential(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=now_utc)
 
 
+class WhatsAppBusinessConfig(SQLModel, table=True):
+    """Admin-managed WhatsApp Cloud API identifiers and encrypted credentials."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    app_id: Optional[str] = Field(default=None, max_length=100)
+    business_account_id: str = Field(max_length=100)
+    phone_number_id: str = Field(max_length=100)
+    encrypted_access_token: str
+    encrypted_app_secret: str
+    encrypted_verify_token: str
+    updated_by_email: str = Field(max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
 class OAuthState(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str = Field(index=True, max_length=32)

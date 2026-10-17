@@ -14,13 +14,27 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import get_session
-from app.models import AIConfiguration, Appointment, Customer, ExternalImport, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WorkOrder
-from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest
+from app.models import AIConfiguration, Appointment, Customer, ExternalImport, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
+from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, WhatsAppBusinessConfigUpdate
 from app.security import require_admin
 from app.services import google
-from app.services.crypto import decrypt_secret
+from app.services.crypto import decrypt_secret, encrypt_secret
 
 router = APIRouter()
+
+
+def _whatsapp_business_status(config: WhatsAppBusinessConfig | None) -> dict:
+    return {
+        "provider": "meta_cloud_api",
+        "configured": bool(config),
+        "app_id": config.app_id if config else None,
+        "business_account_id": config.business_account_id if config else None,
+        "phone_number_id": config.phone_number_id if config else None,
+        "access_token_configured": bool(config and config.encrypted_access_token),
+        "app_secret_configured": bool(config and config.encrypted_app_secret),
+        "verify_token_configured": bool(config and config.encrypted_verify_token),
+        "updated_at": config.updated_at.isoformat() if config else None,
+    }
 
 
 def _baileys_bridge_url() -> str:
@@ -114,6 +128,7 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
+    whatsapp_config = session.get(WhatsAppBusinessConfig, 1)
     mp_token = settings.mercadopago_access_token
     return {
         "mercado_pago": {"credentials_present": bool(mp_token), "webhook_secret_present": bool(settings.mercadopago_webhook_secret),
@@ -135,7 +150,7 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
             "redirect_uri": settings.meta_redirect_uri,
         },
         "whatsapp": {
-            "business": {"provider": "official", "configured": False},
+            "business": _whatsapp_business_status(whatsapp_config),
             "baileys_test": {
                 "configured": bool(settings.baileys_service_url and settings.baileys_bridge_token),
                 "enabled": settings.baileys_test_enabled,
@@ -144,6 +159,56 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
         },
         "scanner": {"brand": "LAUNCH", "model": "X-431 PRO", "ingest": ["pdf_upload", "gmail", "drive"]},
     }
+
+
+@router.get("/api/v1/integrations/whatsapp/business", dependencies=[Depends(require_admin)])
+def whatsapp_business_config(session: Session = Depends(get_session)):
+    """Return identifiers and secret-presence flags only; never return credentials."""
+    return _whatsapp_business_status(session.get(WhatsAppBusinessConfig, 1))
+
+
+@router.put("/api/v1/integrations/whatsapp/business", dependencies=[Depends(require_admin)])
+def save_whatsapp_business_config(data: WhatsAppBusinessConfigUpdate, request: Request,
+                                  session: Session = Depends(get_session)):
+    if not data.business_account_id or not data.phone_number_id:
+        raise HTTPException(422, "Ingresa el ID de la cuenta de WhatsApp Business y el ID del número de teléfono")
+    config = session.get(WhatsAppBusinessConfig, 1)
+    if config is None and not all((data.access_token, data.app_secret, data.verify_token)):
+        raise HTTPException(422, "Para la primera configuración se requieren el token de acceso, App Secret y token de verificación")
+    if config is None:
+        config = WhatsAppBusinessConfig(
+            id=1,
+            business_account_id=data.business_account_id,
+            phone_number_id=data.phone_number_id,
+            encrypted_access_token="",
+            encrypted_app_secret="",
+            encrypted_verify_token="",
+            updated_by_email=request.state.user_email,
+        )
+    config.app_id = data.app_id or None
+    config.business_account_id = data.business_account_id
+    config.phone_number_id = data.phone_number_id
+    if data.access_token:
+        config.encrypted_access_token = encrypt_secret(data.access_token)
+    if data.app_secret:
+        config.encrypted_app_secret = encrypt_secret(data.app_secret)
+    if data.verify_token:
+        config.encrypted_verify_token = encrypt_secret(data.verify_token)
+    config.updated_by_email = request.state.user_email
+    config.updated_at = datetime.now(timezone.utc)
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return _whatsapp_business_status(config)
+
+
+@router.delete("/api/v1/integrations/whatsapp/business", dependencies=[Depends(require_admin)])
+def delete_whatsapp_business_config(session: Session = Depends(get_session)):
+    config = session.get(WhatsAppBusinessConfig, 1)
+    if config:
+        session.delete(config)
+        session.commit()
+    return {"configured": False}
 
 
 @router.get("/api/v1/integrations/whatsapp/baileys/status", dependencies=[Depends(require_admin)])

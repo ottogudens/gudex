@@ -33,7 +33,7 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    | `JWT_SECRET` | Secreto aleatorio de al menos 32 caracteres |
    | `BOOTSTRAP_ADMIN_EMAIL` | Correo que usarás para el primer administrador |
    | `BOOTSTRAP_ADMIN_PASSWORD` | Contraseña de al menos 12 caracteres |
-   | `INTEGRATION_ENCRYPTION_KEY` | Clave Fernet para tokens Google; necesaria antes de conectar la cuenta |
+   | `INTEGRATION_ENCRYPTION_KEY` | Clave Fernet para credenciales Google y WhatsApp Business; necesaria antes de configurarlas |
    | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciales OAuth tipo Web de Google Cloud |
    | `GOOGLE_REDIRECT_URI` | `https://<dominio-api-railway>/auth/google/callback` (debe coincidir exactamente en Google Cloud) |
    | `GOOGLE_DRIVE_FOLDER_ID` | Opcional, ID de carpeta Drive que recibe PDFs LAUNCH |
@@ -263,6 +263,10 @@ La respuesta debe incluir `Access-Control-Allow-Origin: $WEB_URL`. Si no aparece
 6. Abre una orden como administración o mecánico, crea una cotización con mano de obra y repuestos, y publícala confirmando el envío. Como cliente, abre Cotizaciones y comprueba que aparezca con sus importes; usa Aprobar/Rechazar y verifica el cambio de estado.
 7. Revisa la consola del navegador si la pantalla indica error de conexión; un error CORS suele señalar un origen ausente en `CORS_ORIGINS`.
 8. Abre una orden, completa la recepción, aplica una plantilla, edita un resultado y adjunta una foto. Ingresa como cliente vinculado y comprueba que el informe aparezca en **Trabajos anteriores**.
+
+### Configurar credenciales de WhatsApp Business
+
+En **Integraciones → Configurar WhatsApp Business** ingresa el ID de la app Meta (opcional), el ID de WABA, el ID del número, un token de acceso, el App Secret y un token de verificación elegido por el taller. Los tres secretos se guardan cifrados usando `INTEGRATION_ENCRYPTION_KEY`; al editar, déjalos vacíos para conservar los valores guardados. El estado solo confirma que las credenciales existen y no las vuelve a mostrar. Esto no habilita todavía mensajería ni recepción de eventos: la configuración de webhook y la bandeja de conversaciones deben completarse antes de atender clientes desde Gudex.
 
 ## 5. Prueba de persistencia y scanner
 

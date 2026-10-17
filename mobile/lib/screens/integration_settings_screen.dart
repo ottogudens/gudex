@@ -118,6 +118,28 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); }
   }
 
+  Future<void> _configureWhatsAppBusiness(Map<String, dynamic> configuration) async {
+    setState(() => _busy = true);
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (_) => _WhatsAppBusinessConfigDialog(api: widget.api, initial: configuration),
+      );
+      if (saved == true) {
+        await _refresh();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Configuración de WhatsApp Business guardada de forma segura.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _chooseAiModel() async {
     setState(() => _busy = true);
     try {
@@ -182,6 +204,7 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     final instagram = Map<String, dynamic>.from(social['instagram'] as Map? ?? {});
     final facebook = Map<String, dynamic>.from(social['facebook'] as Map? ?? {});
     final whatsapp = Map<String, dynamic>.from(_status?['whatsapp'] as Map? ?? {});
+    final business = Map<String, dynamic>.from(whatsapp['business'] as Map? ?? {});
     final baileys = Map<String, dynamic>.from(whatsapp['baileys_test'] as Map? ?? {});
     return Scaffold(appBar: AppBar(title: const Text('Integraciones'), actions: [IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh))]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
@@ -221,6 +244,27 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
           _socialConnectionTile(Icons.facebook, 'Facebook', facebook['configured'] == true, social['connected'] == true),
           const SizedBox(height: 8),
           const Text('Variables requeridas: META_APP_ID, META_APP_SECRET, META_REDIRECT_URI, META_ACCESS_TOKEN y el ID de cada cuenta. Las publicaciones siguen requiriendo aprobación humana.'),
+        ]))),
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.verified_user_outlined),
+            const SizedBox(width: 10),
+            Expanded(child: Text('WhatsApp Business Platform (Meta)', style: Theme.of(context).textTheme.titleLarge)),
+            Icon(business['configured'] == true ? Icons.check_circle : Icons.warning_amber_outlined,
+                color: business['configured'] == true ? Colors.green : Theme.of(context).colorScheme.onSurfaceVariant),
+          ]),
+          const SizedBox(height: 6),
+          Text(business['configured'] == true
+              ? 'Datos guardados. Número: ${business['phone_number_id']}'
+              : 'Agrega las credenciales de Meta para preparar el canal oficial.'),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _busy ? null : () => _configureWhatsAppBusiness(business),
+            icon: const Icon(Icons.settings_outlined),
+            label: Text(business['configured'] == true ? 'Editar configuración' : 'Configurar WhatsApp Business'),
+          ),
+          const SizedBox(height: 10),
+          const Text('Los secretos se cifran en el servidor y nunca se vuelven a mostrar. Esta pantalla guarda la configuración; el envío y la recepción de conversaciones requieren completar la integración del webhook y la bandeja de atención.'),
         ]))),
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('WhatsApp: puente Baileys de pruebas', style: Theme.of(context).textTheme.titleLarge),
@@ -303,4 +347,97 @@ class _BaileysPairingDialogState extends State<_BaileysPairingDialog> {
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
     );
   }
+}
+
+class _WhatsAppBusinessConfigDialog extends StatefulWidget {
+  const _WhatsAppBusinessConfigDialog({required this.api, required this.initial});
+  final ApiClient api;
+  final Map<String, dynamic> initial;
+
+  @override
+  State<_WhatsAppBusinessConfigDialog> createState() => _WhatsAppBusinessConfigDialogState();
+}
+
+class _WhatsAppBusinessConfigDialogState extends State<_WhatsAppBusinessConfigDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _appId;
+  late final TextEditingController _businessAccountId;
+  late final TextEditingController _phoneNumberId;
+  final _accessToken = TextEditingController();
+  final _appSecret = TextEditingController();
+  final _verifyToken = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _appId = TextEditingController(text: widget.initial['app_id']?.toString() ?? '');
+    _businessAccountId = TextEditingController(text: widget.initial['business_account_id']?.toString() ?? '');
+    _phoneNumberId = TextEditingController(text: widget.initial['phone_number_id']?.toString() ?? '');
+  }
+
+  @override
+  void dispose() {
+    _appId.dispose();
+    _businessAccountId.dispose();
+    _phoneNumberId.dispose();
+    _accessToken.dispose();
+    _appSecret.dispose();
+    _verifyToken.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      await widget.api.putJson('/api/v1/integrations/whatsapp/business', {
+        'app_id': _appId.text.trim(),
+        'business_account_id': _businessAccountId.text.trim(),
+        'phone_number_id': _phoneNumberId.text.trim(),
+        'access_token': _accessToken.text.trim(),
+        'app_secret': _appSecret.text.trim(),
+        'verify_token': _verifyToken.text.trim(),
+      });
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  String? _required(String? value) => value == null || value.trim().isEmpty ? 'Este dato es obligatorio' : null;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Configurar WhatsApp Business'),
+    content: SizedBox(
+      width: 520,
+      child: SingleChildScrollView(child: Form(
+        key: _formKey,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Obtén estos datos en Meta for Developers y WhatsApp Manager. Los campos secretos quedan vacíos al editar; déjalos así para conservar los valores actuales.'),
+          const SizedBox(height: 16),
+          TextFormField(controller: _appId, decoration: const InputDecoration(labelText: 'ID de la aplicación Meta (opcional)'),),
+          TextFormField(controller: _businessAccountId, validator: _required, decoration: const InputDecoration(labelText: 'ID de cuenta de WhatsApp Business (WABA) *'),),
+          TextFormField(controller: _phoneNumberId, validator: _required, decoration: const InputDecoration(labelText: 'ID del número de teléfono *'),),
+          TextFormField(controller: _accessToken, obscureText: true, validator: widget.initial['configured'] == true ? null : _required,
+              decoration: InputDecoration(labelText: 'Token de acceso de Meta *', helperText: widget.initial['access_token_configured'] == true ? 'Configurado; vacío conserva el actual.' : null),),
+          TextFormField(controller: _appSecret, obscureText: true, validator: widget.initial['configured'] == true ? null : _required,
+              decoration: InputDecoration(labelText: 'App Secret *', helperText: widget.initial['app_secret_configured'] == true ? 'Configurado; vacío conserva el actual.' : null),),
+          TextFormField(controller: _verifyToken, obscureText: true, validator: widget.initial['configured'] == true ? null : _required,
+              decoration: InputDecoration(labelText: 'Token de verificación del webhook *', helperText: widget.initial['verify_token_configured'] == true ? 'Configurado; vacío conserva el actual.' : 'Define uno y usa el mismo valor al registrar el webhook en Meta.'),),
+          const SizedBox(height: 12),
+          const Align(alignment: Alignment.centerLeft, child: Text('Al guardar, Gudex no muestra ni registra los secretos. La conexión operativa de mensajes y webhook debe habilitarse por separado.'),),
+        ]),
+      )),
+    ),
+    actions: [
+      TextButton(onPressed: _saving ? null : () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
+      FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Guardando…' : 'Guardar credenciales')),
+    ],
+  );
 }

@@ -469,6 +469,20 @@ class BaileysTestMessage(SQLModel):
         return digits
 
 
+class WhatsAppBusinessConfigUpdate(SQLModel):
+    app_id: Optional[str] = Field(default=None, max_length=100)
+    business_account_id: str = Field(min_length=1, max_length=100)
+    phone_number_id: str = Field(min_length=1, max_length=100)
+    access_token: Optional[str] = Field(default=None, max_length=4096)
+    app_secret: Optional[str] = Field(default=None, max_length=512)
+    verify_token: Optional[str] = Field(default=None, max_length=512)
+
+    @field_validator("app_id", "business_account_id", "phone_number_id", "access_token", "app_secret", "verify_token")
+    @classmethod
+    def trim_whitespace(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
 class AssistantQuery(SQLModel):
     mode: Literal["general", "diagnostic"] = "general"
     message: str = Field(min_length=2, max_length=2000)
