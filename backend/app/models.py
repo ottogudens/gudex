@@ -250,7 +250,9 @@ class WorkOrderEvidence(SQLModel, table=True):
 
 class Quote(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    work_order_id: Optional[int] = Field(default=None, foreign_key="workorder.id", index=True)
+    customer_id: int = Field(foreign_key="customer.id", index=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
     description: str = Field(max_length=250)
     labor_clp: int = Field(default=0, ge=0)
     parts_clp: int = Field(default=0, ge=0)
@@ -259,6 +261,18 @@ class Quote(SQLModel, table=True):
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=now_utc)
     work_order: Optional[WorkOrder] = Relationship(back_populates="quotes")
+
+
+class QuoteItem(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    quote_id: int = Field(foreign_key="quote.id", index=True)
+    kind: str = Field(max_length=16)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id")
+    service_id: Optional[int] = Field(default=None, foreign_key="service.id")
+    description: str = Field(max_length=200)
+    quantity: float = Field(gt=0)
+    unit_price_clp: int = Field(ge=0)
+    line_total_clp: int = Field(ge=0)
 
 
 class Product(SQLModel, table=True):

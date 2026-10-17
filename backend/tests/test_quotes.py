@@ -74,6 +74,41 @@ def test_quote_create_edit_pdf_publish_and_customer_isolation(quote_context):
     assert client.get('/api/v1/quotes/99999999/pdf', headers=headers['admin']).status_code == 404
 
 
+def test_standalone_quote_accepts_catalog_and_manual_lines(quote_context):
+    client, _, customer_id, headers = quote_context
+    vehicle_id = next(v['id'] for v in client.get('/api/v1/vehicles', headers=headers['admin']).json()
+                      if v['customer_id'] == customer_id)
+    product = client.post('/api/v1/products', json={
+        'sku': f'QUOTE-{uuid4().hex[:8]}', 'name': 'Filtro de cotización',
+        'stock_quantity': 2, 'price_clp': 7500,
+    }, headers=headers['admin']).json()
+    service = client.get('/api/v1/services', headers=headers['admin']).json()[0]
+    payload = {
+        'customer_id': customer_id,
+        'vehicle_id': vehicle_id,
+        'work_order_id': None,
+        'description': 'Mantención cotizada sin orden',
+        'lines': [
+            {'kind': 'service', 'service_id': service['id'], 'description': service['name'],
+             'quantity': 1.5, 'unit_price_clp': 20000},
+            {'kind': 'product', 'product_id': product['id'], 'description': product['name'],
+             'quantity': 2, 'unit_price_clp': 7500},
+            {'kind': 'service', 'description': 'Servicio manual', 'quantity': 1, 'unit_price_clp': 5000},
+        ],
+    }
+    created = client.post('/api/v1/quotes', json=payload, headers=headers['admin'])
+    assert created.status_code == 201, created.text
+    quote_id = created.json()['id']
+    row = next(q for q in client.get('/api/v1/quotes', headers=headers['admin']).json() if q['id'] == quote_id)
+    assert row['work_order_id'] is None
+    assert row['labor_clp'] == 35000
+    assert row['parts_clp'] == 15000
+    assert len(row['lines']) == 3
+    assert client.get(f'/api/v1/quotes/{quote_id}/pdf', headers=headers['admin']).status_code == 200
+    assert client.post(f'/api/v1/quotes/{quote_id}/publish', headers=headers['admin']).status_code == 200
+    assert quote_id in [q['id'] for q in client.get('/api/v1/portal/quotes', headers=headers['customer']).json()]
+
+
 @pytest.mark.parametrize('payload', [
     {'description': '', 'labor_clp': 0}, {'description': '  ', 'labor_clp': 0},
     {'description': 'A' * 251}, {'description': 'Servicio', 'labor_clp': -1},

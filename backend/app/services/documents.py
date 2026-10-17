@@ -146,7 +146,7 @@ def sale_receipt_pdf(sale, items: list, customer=None, vehicle=None, payments: l
     return buffer.getvalue()
 
 
-def quote_pdf(quote, order, customer, vehicle) -> bytes:
+def quote_pdf(quote, order, customer, vehicle, items=None) -> bytes:
     buffer = BytesIO()
     code = f"COT-{quote.id:06d}"
     doc, styles = _document(buffer, f"Cotización {code}")
@@ -156,7 +156,7 @@ def quote_pdf(quote, order, customer, vehicle) -> bytes:
     for label, value in (
         ("Cliente", customer.full_name), ("RUT", customer.rut),
         ("Vehículo", f"{vehicle.make} {vehicle.model} · {vehicle.plate}"),
-        ("Orden de trabajo", order.code),
+        ("Orden de trabajo", order.code if order else "Sin orden asociada"),
     ):
         story.append(Paragraph(f"<b>{label}:</b> {_text(value)}", styles["GudexBody"]))
     story += [Spacer(1, 5 * mm), Paragraph("Trabajo propuesto", styles["Heading2"]),
@@ -165,17 +165,26 @@ def quote_pdf(quote, order, customer, vehicle) -> bytes:
         story += [Paragraph("Detalle y observaciones", styles["Heading2"]),
                   Paragraph(_text(quote.notes), styles["GudexBody"])]
     money = lambda value: "$" + f"{value:,}".replace(",", ".")
-    table = Table([
-        ["Concepto", "Valor (CLP)"],
-        ["Mano de obra / servicios", money(quote.labor_clp)],
-        ["Repuestos e insumos", money(quote.parts_clp)],
-        ["TOTAL", money(quote.labor_clp + quote.parts_clp)],
-    ], colWidths=[120 * mm, 51 * mm])
+    if items:
+        rows = [["Producto / servicio", "Cant.", "P. unitario", "Total"]]
+        rows.extend([
+            [_text(item.description), f"{item.quantity:g}", money(item.unit_price_clp), money(item.line_total_clp)]
+            for item in items
+        ])
+        rows.append(["TOTAL", "", "", money(quote.labor_clp + quote.parts_clp)])
+        table = Table(rows, colWidths=[82 * mm, 18 * mm, 34 * mm, 37 * mm])
+    else:
+        table = Table([
+            ["Concepto", "Valor (CLP)"],
+            ["Mano de obra / servicios", money(quote.labor_clp)],
+            ["Repuestos e insumos", money(quote.parts_clp)],
+            ["TOTAL", money(quote.labor_clp + quote.parts_clp)],
+        ], colWidths=[120 * mm, 51 * mm])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), YELLOW),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
         ("TOPPADDING", (0, 0), (-1, -1), 10),
         ("LINEABOVE", (0, -1), (-1, -1), 1, RED),

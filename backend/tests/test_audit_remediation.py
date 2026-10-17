@@ -89,8 +89,10 @@ def test_inspection_requires_assignment(records):
 
 def test_portal_history_hides_drafts_and_internal_order_fields(records):
     session, _, _, vehicle, order, request = records
-    session.add_all([Quote(work_order_id=order.id, description="Privado", status="draft"),
-                     Quote(work_order_id=order.id, description="Publicado", status="sent")])
+    session.add_all([Quote(work_order_id=order.id, customer_id=order.customer_id, vehicle_id=vehicle.id,
+                           description="Privado", status="draft"),
+                     Quote(work_order_id=order.id, customer_id=order.customer_id, vehicle_id=vehicle.id,
+                           description="Publicado", status="sent")])
     session.commit()
     result = customer_vehicle_history(vehicle.id, request, session)
     assert [q.description for q in result["quotes"]] == ["Publicado"]

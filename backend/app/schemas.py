@@ -311,16 +311,41 @@ class WorkOrderEvidenceRead(SQLModel):
     download_url: str
 
 
+class QuoteLineCreate(SQLModel):
+    kind: Literal["product", "service"]
+    product_id: Optional[int] = None
+    service_id: Optional[int] = None
+    description: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    quantity: float = Field(gt=0)
+    unit_price_clp: int = Field(ge=0)
+
+    @field_validator("quantity")
+    @classmethod
+    def finite_quantity(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("La cantidad debe ser finita")
+        return value
+
+
+class QuoteLineRead(QuoteLineCreate):
+    id: int
+    line_total_clp: int
+
+
 class QuoteCreate(SQLModel):
+    customer_id: Optional[int] = None
+    vehicle_id: Optional[int] = None
+    work_order_id: Optional[int] = None
     description: str = Field(min_length=1, max_length=250, pattern=r"\S")
     labor_clp: int = Field(default=0, ge=0)
     parts_clp: int = Field(default=0, ge=0)
     notes: Optional[str] = None
+    lines: list[QuoteLineCreate] = Field(default_factory=list)
 
 
 class QuoteRead(SQLModel):
     id: int
-    work_order_id: int
+    work_order_id: Optional[int] = None
     description: str
     labor_clp: int
     parts_clp: int
@@ -330,8 +355,10 @@ class QuoteRead(SQLModel):
     created_at: datetime
     customer_name: Optional[str] = None
     customer_id: Optional[int] = None
+    vehicle_id: Optional[int] = None
     order_code: Optional[str] = None
     vehicle_plate: Optional[str] = None
+    lines: list[QuoteLineRead] = Field(default_factory=list)
 
 
 class ProductCreate(SQLModel):

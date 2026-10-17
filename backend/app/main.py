@@ -21,7 +21,7 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, Sale, SaleItem, ScannerReport,
+    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
 )
 from app.schemas import (
@@ -594,6 +594,7 @@ def delete_vehicle(vehicle_id: int, session: Session = Depends(get_session)):
     if session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id == vehicle_id)).first():
         raise HTTPException(409, "No se puede eliminar un vehículo con planes o historial de mantención")
     if (session.exec(select(WorkOrder).where(WorkOrder.vehicle_id == vehicle_id)).first()
+            or session.exec(select(Quote).where(Quote.vehicle_id == vehicle_id)).first()
             or session.exec(select(ScannerReport).where(ScannerReport.vehicle_id == vehicle_id)).first()
             or session.exec(select(Appointment).where(Appointment.vehicle_id == vehicle_id)).first()):
         raise HTTPException(409, "No se puede eliminar un vehículo con historial de trabajo, scanner o citas")
@@ -609,9 +610,8 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
                            .order_by(ScannerReport.scanned_at.desc())).all()
     appointments = session.exec(select(Appointment).where(Appointment.vehicle_id == vehicle.id)
                                 .order_by(Appointment.starts_at.desc())).all()
-    order_ids = [order.id for order in orders]
-    quotes = session.exec(select(Quote).where(Quote.work_order_id.in_(order_ids))
-                          .order_by(Quote.created_at.desc())).all() if order_ids else []
+    quotes = session.exec(select(Quote).where(Quote.vehicle_id == vehicle.id)
+                          .order_by(Quote.created_at.desc())).all()
     return {
         "vehicle": vehicle,
         "technical": technical_payload(session, vehicle.id),
@@ -1025,14 +1025,94 @@ def create_quote(order_id: int, data: QuoteCreate, session: Session = Depends(ge
     order = session.get(WorkOrder, order_id)
     if not order:
         raise HTTPException(404, "Orden de trabajo no encontrada")
-    quote = Quote.model_validate(data, update={"work_order_id": order_id})
+    return save_quote(session, data, order=order)
+
+
+def quote_context(session: Session, data: QuoteCreate, order: WorkOrder | None = None,
+                  current: Quote | None = None):
+    work_order_id = data.work_order_id
+    customer_id = data.customer_id
+    vehicle_id = data.vehicle_id
+    if current:
+        if "work_order_id" not in data.model_fields_set:
+            work_order_id = current.work_order_id
+        if "customer_id" not in data.model_fields_set:
+            customer_id = current.customer_id
+        if "vehicle_id" not in data.model_fields_set:
+            vehicle_id = current.vehicle_id
+    if order is None and work_order_id is not None:
+        order = session.get(WorkOrder, work_order_id)
+        if not order:
+            raise HTTPException(404, "Orden de trabajo no encontrada")
+    customer_id = order.customer_id if order else customer_id
+    vehicle_id = order.vehicle_id if order else vehicle_id
+    customer = session.get(Customer, customer_id) if customer_id else None
+    vehicle = session.get(Vehicle, vehicle_id) if vehicle_id else None
+    if not customer:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not vehicle or vehicle.customer_id != customer.id:
+        raise HTTPException(422, "Selecciona un vehículo perteneciente al cliente")
+    return order, customer, vehicle
+
+
+def normalized_quote_lines(session: Session, data: QuoteCreate):
+    rows = []
+    labor_clp = parts_clp = 0
+    for line in data.lines:
+        if line.product_id is not None and not session.get(Product, line.product_id):
+            raise HTTPException(404, "Producto de la cotización no encontrado")
+        if line.service_id is not None and not session.get(Service, line.service_id):
+            raise HTTPException(404, "Servicio de la cotización no encontrado")
+        if line.kind == "product" and line.service_id is not None:
+            raise HTTPException(422, "Una línea de producto no puede apuntar a un servicio")
+        if line.kind == "service" and line.product_id is not None:
+            raise HTTPException(422, "Una línea de servicio no puede apuntar a un producto")
+        total = round(line.quantity * line.unit_price_clp)
+        rows.append((line, total))
+        if line.kind == "service":
+            labor_clp += total
+        else:
+            parts_clp += total
+    if not rows:
+        labor_clp, parts_clp = data.labor_clp, data.parts_clp
+    return rows, labor_clp, parts_clp
+
+
+def save_quote(session: Session, data: QuoteCreate, order: WorkOrder | None = None,
+               quote: Quote | None = None):
+    order, customer, vehicle = quote_context(session, data, order, quote)
+    lines, labor_clp, parts_clp = normalized_quote_lines(session, data)
+    values = {
+        "work_order_id": order.id if order else None,
+        "customer_id": customer.id,
+        "vehicle_id": vehicle.id,
+        "description": data.description.strip(),
+        "labor_clp": labor_clp,
+        "parts_clp": parts_clp,
+        "notes": data.notes,
+    }
+    if quote is None:
+        quote = Quote(**values)
+    else:
+        quote.sqlmodel_update(values)
+        for item in session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all():
+            session.delete(item)
     session.add(quote)
-    order.status = WorkStatus.quoted
-    order.total_clp = data.labor_clp + data.parts_clp
-    session.add(order)
+    session.flush()
+    for line, total in lines:
+        session.add(QuoteItem(quote_id=quote.id, line_total_clp=total, **line.model_dump()))
+    if order:
+        order.status = WorkStatus.quoted
+        order.total_clp = labor_clp + parts_clp
+        session.add(order)
     session.commit()
     session.refresh(quote)
     return quote
+
+
+@app.post("/api/v1/quotes", response_model=Quote, status_code=201, dependencies=[Depends(require_admin)])
+def create_standalone_quote(data: QuoteCreate, session: Session = Depends(get_session)):
+    return save_quote(session, data)
 
 
 @app.get("/api/v1/work-orders/{order_id}/quotes", response_model=list[Quote])
@@ -1046,13 +1126,15 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
 def list_quotes(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0, session: Session = Depends(get_session)):
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     rows = session.exec(select(Quote, WorkOrder, Customer, Vehicle)
-                        .join(WorkOrder, Quote.work_order_id == WorkOrder.id)
-                        .join(Customer, WorkOrder.customer_id == Customer.id)
-                        .join(Vehicle, WorkOrder.vehicle_id == Vehicle.id)
+                        .join(Customer, Quote.customer_id == Customer.id)
+                        .join(Vehicle, Quote.vehicle_id == Vehicle.id)
+                        .outerjoin(WorkOrder, Quote.work_order_id == WorkOrder.id)
                         .order_by(Quote.created_at.desc(), Quote.id.desc())
                         .offset(offset).limit(limit)).all()
     return [{**quote.model_dump(), "customer_name": customer.full_name,
-             "customer_id": customer.id, "order_code": order.code, "vehicle_plate": vehicle.plate}
+             "customer_id": customer.id, "order_code": order.code if order else None,
+             "vehicle_plate": vehicle.plate,
+             "lines": [item.model_dump() for item in session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()]}
             for quote, order, customer, vehicle in rows]
 
 
@@ -1063,11 +1145,7 @@ def update_quote(quote_id: int, data: QuoteCreate, session: Session = Depends(ge
         raise HTTPException(404, "Cotización no encontrada")
     if quote.status != "draft":
         raise HTTPException(409, "Solo se pueden editar cotizaciones en borrador")
-    quote.sqlmodel_update(data.model_dump())
-    session.add(quote)
-    session.commit()
-    session.refresh(quote)
-    return quote
+    return save_quote(session, data, quote=quote)
 
 
 @app.get("/api/v1/quotes/{quote_id}/pdf", dependencies=[Depends(require_admin)])
@@ -1075,10 +1153,11 @@ def download_quote(quote_id: int, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Cotización no encontrada")
-    order = session.get(WorkOrder, quote.work_order_id)
-    customer = session.get(Customer, order.customer_id)
-    vehicle = session.get(Vehicle, order.vehicle_id)
-    return Response(content=quote_pdf(quote, order, customer, vehicle), media_type="application/pdf",
+    order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
+    customer = session.get(Customer, quote.customer_id)
+    vehicle = session.get(Vehicle, quote.vehicle_id)
+    items = session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()
+    return Response(content=quote_pdf(quote, order, customer, vehicle, items), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="cotizacion-{quote.id}.pdf"'})
 
 
@@ -1089,6 +1168,8 @@ def delete_quote(quote_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404, "Cotización no encontrada")
     if quote.status != "draft":
         raise HTTPException(409, "Solo se pueden eliminar cotizaciones en borrador")
+    for item in session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all():
+        session.delete(item)
     session.delete(quote); session.commit()
     return {"deleted": True}
 
@@ -1103,7 +1184,7 @@ def approve_quote(quote_id: int, approved: bool, session: Session = Depends(get_
     quote.status = "approved" if approved else "rejected"
     quote.customer_approved_at = datetime.now(timezone.utc)
     session.add(quote)
-    order = session.get(WorkOrder, quote.work_order_id)
+    order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
     if order:
         order.status = WorkStatus.approved if approved else WorkStatus.quote_rejected
         session.add(order)
@@ -1121,7 +1202,7 @@ def publish_quote(quote_id: int, session: Session = Depends(get_session)):
         raise HTTPException(409, "La cotización ya fue publicada o respondida")
     quote.status = "sent"
     session.add(quote)
-    order = session.get(WorkOrder, quote.work_order_id)
+    order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
     if order:
         order.status = WorkStatus.awaiting_approval
         order.total_clp = quote.labor_clp + quote.parts_clp
@@ -1437,21 +1518,18 @@ def cancel_customer_appointment(appointment_id: int, request: Request, session: 
 
 @app.get("/api/v1/portal/quotes")
 def customer_portal_quotes(request: Request, session: Session = Depends(get_session)):
-    orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == request.state.customer_id)).all()
-    order_ids = [order.id for order in orders]
-    if not order_ids:
-        return []
-    return session.exec(select(Quote).where(Quote.work_order_id.in_(order_ids), Quote.status != "draft")
+    return session.exec(select(Quote).where(Quote.customer_id == request.state.customer_id, Quote.status != "draft")
                         .order_by(Quote.created_at.desc())).all()
 
 
 @app.get("/api/v1/portal/documents")
 def customer_documents(request: Request, session: Session = Depends(get_session)):
     orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == request.state.customer_id)).all()
-    docs = []
+    docs = [{"type": "quote", "title": f"Cotización {quote.id}", "created_at": quote.created_at,
+             "url": f"/api/v1/portal/quotes/{quote.id}/pdf"}
+            for quote in session.exec(select(Quote).where(
+                Quote.customer_id == request.state.customer_id, Quote.status != "draft")).all()]
     for order in orders:
-        for quote in session.exec(select(Quote).where(Quote.work_order_id == order.id, Quote.status != "draft")).all():
-            docs.append({"type": "quote", "title": f"Cotización {quote.id}", "created_at": quote.created_at, "url": f"/api/v1/portal/quotes/{quote.id}/pdf"})
         docs.append({"type": "inspection", "title": f"Informe de inspección {order.code}", "created_at": order.opened_at, "url": f"/api/v1/portal/work-orders/{order.id}/inspection-report.pdf"})
     return docs
 
@@ -1460,10 +1538,10 @@ def customer_documents(request: Request, session: Session = Depends(get_session)
 def customer_notifications(request: Request, session: Session = Depends(get_session)):
     customer_id = request.state.customer_id
     notices = []
-    orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == customer_id)).all()
-    for order in orders:
-        for quote in session.exec(select(Quote).where(Quote.work_order_id == order.id, Quote.status == "sent")).all():
-            notices.append({"type": "quote", "title": "Cotización pendiente", "message": f"Tienes una cotización pendiente para la orden {order.code}.", "created_at": quote.created_at})
+    for quote in session.exec(select(Quote).where(Quote.customer_id == customer_id, Quote.status == "sent")).all():
+        order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
+        reference = f" para la orden {order.code}" if order else ""
+        notices.append({"type": "quote", "title": "Cotización pendiente", "message": f"Tienes una cotización pendiente{reference}.", "created_at": quote.created_at})
     for appointment in session.exec(select(Appointment).where(Appointment.customer_id == customer_id, Appointment.status == "requested")).all():
         notices.append({"type": "appointment", "title": "Cita solicitada", "message": f"Tu solicitud de {appointment.service_type} está pendiente de confirmación.", "created_at": appointment.created_at})
     vehicle_ids = [vehicle.id for vehicle in session.exec(select(Vehicle).where(Vehicle.customer_id == customer_id)).all()]
@@ -1480,11 +1558,12 @@ def customer_notifications(request: Request, session: Session = Depends(get_sess
 @app.get("/api/v1/portal/quotes/{quote_id}/pdf")
 def customer_quote_pdf(quote_id: int, request: Request, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
-    order = session.get(WorkOrder, quote.work_order_id) if quote else None
-    if not quote or not order or order.customer_id != request.state.customer_id or quote.status == "draft":
+    if not quote or quote.customer_id != request.state.customer_id or quote.status == "draft":
         raise HTTPException(404, "Cotización no encontrada")
-    customer = session.get(Customer, order.customer_id); vehicle = session.get(Vehicle, order.vehicle_id)
-    return Response(content=quote_pdf(quote, order, customer, vehicle), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="cotizacion-{quote.id}.pdf"', "Cache-Control": "private, no-store"})
+    order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
+    customer = session.get(Customer, quote.customer_id); vehicle = session.get(Vehicle, quote.vehicle_id)
+    items = session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()
+    return Response(content=quote_pdf(quote, order, customer, vehicle, items), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="cotizacion-{quote.id}.pdf"', "Cache-Control": "private, no-store"})
 
 
 @app.get("/api/v1/portal/work-orders")
@@ -1498,16 +1577,17 @@ def customer_portal_approve_quote(quote_id: int, approved: bool, request: Reques
     quote = session.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Cotización no encontrada")
-    order = session.get(WorkOrder, quote.work_order_id)
-    if not order or order.customer_id != request.state.customer_id:
+    if quote.customer_id != request.state.customer_id:
         raise HTTPException(404, "Cotización no encontrada")
     if quote.status != "sent":
         raise HTTPException(409, "La cotización ya tiene una respuesta")
     quote.status = "approved" if approved else "rejected"
     quote.customer_approved_at = datetime.now(timezone.utc)
-    order.status = WorkStatus.approved if approved else WorkStatus.quote_rejected
+    order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
+    if order:
+        order.status = WorkStatus.approved if approved else WorkStatus.quote_rejected
+        session.add(order)
     session.add(quote)
-    session.add(order)
     session.commit()
     session.refresh(quote)
     return quote
