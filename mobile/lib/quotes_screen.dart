@@ -76,22 +76,50 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                 DropdownButtonFormField<int>(
                   initialValue: customerId, isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Cliente *'),
-                  items: _customers.map((c) => DropdownMenuItem<int>(value: c['id'] as int,
-                    child: Text(c['full_name'].toString(), overflow: TextOverflow.ellipsis))).toList(),
-                  onChanged: quote != null ? null : (value) => update(() { customerId = value; orderId = null; }),
+                  items: [
+                    ..._customers.map((c) => DropdownMenuItem<int>(value: c['id'] as int,
+                      child: Text(c['full_name'].toString(), overflow: TextOverflow.ellipsis))),
+                    const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 8), Text('Crear nuevo cliente')]))
+                  ],
+                  onChanged: quote != null ? null : (value) async {
+                    if (value == -1) {
+                      final created = await showQuickCreateCustomer(context, widget.api);
+                      if (created != null && context.mounted) update(() {
+                        _customers.add(created); customerId = created['id'] as int; orderId = null;
+                      });
+                      return;
+                    }
+                    update(() { customerId = value; orderId = null; });
+                  },
                   validator: (value) => value == null ? 'Selecciona un cliente' : null,
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
                   key: ValueKey(customerId), initialValue: orderId, isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Orden y vehículo *'),
-                  items: orders.map((o) => DropdownMenuItem<int>(value: o['id'] as int,
-                    child: Text(_orderLabel(o), overflow: TextOverflow.ellipsis))).toList(),
-                  onChanged: quote != null ? null : (value) => update(() => orderId = value),
+                  items: [
+                    ...orders.map((o) => DropdownMenuItem<int>(value: o['id'] as int,
+                      child: Text(_orderLabel(o), overflow: TextOverflow.ellipsis))),
+                    if (customerId != null) const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.add_task), SizedBox(width: 8), Text('Crear nueva orden')]))
+                  ],
+                  onChanged: quote != null ? null : (value) async {
+                    if (value == -1 && customerId != null) {
+                      var customerVehicles = _vehicles.where((v) => v['customer_id'] == customerId).toList();
+                      if (customerVehicles.isEmpty) {
+                        final vehicle = await showQuickCreateVehicle(context, widget.api, _customers, initialCustomerId: customerId);
+                        if (vehicle != null) { _vehicles.add(vehicle); customerVehicles = [vehicle]; }
+                      }
+                      if (customerVehicles.isEmpty || !context.mounted) return;
+                      final created = await showQuickCreateWorkOrder(context, widget.api, customerId: customerId!, vehicles: customerVehicles);
+                      if (created != null && context.mounted) update(() { _orders.add(created); orderId = created['id'] as int; });
+                      return;
+                    }
+                    update(() => orderId = value);
+                  },
                   validator: (value) => value == null ? 'Selecciona una orden' : null,
                 ),
                 if (customerId != null && orders.isEmpty)
-                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Este cliente no tiene órdenes. Crea una en Órdenes de trabajo y vuelve a este menú.')),
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Este cliente no tiene órdenes. Puedes crearla directamente desde el selector.')),
                 const SizedBox(height: 12),
                 TextFormField(controller: description, maxLength: 250, maxLines: 2,
                   decoration: const InputDecoration(labelText: 'Trabajo propuesto *'),

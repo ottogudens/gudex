@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/constants.dart';
 import '../services/api_client.dart';
+import '../widgets/quick_create_dialogs.dart';
 
 class PosScreen extends StatefulWidget {
   const PosScreen({required this.api, super.key});
@@ -152,6 +153,28 @@ class _PosScreenState extends State<PosScreen> {
     } else {
       setState(() => _cart[id] = next);
     }
+  }
+
+  Future<void> _quickCreateProduct() async {
+    final created = await showQuickCreateProduct(context, widget.api);
+    if (created == null || !mounted) return;
+    setState(() {
+      _products.add(created);
+      _categoryFilter = 'Todos';
+      _productSearch.clear();
+    });
+    if (_number(created['stock_quantity']) > 0) {
+      _changeQuantity(created, 1);
+    }
+  }
+
+  Future<void> _quickCreateCustomer() async {
+    final created = await showQuickCreateCustomer(context, widget.api);
+    if (created == null || !mounted) return;
+    setState(() {
+      _customers.add(created);
+      _customerId = created['id'] as int;
+    });
   }
 
   Future<void> _addServiceLine() async {
@@ -1000,6 +1023,11 @@ class _PosScreenState extends State<PosScreen> {
                         },
                   icon: const Icon(Icons.backspace_outlined),
                 ),
+                IconButton(
+                  tooltip: 'Crear producto',
+                  onPressed: _quickCreateProduct,
+                  icon: const Icon(Icons.add_box_outlined),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -1252,8 +1280,24 @@ class _PosScreenState extends State<PosScreen> {
                     child: Text('${customer['full_name']}'),
                   ),
                 ),
+                const DropdownMenuItem<int?>(
+                  value: -1,
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_add_alt_1),
+                      SizedBox(width: 8),
+                      Text('Crear nuevo cliente'),
+                    ],
+                  ),
+                ),
               ],
-              onChanged: (value) => setState(() => _customerId = value),
+              onChanged: (value) async {
+                if (value == -1) {
+                  await _quickCreateCustomer();
+                } else {
+                  setState(() => _customerId = value);
+                }
+              },
             ),
             if (_readyOrders.isNotEmpty) ...[
               const SizedBox(height: 10),

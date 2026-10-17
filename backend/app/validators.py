@@ -44,7 +44,7 @@ def validate_vehicle_year(value: int | None) -> int | None:
 
 # Contraseñas demasiado comunes que se rechazan independientemente de la longitud.
 _COMMON_PASSWORDS = frozenset({
-    "12345678", "123456789", "1234567890", "qwerty123", "password",
+    "123456", "12345678", "123456789", "1234567890", "qwerty", "qwerty123", "password",
     "password1", "password123", "abc12345", "qwertyuiop", "11111111",
     "00000000", "lubricentro", "mecanico", "administrador", "gudex1234",
 })
@@ -52,7 +52,7 @@ _COMMON_PASSWORDS = frozenset({
 
 def validate_password(password: str, *, is_customer: bool = False) -> str | None:
     """Devuelve un mensaje de error si la contraseña es demasiado débil, o None si es aceptable."""
-    minimum_length = 8 if is_customer else 12
+    minimum_length = 6
     if len(password) < minimum_length:
         return f"La contraseña debe tener al menos {minimum_length} caracteres"
     if password.lower() in _COMMON_PASSWORDS:

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/constants.dart';
 import '../services/api_client.dart';
+import '../widgets/quick_create_dialogs.dart';
 
 class AgendaScreen extends StatefulWidget {
   const AgendaScreen({required this.api, required this.role, super.key});
@@ -59,16 +60,20 @@ class _AgendaScreenState extends State<AgendaScreen> {
     final customers = raw is List
         ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : <Map<String, dynamic>>[];
+    final vehicleRaw = await widget.api.get('/api/v1/vehicles');
+    final vehicles = vehicleRaw is List
+        ? vehicleRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : <Map<String, dynamic>>[];
+    if (customers.isEmpty && widget.role == 'admin' && mounted) {
+      final created = await showQuickCreateCustomer(context, widget.api);
+      if (created != null) customers.add(created);
+    }
     if (customers.isEmpty || !mounted) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Registra un cliente antes de agendar.')),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registra un cliente antes de agendar.')));
       return;
     }
     int customerId = customers.first['id'] as int;
+    int? vehicleId;
     final service = TextEditingController(text: 'Mantención preventiva');
     final date = await showDatePicker(
       context: context,
@@ -99,14 +104,42 @@ class _AgendaScreenState extends State<AgendaScreen> {
               DropdownButtonFormField<int>(
                 initialValue: customerId,
                 decoration: const InputDecoration(labelText: 'Cliente'),
-                items: customers
-                    .map((c) => DropdownMenuItem(
+                items: [
+                  ...customers.map((c) => DropdownMenuItem(
                           value: c['id'] as int,
                           child: Text(c['full_name'].toString()),
-                        ))
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) update(() => customerId = value);
+                        )),
+                  if (widget.role == 'admin') const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 8), Text('Crear nuevo cliente')]))
+                ],
+                onChanged: (value) async {
+                  if (value == -1) {
+                    final created = await showQuickCreateCustomer(context, widget.api);
+                    if (created != null && context.mounted) update(() {
+                      customers.add(created); customerId = created['id'] as int; vehicleId = null;
+                    });
+                  } else if (value != null) {
+                    update(() { customerId = value; vehicleId = null; });
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int?>(
+                key: ValueKey('appointment-vehicle-$customerId-$vehicleId'),
+                initialValue: vehicles.any((v) => v['id'] == vehicleId) ? vehicleId : null,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Vehículo (opcional)'),
+                items: [
+                  const DropdownMenuItem<int?>(value: null, child: Text('Sin vehículo')),
+                  ...vehicles.where((v) => v['customer_id'] == customerId).map((v) => DropdownMenuItem<int?>(value: v['id'] as int, child: Text('${v['plate']} · ${v['make']} ${v['model']}', overflow: TextOverflow.ellipsis))),
+                  if (widget.role == 'admin') const DropdownMenuItem<int?>(value: -1, child: Row(children: [Icon(Icons.add_road), SizedBox(width: 8), Text('Crear nuevo vehículo')]))
+                ],
+                onChanged: (value) async {
+                  if (value == -1) {
+                    final created = await showQuickCreateVehicle(context, widget.api, customers, initialCustomerId: customerId);
+                    if (created != null && context.mounted) update(() { vehicles.add(created); vehicleId = created['id'] as int; });
+                  } else {
+                    update(() => vehicleId = value);
+                  }
                 },
               ),
               const SizedBox(height: 10),
@@ -140,6 +173,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
         );
         await widget.api.postJson('/api/v1/appointments', {
           'customer_id': customerId,
+          if (vehicleId != null) 'vehicle_id': vehicleId,
           'starts_at': start.toUtc().toIso8601String(),
           'ends_at':
               start.add(const Duration(hours: 1)).toUtc().toIso8601String(),

@@ -37,7 +37,7 @@ class _UsersScreenState extends State<UsersScreen> {
       content: StatefulBuilder(builder: (context, update) => SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo')),
         if (isNew) TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
-        if (isNew) TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña inicial (12 caracteres mínimo)')),
+        if (isNew) TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña inicial (6 caracteres mínimo)')),
         DropdownButtonFormField<String>(initialValue: role, decoration: const InputDecoration(labelText: 'Rol'), items: const [DropdownMenuItem(value: 'admin', child: Text('Administración')), DropdownMenuItem(value: 'mechanic', child: Text('Mecánico'))], onChanged: (value) { if (value != null) update(() => role = value); }),
         if (!isNew) SwitchListTile(contentPadding: EdgeInsets.zero, value: active, onChanged: (value) => update(() => active = value), title: const Text('Cuenta activa')),
       ]))),

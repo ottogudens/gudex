@@ -32,7 +32,7 @@ El SDK Flutter está fijado por defecto a la versión estable `3.47.3` en el scr
    | `MAX_EVIDENCE_BYTES` | `20000000` (opcional; límite por fotografía o adjunto) |
    | `JWT_SECRET` | Secreto aleatorio de al menos 32 caracteres |
    | `BOOTSTRAP_ADMIN_EMAIL` | Correo que usarás para el primer administrador |
-   | `BOOTSTRAP_ADMIN_PASSWORD` | Contraseña de al menos 12 caracteres |
+   | `BOOTSTRAP_ADMIN_PASSWORD` | Contraseña de al menos 6 caracteres y no incluida en la lista de claves comunes |
    | `INTEGRATION_ENCRYPTION_KEY` | Clave Fernet para credenciales Google y WhatsApp Business; necesaria antes de configurarlas |
    | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciales OAuth tipo Web de Google Cloud |
    | `GOOGLE_REDIRECT_URI` | `https://<dominio-api-railway>/auth/google/callback` (debe coincidir exactamente en Google Cloud) |
@@ -109,6 +109,8 @@ Para crear `JWT_SECRET` localmente, ejecuta `python -c 'import secrets; print(se
 
 Vercel descarga Flutter SDK en el build y genera `build/web`. Flutter documenta `flutter build web` como el comando para compilar la app web. El almacenamiento seguro del paquete Flutter requiere HTTPS en navegador; el dominio HTTPS de Vercel cumple ese requisito.
 
+Cada build genera `app-version.json` con el identificador único del despliegue (o el commit como respaldo). La PWA instalada lo consulta sin caché al iniciar, recuperar conexión, volver al primer plano y cada minuto. Cuando detecta otra versión muestra **Nueva versión disponible**; **Actualizar** recarga los archivos publicados sin cerrar la sesión. Los encabezados de `mobile/vercel.json` impiden que el documento de entrada o el identificador de despliegue queden obsoletos en el navegador. En Vercel conviene mantener habilitada la opción **Automatically expose System Environment Variables** para disponer de `VERCEL_DEPLOYMENT_ID` y detectar también redepliegues del mismo commit.
+
 ## 3. Comprobar la API desde la terminal
 
 Define en una terminal local las URLs reales:
@@ -171,7 +173,7 @@ curl -sS -X POST "$API_URL/api/v1/users" \
   -d '{"email":"cliente.prueba@example.com","full_name":"Cliente de prueba","password":"<otra-contraseña-larga>","role":"customer","customer_id":<CUSTOMER_ID>}'
 ```
 
-Usa contraseñas de al menos 12 caracteres para administración y mecánicos, y al menos 6 para clientes. Para verificar aislamiento, inicia sesión con el usuario cliente y consulta `/api/v1/portal/profile`; debe mostrar solamente sus vehículos y órdenes. Una ruta interna como `/api/v1/customers` debe responder HTTP 403 a la cuenta cliente.
+Usa contraseñas de al menos 6 caracteres para todos los perfiles y evita claves comunes. Para verificar aislamiento, inicia sesión con el usuario cliente y consulta `/api/v1/portal/profile`; debe mostrar solamente sus vehículos y órdenes. Una ruta interna como `/api/v1/customers` debe responder HTTP 403 a la cuenta cliente.
 
 ### Flujo de mantención, cotización y aprobación
 

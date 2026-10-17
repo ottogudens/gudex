@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../core/constants.dart';
 import '../services/api_client.dart';
 import '../services/draft_store.dart';
+import '../widgets/quick_create_dialogs.dart';
 import 'vehicle_history_screen.dart';
 
 class WorkshopScreen extends StatefulWidget {
@@ -241,9 +242,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
 
   Future<void> _createVehicle() async {
     if (_customers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Registra un cliente antes de agregar su vehículo.')));
-      return;
+      final created = await showQuickCreateCustomer(context, widget.api);
+      if (created == null || !mounted) return;
+      setState(() => _customers.add(created));
     }
     final form = GlobalKey<FormState>();
     final plate = TextEditingController();
@@ -269,14 +270,22 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                           initialValue: customerId,
                           decoration:
                               const InputDecoration(labelText: 'Cliente *'),
-                          items: _customers
-                              .map((item) => DropdownMenuItem<int>(
+                          items: [
+                            ..._customers.map((item) => DropdownMenuItem<int>(
                                   value: item['id'] as int,
-                                  child: Text('${item['full_name']}')))
-                              .toList(),
-                          onChanged: (value) {
-                            if (value != null)
+                                  child: Text('${item['full_name']}'))),
+                            const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 8), Text('Crear nuevo cliente')]))
+                          ],
+                          onChanged: (value) async {
+                            if (value == -1) {
+                              final created = await showQuickCreateCustomer(context, widget.api);
+                              if (created != null && context.mounted) updateDialog(() {
+                                _customers.add(created);
+                                customerId = created['id'] as int;
+                              });
+                            } else if (value != null) {
                               updateDialog(() => customerId = value);
+                            }
                           },
                         ),
                         const SizedBox(height: 10),
@@ -730,10 +739,16 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
   }
 
   Future<void> _createWorkOrder() async {
-    if (_customers.isEmpty || _vehicles.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Registra primero un cliente y su vehículo.')));
-      return;
+    if (_customers.isEmpty) {
+      final customer = await showQuickCreateCustomer(context, widget.api);
+      if (customer == null || !mounted) return;
+      setState(() => _customers.add(customer));
+    }
+    if (_vehicles.isEmpty) {
+      final vehicle = await showQuickCreateVehicle(context, widget.api, _customers,
+          initialCustomerId: _customers.first['id'] as int);
+      if (vehicle == null || !mounted) return;
+      setState(() => _vehicles.add(vehicle));
     }
     final form = GlobalKey<FormState>();
     final mileage = TextEditingController();
@@ -760,17 +775,26 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                   DropdownButtonFormField<int>(
                     initialValue: customerId,
                     decoration: const InputDecoration(labelText: 'Cliente *'),
-                    items: _customers
-                        .map((item) => DropdownMenuItem<int>(
+                    items: [
+                      ..._customers.map((item) => DropdownMenuItem<int>(
                             value: item['id'] as int,
-                            child: Text('${item['full_name']}')))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null)
+                            child: Text('${item['full_name']}'))),
+                      const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 8), Text('Crear nuevo cliente')]))
+                    ],
+                    onChanged: (value) async {
+                      if (value == -1) {
+                        final created = await showQuickCreateCustomer(context, widget.api);
+                        if (created != null && context.mounted) updateDialog(() {
+                          _customers.add(created);
+                          customerId = created['id'] as int;
+                          vehicleId = null;
+                        });
+                      } else if (value != null) {
                         updateDialog(() {
                           customerId = value;
                           vehicleId = null;
                         });
+                      }
                     },
                   ),
                   const SizedBox(height: 10),
@@ -780,14 +804,24 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                             ? vehicleId
                             : null,
                     decoration: const InputDecoration(labelText: 'Vehículo *'),
-                    items: customerVehicles
-                        .map((item) => DropdownMenuItem<int>(
+                    items: [
+                      ...customerVehicles.map((item) => DropdownMenuItem<int>(
                             value: item['id'] as int,
                             child: Text(
-                                '${item['plate']} · ${item['make']} ${item['model']}')))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) updateDialog(() => vehicleId = value);
+                                '${item['plate']} · ${item['make']} ${item['model']}'))),
+                      const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.add_road), SizedBox(width: 8), Text('Crear nuevo vehículo')]))
+                    ],
+                    onChanged: (value) async {
+                      if (value == -1) {
+                        final created = await showQuickCreateVehicle(context, widget.api, _customers, initialCustomerId: customerId);
+                        if (created != null && context.mounted) updateDialog(() {
+                          _vehicles.add(created);
+                          customerId = created['customer_id'] as int;
+                          vehicleId = created['id'] as int;
+                        });
+                      } else if (value != null) {
+                        updateDialog(() => vehicleId = value);
+                      }
                     },
                     validator: (value) => value == null
                         ? 'Selecciona un vehículo del cliente'

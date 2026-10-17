@@ -23,3 +23,13 @@ git config --global --add safe.directory "$build_tmp/flutter"
 "$flutter_bin" precache --web
 "$flutter_bin" pub get
 "$flutter_bin" build web --release --dart-define="API_URL=$api_url"
+
+# Each successful deployment exposes an immutable identifier. The installed
+# PWA polls this small, uncached file and offers the user a controlled reload
+# whenever Vercel publishes a newer build.
+deploy_version="${VERCEL_DEPLOYMENT_ID:-${VERCEL_GIT_COMMIT_SHA:-${GITHUB_SHA:-}}}"
+if [[ -z "$deploy_version" ]]; then
+  deploy_version="$(git rev-parse --verify HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
+fi
+printf '{"version":"%s"}\n' "$deploy_version" > build/web/app-version.json
+sed -i "s/__GUDEX_DEPLOY_VERSION__/$deploy_version/g" build/web/index.html

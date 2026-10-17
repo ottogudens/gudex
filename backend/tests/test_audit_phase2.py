@@ -5,6 +5,7 @@
 - Inicialización en producción (solo Alembic, omite create_db_and_tables)
 """
 import pytest
+from uuid import uuid4
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
@@ -12,7 +13,7 @@ from app.database import create_db_and_tables, engine
 from app.main import (
     DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, create_customer, create_product, create_sale,
     create_user, create_vehicle, create_work_order, list_appointments, list_customers,
-    list_products, list_quotes, list_sales, list_vehicles, list_work_orders,
+    list_products, list_quotes, list_sales, list_users, list_vehicles, list_work_orders,
 )
 from app.models import Customer, Product, User, UserRole, Vehicle, WorkOrder
 from app.schemas import CustomerCreate, ProductCreate, SaleCreate, SaleLine, UserCreate, VehicleCreate, WorkOrderCreate
@@ -20,15 +21,32 @@ from app.validators import validate_password
 
 
 def test_password_validator_rejects_short_or_common():
-    # Clientes: mínimo 8 caracteres
+    # Todos los perfiles: mínimo 6 caracteres y rechazo de claves comunes.
     assert validate_password("short", is_customer=True) is not None
+    assert validate_password("clave6", is_customer=True) is None
     assert validate_password("12345678", is_customer=True) is not None  # común
-    assert validate_password("segura123", is_customer=True) is None
-
-    # Staff / admin: mínimo 12 caracteres
-    assert validate_password("segura123", is_customer=False) is not None
-    assert validate_password("123456789012", is_customer=False) is None
+    assert validate_password("clave6", is_customer=False) is None
+    assert validate_password("123456", is_customer=False) is not None
     assert validate_password("super-clave-staff-2026", is_customer=False) is None
+
+
+def test_user_list_excludes_customer_portal_accounts():
+    create_db_and_tables()
+    suffix = uuid4().hex
+    with Session(engine) as session:
+        customer = Customer(full_name="Cliente portal")
+        session.add(customer)
+        session.flush()
+        session.add_all([
+            User(email=f"admin-{suffix}@test.local", full_name="Admin interno", password_hash="unused", role=UserRole.admin),
+            User(email=f"mechanic-{suffix}@test.local", full_name="Mecánico interno", password_hash="unused", role=UserRole.mechanic),
+            User(email=f"customer-{suffix}@test.local", full_name="Cliente portal", password_hash="unused",
+                 role=UserRole.customer, customer_id=customer.id),
+        ])
+        session.commit()
+        listed = list_users(session)
+        assert {user.role for user in listed} <= {UserRole.admin, UserRole.mechanic}
+        assert not any(user.email == f"customer-{suffix}@test.local" for user in listed)
 
 
 def test_create_user_enforces_password_strength():

@@ -114,8 +114,9 @@ def on_startup() -> None:
         with Session(engine) as session:
             existing = session.exec(select(User).where(User.email == settings.bootstrap_admin_email.lower())).first()
             if not existing:
-                if len(settings.bootstrap_admin_password) < 12:
-                    raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD debe tener al menos 12 caracteres")
+                password_error = validate_password(settings.bootstrap_admin_password)
+                if password_error:
+                    raise RuntimeError(f"BOOTSTRAP_ADMIN_PASSWORD: {password_error}")
                 session.add(User(email=settings.bootstrap_admin_email.lower(), full_name="Administrador",
                                  password_hash=hash_password(settings.bootstrap_admin_password), role=UserRole.admin))
                 session.commit()
@@ -215,7 +216,10 @@ def create_user(data: UserCreate, session: Session = Depends(get_session)):
 
 @app.get("/api/v1/users", response_model=list[UserRead], dependencies=[Depends(require_admin)])
 def list_users(session: Session = Depends(get_session)):
-    return session.exec(select(User).order_by(User.full_name)).all()
+    # Portal accounts belong to the customer domain and must be managed from
+    # Clientes. The Users module is reserved for people who operate Gudex.
+    return session.exec(select(User).where(User.role.in_([UserRole.admin, UserRole.mechanic]))
+                        .order_by(User.full_name)).all()
 
 
 @app.patch("/api/v1/users/{user_id}", response_model=UserRead, dependencies=[Depends(require_admin)])

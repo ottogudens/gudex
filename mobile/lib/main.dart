@@ -30,6 +30,7 @@ import 'screens/redemptions_screen.dart';
 import 'screens/campaigns_screen.dart';
 import 'screens/documents_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'widgets/quick_create_dialogs.dart';
 
 part 'quotes_screen.dart';
 part 'social_screen.dart';

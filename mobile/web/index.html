@@ -7,16 +7,61 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Gestión de servicios y vehículos del lubricentro" />
     <meta name="theme-color" content="#ed0606" />
+    <meta name="gudex-build-version" content="__GUDEX_DEPLOY_VERSION__" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Gudex" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="icon" type="image/png" sizes="32x32" href="icons/Icon-32.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="icons/Icon-180.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/Icon-32.png?v=20261017-yellow" />
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/Icon-180.png?v=20261017-yellow" />
+    <style>
+      #gudex-update-notice {
+        position: fixed;
+        z-index: 2147483647;
+        right: 18px;
+        bottom: calc(18px + env(safe-area-inset-bottom));
+        left: 18px;
+        display: flex;
+        max-width: 560px;
+        margin: 0 auto;
+        padding: 14px 16px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        color: #fff;
+        background: #191919;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 16px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
+        font-family: Arial, sans-serif;
+      }
+      .gudex-update-copy { display: grid; gap: 3px; }
+      .gudex-update-copy span { color: #dedede; font-size: 14px; }
+      .gudex-update-actions { display: flex; gap: 8px; flex-shrink: 0; }
+      .gudex-update-actions button {
+        min-height: 40px;
+        padding: 0 14px;
+        color: #fff;
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .gudex-update-actions button[data-action="update"] {
+        background: #ed0606;
+        border-color: #ed0606;
+      }
+      @media (max-width: 520px) {
+        #gudex-update-notice { align-items: stretch; flex-direction: column; }
+        .gudex-update-actions { justify-content: flex-end; }
+      }
+    </style>
     <title>Gudex · Lubricentro Serviteca</title>
   </head>
   <body>
+    <script src="app_update.js" defer></script>
     <script src="flutter_bootstrap.js" async></script>
   </body>
 </html>
