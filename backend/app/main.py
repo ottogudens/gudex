@@ -18,7 +18,7 @@ from sqlmodel import Session, select
 
 from app.config import settings, uploads_are_persistent
 from app.rate_limit import client_ip, limiter, rate_limit, too_many
-from app.database import create_db_and_tables, engine, get_session, upgrade_schema
+from app.database import create_db_and_tables, engine, get_session
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, Sale, SaleItem, ScannerReport, Service,
@@ -96,13 +96,10 @@ def on_startup() -> None:
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
     if _is_production:
-        # Alembic es la fuente de verdad. Se ejecuta dentro de la aplicación
-        # como respaldo ante comandos de Railway heredados que no apliquen el
-        # manifiesto actual antes de iniciar Uvicorn.
-        logger.info("Producción: aplicando migraciones Alembic antes de iniciar la aplicación.")
-        upgrade_schema()
-        logger.warning("Producción: verificando esquema base antes de iniciar la aplicación.")
-        create_db_and_tables()
+        # Railway ejecuta Alembic una única vez en preDeployCommand. No se
+        # repite desde el proceso web: dos migraciones concurrentes pueden
+        # esperar un bloqueo de PostgreSQL y dejar la API sin health check.
+        logger.info("Producción: esquema administrado por Alembic antes del arranque.")
     else:
         create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
