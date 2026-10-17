@@ -359,14 +359,18 @@ class _BaileysPairingDialogState extends State<_BaileysPairingDialog> {
     final qr = _session?['qr']?.toString();
     final connected = _session?['connected'] == true;
     final status = _session?['status']?.toString() ?? 'connecting';
-    final needsRestart = status == 'logged_out' || status == 'disconnected';
+    final needsRestart = status == 'logged_out';
     final message = connected
         ? 'Teléfono conectado para pruebas.'
         : (qr != null && qr.isNotEmpty
             ? 'En WhatsApp, abre Dispositivos vinculados y escanea este código.'
             : (needsRestart
                 ? 'La sesión anterior dejó de ser válida. Reiníciala para generar un código QR nuevo.'
-                : 'Generando un código QR seguro…'));
+                : (status == 'reconnecting'
+                    ? 'WhatsApp confirmó el código. Completando la vinculación…'
+                    : (status == 'disconnected'
+                        ? 'La conexión se interrumpió. Actualiza la sesión o vuelve a generar el código QR.'
+                        : 'Generando un código QR seguro…'))));
     return AlertDialog(
       title: const Text('Emparejar WhatsApp de prueba'),
       content: SizedBox(width: 330, child: Column(mainAxisSize: MainAxisSize.min, children: [

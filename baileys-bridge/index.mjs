@@ -26,6 +26,9 @@ let phone = null;
 let qr = null;
 let connecting = null;
 let connectionGeneration = 0;
+let reconnectTimer;
+let restartAttempts = 0;
+const maxRestartAttempts = 3;
 
 function internalOnly(request, response, next) {
   if (!bridgeToken || request.get('x-gudex-bridge-token') !== bridgeToken) {
@@ -49,6 +52,9 @@ function publicStatus() {
 function resetPublicState(nextStatus = 'disconnected') {
   socket = undefined;
   connecting = null;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  restartAttempts = 0;
   status = nextStatus;
   phone = null;
   qr = null;
@@ -77,6 +83,28 @@ async function resetSession() {
   await rm(directory, { recursive: true, force: true });
   await mkdir(directory, { recursive: true });
   return publicStatus();
+}
+
+function schedulePostScanReconnect(generation) {
+  if (generation !== connectionGeneration || reconnectTimer || restartAttempts >= maxRestartAttempts) return;
+  restartAttempts += 1;
+  status = 'reconnecting';
+  qr = null;
+  phone = null;
+  // Baileys emits restartRequired (515) after a QR is accepted. The new
+  // credentials have already been persisted by creds.update; reconnecting is
+  // required to complete the pairing and obtain the "open" event.
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = undefined;
+    if (generation !== connectionGeneration) return;
+    try {
+      await connect({ resetInvalidSession: false });
+    } catch (error) {
+      // Do not expose auth data, QR contents, or phone numbers in logs.
+      console.error('Baileys reconnect after QR failed:', error?.message || 'unknown error');
+      if (generation === connectionGeneration) status = 'disconnected';
+    }
+  }, 500);
 }
 
 async function connect({ resetInvalidSession = true } = {}) {
@@ -114,13 +142,20 @@ async function connect({ resetInvalidSession = true } = {}) {
         phone = socket?.user?.id?.split(':')[0]?.split('@')[0] || null;
         qr = null;
         status = 'connected';
+        restartAttempts = 0;
       }
       if (update.connection === 'close') {
-        const code = update.lastDisconnect?.error?.output?.statusCode;
+        const code = update.lastDisconnect?.error?.output?.statusCode ?? update.lastDisconnect?.error?.statusCode;
         socket = undefined;
         qr = null;
         phone = null;
-        status = code === DisconnectReason.loggedOut ? 'logged_out' : 'disconnected';
+        if (code === DisconnectReason.loggedOut) {
+          status = 'logged_out';
+        } else if (code === DisconnectReason.restartRequired) {
+          schedulePostScanReconnect(generation);
+        } else {
+          status = 'disconnected';
+        }
       }
     });
     return publicStatus();
