@@ -256,7 +256,7 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
 
   Future<void> _attachPhoto(Map<String, dynamic> part) async {
     try {
-      final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+      final picked = await FilePicker.pickFiles(type: FileType.image, withData: true);
       final file = picked?.files.single;
       if (file == null || file.bytes == null) return;
       final evidence = Map<String, dynamic>.from(await widget.api.uploadBytes(
