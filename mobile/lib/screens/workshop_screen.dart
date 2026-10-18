@@ -897,6 +897,112 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     }
   }
 
+  Future<Map<String, dynamic>?> _editWorkOrder(Map<String, dynamic> order) async {
+    final mileage = TextEditingController(text: '${order['mileage_km'] ?? ''}');
+    final symptoms = TextEditingController(text: '${order['reported_symptoms'] ?? ''}');
+    final notes = TextEditingController(text: '${order['initial_notes'] ?? ''}');
+    DateTime? deadline = DateTime.tryParse('${order['promised_at'] ?? ''}')?.toLocal();
+    final form = GlobalKey<FormState>();
+    try {
+      final data = await showDialog<Map<String, dynamic>>(context: context,
+        builder: (dialogContext) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: Text('Editar ${order['code'] ?? 'orden'}'),
+          content: SizedBox(width: 440, child: Form(key: form, child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Cliente y vehículo permanecen vinculados para proteger el historial.'),
+              const SizedBox(height: 12),
+              TextFormField(controller: mileage, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Kilometraje'),
+                validator: (value) => value == null || value.trim().isEmpty ||
+                    (int.tryParse(value.trim()) != null && int.parse(value.trim()) >= 0)
+                    ? null : 'Ingresa un kilometraje válido'),
+              const SizedBox(height: 10),
+              TextFormField(controller: symptoms, maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Síntomas informados')),
+              const SizedBox(height: 10),
+              TextFormField(controller: notes, maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Notas de recepción')),
+              const SizedBox(height: 10),
+              ListTile(contentPadding: EdgeInsets.zero,
+                title: const Text('Fecha prometida de entrega'),
+                subtitle: Text(deadline == null ? 'Sin fecha' :
+                  '${MaterialLocalizations.of(context).formatMediumDate(deadline!)} · '
+                  '${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(deadline!))}'),
+                trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+                  if (deadline != null) IconButton(tooltip: 'Quitar fecha',
+                    onPressed: () => update(() => deadline = null),
+                    icon: const Icon(Icons.close)),
+                  IconButton(tooltip: 'Elegir fecha y hora', icon: const Icon(Icons.calendar_month),
+                    onPressed: () async {
+                      final now = DateTime.now();
+                      final date = await showDatePicker(context: context,
+                        initialDate: deadline ?? now, firstDate: DateTime(2000),
+                        lastDate: DateTime(now.year + 10));
+                      if (date == null || !context.mounted) return;
+                      final time = await showTimePicker(context: context,
+                        initialTime: deadline == null ? TimeOfDay.now() : TimeOfDay.fromDateTime(deadline!));
+                      if (time == null || !context.mounted) return;
+                      update(() => deadline = DateTime(date.year, date.month, date.day,
+                        time.hour, time.minute));
+                    }),
+                ])),
+            ])))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+            FilledButton(onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(dialogContext, {
+                'mileage_km': mileage.text.trim().isEmpty ? null : int.parse(mileage.text.trim()),
+                'reported_symptoms': symptoms.text.trim(),
+                'initial_notes': notes.text.trim(),
+                'promised_at': deadline?.toUtc().toIso8601String(),
+              });
+            }, child: const Text('Guardar cambios')),
+          ],
+        )));
+      if (data == null) return null;
+      final updated = await widget.api.patchJson('/api/v1/work-orders/${order['id']}', data);
+      if (!mounted) return null;
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Orden actualizada')));
+      return Map<String, dynamic>.from(updated as Map);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+      return null;
+    } finally {
+      mileage.dispose(); symptoms.dispose(); notes.dispose();
+    }
+  }
+
+  Future<bool> _deleteWorkOrder(Map<String, dynamic> order) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: Text('Eliminar ${order['code'] ?? 'orden'}'),
+      content: const Text('Si la orden no tiene trabajos registrados, se eliminará. '
+        'Si ya tiene historial, se cancelará y sus registros se conservarán.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Volver')),
+        FilledButton(onPressed: () => Navigator.pop(context, true),
+          child: const Text('Eliminar o cancelar')),
+      ],
+    ));
+    if (confirmed != true) return false;
+    try {
+      final result = await widget.api.delete('/api/v1/work-orders/${order['id']}');
+      if (!mounted) return false;
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result is Map && result['cancelled'] == true
+          ? 'Orden cancelada. El historial se conservó.' : 'Orden eliminada.')));
+      return true;
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+      return false;
+    }
+  }
+
   Future<void> _save(
       String path, Map<String, dynamic> data, String success) async {
     setState(() => _saving = true);
@@ -925,7 +1031,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           api: widget.api,
           order: order,
           role: widget.role,
-          onChanged: _refresh),
+          onChanged: _refresh,
+          onEditOrder: _editWorkOrder,
+          onDeleteOrder: _deleteWorkOrder),
     );
     await _refresh();
   }
@@ -1252,14 +1360,23 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
       subtitle: Text(
           '$customerLabel${item['technician_name'] == null ? '' : ' · ${item['technician_name']}'}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
       isThreeLine: true,
-      trailing: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _StatusPill(label: spanishStatus(status), color: color),
-            const SizedBox(height: 8),
-            const Icon(Icons.chevron_right),
-          ]),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        _StatusPill(label: spanishStatus(status), color: color),
+        if (widget.role == 'admin')
+          PopupMenuButton<String>(
+            tooltip: 'Acciones de la orden',
+            onSelected: (action) async {
+              if (action == 'edit') await _editWorkOrder(item);
+              if (action == 'delete') await _deleteWorkOrder(item);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Editar orden')),
+              PopupMenuItem(value: 'delete', child: Text('Eliminar orden')),
+            ],
+          )
+        else
+          const Icon(Icons.chevron_right),
+      ]),
       onTap: () => _openOrder(item),
     ));
   }
@@ -1419,11 +1536,15 @@ class WorkOrderDetails extends StatefulWidget {
       required this.order,
       required this.role,
       required this.onChanged,
+      required this.onEditOrder,
+      required this.onDeleteOrder,
       super.key});
   final ApiClient api;
   final Map<String, dynamic> order;
   final String role;
   final Future<void> Function() onChanged;
+  final Future<Map<String, dynamic>?> Function(Map<String, dynamic>) onEditOrder;
+  final Future<bool> Function(Map<String, dynamic>) onDeleteOrder;
 
   @override
   State<WorkOrderDetails> createState() => _WorkOrderDetailsState();
@@ -2270,8 +2391,29 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                       color: Theme.of(context).colorScheme.outlineVariant,
                       borderRadius: BorderRadius.circular(4)))),
           const SizedBox(height: 18),
-          Text('${widget.order['code'] ?? 'Orden de trabajo'}',
-              style: Theme.of(context).textTheme.headlineSmall),
+          Row(children: [
+            Expanded(child: Text('${widget.order['code'] ?? 'Orden de trabajo'}',
+                style: Theme.of(context).textTheme.headlineSmall)),
+            if (widget.role == 'admin')
+              PopupMenuButton<String>(
+                tooltip: 'Acciones de la orden',
+                onSelected: (action) async {
+                  if (action == 'edit') {
+                    final updated = await widget.onEditOrder(widget.order);
+                    if (updated != null && mounted) {
+                      setState(() => widget.order.addAll(updated));
+                    }
+                  } else if (action == 'delete') {
+                    final changed = await widget.onDeleteOrder(widget.order);
+                    if (changed && mounted) Navigator.of(context).pop();
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'edit', child: Text('Editar orden')),
+                  PopupMenuItem(value: 'delete', child: Text('Eliminar orden')),
+                ],
+              ),
+          ]),
           if ('${widget.order['reported_symptoms'] ?? ''}'.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
             Text('Síntomas informados: ${widget.order['reported_symptoms']}'),

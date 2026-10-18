@@ -23,6 +23,7 @@ from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
+    WorkOrderReception, WorkOrderEvidence, InstalledPart,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
@@ -1029,16 +1030,21 @@ def stop_work_session(session_id: int, request: Request, session: Session = Depe
 
 @app.delete("/api/v1/work-orders/{order_id}", dependencies=[Depends(require_admin)])
 def delete_work_order(order_id: int, session: Session = Depends(get_session)):
-    if session.exec(select(MaintenanceExecution).where(MaintenanceExecution.work_order_id == order_id)).first():
-        raise HTTPException(409, "La orden tiene mantenciones registradas y debe conservarse")
     order = session.get(WorkOrder, order_id)
     if not order:
         raise HTTPException(404, "Orden de trabajo no encontrada")
-    has_history = (session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order_id)).first()
+    services = session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order_id)).all()
+    has_history = (session.exec(select(MaintenanceExecution).where(MaintenanceExecution.work_order_id == order_id)).first()
                    or session.exec(select(Inspection).where(Inspection.work_order_id == order_id)).first()
                    or session.exec(select(Quote).where(Quote.work_order_id == order_id)).first()
                    or session.exec(select(ScannerReport).where(ScannerReport.work_order_id == order_id)).first()
-                   or session.exec(select(Sale).where(Sale.work_order_id == order_id)).first())
+                   or session.exec(select(Sale).where(Sale.work_order_id == order_id)).first()
+                   or session.exec(select(WorkSession).where(WorkSession.work_order_id == order_id)).first()
+                   or session.exec(select(WorkOrderReception).where(WorkOrderReception.work_order_id == order_id)).first()
+                   or session.exec(select(WorkOrderEvidence).where(WorkOrderEvidence.work_order_id == order_id)).first()
+                   or session.exec(select(InstalledPart).where(InstalledPart.work_order_id == order_id)).first()
+                   or any(service.status != "pending" or service.findings or service.started_at
+                          or service.completed_at for service in services))
     if has_history:
         order.status = WorkStatus.cancelled
         session.add(order); session.commit()
@@ -1046,6 +1052,8 @@ def delete_work_order(order_id: int, session: Session = Depends(get_session)):
     assignment = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.work_order_id == order_id)).first()
     if assignment:
         session.delete(assignment)
+    for service in services:
+        session.delete(service)
     session.delete(order); session.commit()
     return {"deleted": True, "cancelled": False}
 

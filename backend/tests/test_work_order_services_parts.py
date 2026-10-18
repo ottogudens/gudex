@@ -6,8 +6,8 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
-from app.main import create_work_order, list_work_sessions, my_work_orders, start_work_session, stop_work_session, update_work_order
-from app.models import Customer, Product, StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus
+from app.main import create_work_order, delete_work_order, list_work_sessions, my_work_orders, start_work_session, stop_work_session, update_work_order
+from app.models import Customer, Inspection, Product, StockMovement, User, UserRole, Vehicle, WorkOrder, WorkOrderAssignment, WorkStatus
 from app.routers.work_order_services import (PartCreate, PartUpdate, ServiceCreate, ServiceUpdate,
                                                add_part, add_service, list_services, part_usage, update_part,
                                                update_service, vehicle_parts)
@@ -153,3 +153,30 @@ def test_generic_order_can_add_independent_modules_later():
         repair = add_service(order.id, ServiceCreate(kind="corrective", name="Reparación de frenos"), session)
         rows = session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order.id)).all()
         assert {row.id for row in rows} == {inspection.id, repair.id}
+
+
+def test_delete_draft_order_with_pending_module_and_preserve_order_with_history():
+    create_db_and_tables()
+    suffix = uuid4().hex[:8]
+    with Session(engine) as session:
+        customer = Customer(full_name="Cliente para borrar borrador")
+        session.add(customer)
+        session.flush()
+        vehicle = Vehicle(customer_id=customer.id, plate=suffix.upper(), make="Kia", model="Rio")
+        session.add(vehicle)
+        session.commit()
+
+        draft = create_work_order(WorkOrderCreate(customer_id=customer.id, vehicle_id=vehicle.id), session)
+        pending = add_service(draft.id, ServiceCreate(kind="inspection", name="Inspección pendiente"), session)
+        result = delete_work_order(draft.id, session)
+        from app.models import WorkOrderService
+        assert result["deleted"] is True
+        assert session.get(WorkOrder, draft.id) is None
+        assert session.get(WorkOrderService, pending.id) is None
+
+        recorded = create_work_order(WorkOrderCreate(customer_id=customer.id, vehicle_id=vehicle.id), session)
+        session.add(Inspection(work_order_id=recorded.id, category="Frenos", item="Discos", result="normal"))
+        session.commit()
+        result = delete_work_order(recorded.id, session)
+        assert result["cancelled"] is True
+        assert session.get(WorkOrder, recorded.id).status == WorkStatus.cancelled
