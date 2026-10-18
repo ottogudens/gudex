@@ -928,7 +928,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                 subtitle: Text(deadline == null ? 'Sin fecha' :
                   '${MaterialLocalizations.of(context).formatMediumDate(deadline!)} · '
                   '${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(deadline!))}'),
-                trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (deadline != null) IconButton(tooltip: 'Quitar fecha',
                     onPressed: () => update(() => deadline = null),
                     icon: const Icon(Icons.close)),
