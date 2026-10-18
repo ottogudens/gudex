@@ -16,6 +16,15 @@ const _serviceStatuses = {'pending': 'Pendiente', 'in_progress': 'En ejecución'
   'blocked': 'Bloqueado', 'completed': 'Terminado', 'cancelled': 'Cancelado'};
 const _partStatuses = {'received': 'Recibido', 'installed': 'Instalado',
   'not_installed': 'No instalado'};
+const _kindIcons = <String, IconData>{
+  'inspection': Icons.fact_check_outlined,
+  'scanner': Icons.monitor_heart_outlined,
+  'preventive': Icons.build_circle_outlined,
+  'corrective': Icons.handyman_outlined,
+  'pre_purchase': Icons.car_rental_outlined,
+  'pre_technical_review': Icons.verified_outlined,
+  'other': Icons.add_task_outlined,
+};
 
 class WorkOrderServicesPanel extends StatefulWidget {
   const WorkOrderServicesPanel({required this.api, required this.orderId,
@@ -104,10 +113,22 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
       SnackBar(content: Text('$error'.replaceFirst('Exception: ', ''))));
   }
 
-  Future<void> _addService() async {
-    final name = TextEditingController();
+  Future<void> _chooseModule() async {
+    final kind = await showDialog<String>(context: context, builder: (context) =>
+      SimpleDialog(title: const Text('Agregar módulo a la orden'),
+        children: _kinds.entries.map((entry) => SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, entry.key),
+          child: ListTile(
+            leading: Icon(_kindIcons[entry.key]),
+            title: Text(entry.value),
+            dense: true,
+          ))).toList()));
+    if (kind != null && mounted) await _addService(kind);
+  }
+
+  Future<void> _addService(String kind) async {
+    final name = TextEditingController(text: _kinds[kind]);
     final description = TextEditingController();
-    var kind = 'inspection';
     int? catalogId;
     int? assignee;
     try {
@@ -116,14 +137,9 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
       if (!mounted) return;
       final accepted = await showDialog<bool>(context: context, builder: (context) =>
         StatefulBuilder(builder: (context, redraw) => AlertDialog(
-          title: const Text('Agregar servicio a la orden'),
+          title: Text('Nuevo módulo · ${_kinds[kind]}'),
           content: SizedBox(width: 430, child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min, children: [
-              DropdownButtonFormField<String>(initialValue: kind,
-                decoration: const InputDecoration(labelText: 'Tipo de trabajo'),
-                items: _kinds.entries.map((e) => DropdownMenuItem(value: e.key,
-                  child: Text(e.value))).toList(),
-                onChanged: (value) => redraw(() => kind = value ?? kind)),
               DropdownButtonFormField<int?>(initialValue: catalogId,
                 decoration: const InputDecoration(labelText: 'Servicio del catálogo (opcional)'),
                 items: [const DropdownMenuItem<int?>(value: null, child: Text('Servicio manual')),
@@ -293,26 +309,37 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
 
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [Expanded(child: Text('Servicios de la orden',
-      style: Theme.of(context).textTheme.titleLarge)),
-      if (widget.role == 'admin') IconButton(onPressed: _addService,
-        icon: const Icon(Icons.add_circle_outline), tooltip: 'Agregar servicio')]),
-    const Text('Cada trabajo registra su avance y piezas. Los repuestos del cliente no descuentan inventario.'),
+    Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center,
+      children: [Text('Módulos de servicio',
+      style: Theme.of(context).textTheme.titleLarge),
+      if (widget.role == 'admin') FilledButton.icon(onPressed: _chooseModule,
+        icon: const Icon(Icons.add), label: const Text('Agregar módulo'))]),
+    const SizedBox(height: 6),
+    const Text('Cada módulo tiene su responsable, avance, tiempo, hallazgos y repuestos. Puedes combinar varios en una orden.'),
+    const SizedBox(height: 12),
     FutureBuilder<List<Map<String, dynamic>>>(future: _services, builder: (context, snapshot) {
       if (snapshot.hasError) return Text('Error al cargar servicios: ${snapshot.error}');
       if (!snapshot.hasData) return const LinearProgressIndicator();
       final services = snapshot.data!;
-      if (services.isEmpty) return const ListTile(title: Text('Sin servicios detallados'),
-        subtitle: Text('Administración puede agrupar los trabajos de esta orden.'));
+      if (services.isEmpty) return Card(child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(children: [
+          const Icon(Icons.dashboard_customize_outlined, size: 36),
+          const SizedBox(height: 8),
+          const Text('Esta orden todavía no tiene módulos de servicio.'),
+          const SizedBox(height: 8),
+          if (widget.role == 'admin') OutlinedButton.icon(onPressed: _chooseModule,
+            icon: const Icon(Icons.add), label: const Text('Elegir primer módulo')),
+        ])));
       return FutureBuilder<List<Map<String, dynamic>>>(future: _parts, builder: (context, partSnapshot) {
         final parts = partSnapshot.data ?? [];
         return Column(children: services.map((service) {
           final serviceParts = parts.where((part) => part['work_order_service_id'] == service['id']);
           final canEdit = service['can_edit'] == true;
-          return Card(child: ExpansionTile(initiallyExpanded: true,
-            leading: const Icon(Icons.handyman_outlined),
+          return Card(child: ExpansionTile(initiallyExpanded: services.length == 1,
+            leading: Icon(_kindIcons[service['kind']] ?? Icons.handyman_outlined),
             title: Text('${service['name']}'),
-            subtitle: Text('${_kinds[service['kind']] ?? service['kind']} · ${_serviceStatuses[service['status']] ?? service['status']}'),
+            subtitle: Text('${_kinds[service['kind']] ?? service['kind']} · ${_serviceStatuses[service['status']] ?? service['status']} · ${serviceParts.length} repuesto(s)'),
             children: [
               if ('${service['description'] ?? ''}'.isNotEmpty)
                 ListTile(title: Text('${service['description']}')),

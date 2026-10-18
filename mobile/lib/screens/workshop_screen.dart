@@ -755,8 +755,6 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     final mileage = TextEditingController();
     final symptoms = TextEditingController();
     final notes = TextEditingController();
-    final serviceName = TextEditingController(text: 'Inspección inicial');
-    var serviceKind = 'inspection';
     int customerId = _customers.first['id'] as int;
     int? vehicleId = _vehicles.firstWhere((v) => v['customer_id'] == customerId,
         orElse: () => _vehicles.first)['id'] as int;
@@ -770,7 +768,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
               !customerVehicles.any((v) => v['id'] == vehicleId))
             vehicleId = customerVehicles.first['id'] as int;
           return AlertDialog(
-            title: const Text('Abrir orden de trabajo'),
+            title: const Text('Nueva orden de trabajo'),
             content: Form(
                 key: form,
                 child: SingleChildScrollView(
@@ -854,33 +852,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                       decoration: const InputDecoration(
                           labelText: 'Notas de recepción')),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: serviceKind,
-                    decoration: const InputDecoration(labelText: 'Primer servicio'),
-                    items: const [
-                      DropdownMenuItem(value: 'inspection', child: Text('Inspección')),
-                      DropdownMenuItem(value: 'scanner', child: Text('Diagnóstico con scanner')),
-                      DropdownMenuItem(value: 'preventive', child: Text('Mantención preventiva')),
-                      DropdownMenuItem(value: 'corrective', child: Text('Reparación correctiva')),
-                      DropdownMenuItem(value: 'pre_purchase', child: Text('Inspección precompra')),
-                      DropdownMenuItem(value: 'pre_technical_review', child: Text('Inspección prerevisión técnica')),
-                    ],
-                    onChanged: (value) => updateDialog(() {
-                      serviceKind = value ?? serviceKind;
-                      serviceName.text = switch (serviceKind) {
-                        'scanner' => 'Diagnóstico con scanner',
-                        'preventive' => 'Mantención preventiva',
-                        'corrective' => 'Reparación correctiva',
-                        'pre_purchase' => 'Inspección precompra',
-                        'pre_technical_review' => 'Inspección prerevisión técnica',
-                        _ => 'Inspección inicial',
-                      };
-                    }),
-                  ),
-                  TextFormField(controller: serviceName,
-                    decoration: const InputDecoration(labelText: 'Trabajo a realizar *'),
-                    validator: (v) => v == null || v.trim().length < 2
-                        ? 'Indica el trabajo' : null),
+                  const Text('Después de crear la orden podrás agregar los módulos de servicio que necesites.'),
                 ]))),
             actions: [
               TextButton(
@@ -899,7 +871,6 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                         'reported_symptoms': symptoms.text.trim(),
                       if (notes.text.trim().isNotEmpty)
                         'initial_notes': notes.text.trim(),
-                      'services': [{'kind': serviceKind, 'name': serviceName.text.trim()}],
                     });
                   },
                   child: const Text('Crear orden')),
@@ -907,13 +878,24 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           );
         }),
       );
-      if (data != null)
-        await _save('/api/v1/work-orders', data, 'Orden de trabajo creada');
+      if (data != null) {
+        setState(() => _saving = true);
+        try {
+          final created = await widget.api.postJson('/api/v1/work-orders', data);
+          if (!mounted) return;
+          await _refresh();
+          if (mounted) await _openOrder(Map<String, dynamic>.from(created as Map));
+        } catch (error) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(error.toString().replaceFirst('Exception: ', ''))));
+        } finally {
+          if (mounted) setState(() => _saving = false);
+        }
+      }
     } finally {
       mileage.dispose();
       symptoms.dispose();
       notes.dispose();
-      serviceName.dispose();
     }
   }
 

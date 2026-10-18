@@ -132,3 +132,24 @@ def test_new_order_creates_first_service_atomically():
         from app.models import WorkOrderService
         rows = session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order.id)).all()
         assert len(rows) == 1 and rows[0].kind == "pre_purchase"
+
+
+def test_generic_order_can_add_independent_modules_later():
+    create_db_and_tables()
+    suffix = uuid4().hex[:8]
+    with Session(engine) as session:
+        customer = Customer(full_name="Cliente orden modular")
+        session.add(customer)
+        session.flush()
+        vehicle = Vehicle(customer_id=customer.id, plate=suffix.upper(), make="Kia", model="Rio")
+        session.add(vehicle)
+        session.commit()
+
+        order = create_work_order(WorkOrderCreate(customer_id=customer.id, vehicle_id=vehicle.id), session)
+        from app.models import WorkOrderService
+        assert not session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order.id)).all()
+
+        inspection = add_service(order.id, ServiceCreate(kind="inspection", name="Inspección"), session)
+        repair = add_service(order.id, ServiceCreate(kind="corrective", name="Reparación de frenos"), session)
+        rows = session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order.id)).all()
+        assert {row.id for row in rows} == {inspection.id, repair.id}
