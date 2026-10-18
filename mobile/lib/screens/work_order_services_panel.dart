@@ -28,10 +28,16 @@ const _kindIcons = <String, IconData>{
 
 class WorkOrderServicesPanel extends StatefulWidget {
   const WorkOrderServicesPanel({required this.api, required this.orderId,
-    required this.role, super.key});
+    required this.vehicleId, required this.role, this.onChanged, this.onAddInspection,
+    this.onApplyTemplate, this.onEditInspection, super.key});
   final ApiClient api;
   final int orderId;
+  final int vehicleId;
   final String role;
+  final VoidCallback? onChanged;
+  final Future<void> Function(int serviceId)? onAddInspection;
+  final Future<void> Function(int serviceId)? onApplyTemplate;
+  final Future<void> Function(Map<String, dynamic> inspection)? onEditInspection;
 
   @override
   State<WorkOrderServicesPanel> createState() => _WorkOrderServicesPanelState();
@@ -41,6 +47,9 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
   late Future<List<Map<String, dynamic>>> _services;
   late Future<List<Map<String, dynamic>>> _parts;
   late Future<Map<String, dynamic>> _sessions;
+  late Future<List<Map<String, dynamic>>> _inspections;
+  late Future<List<Map<String, dynamic>>> _scannerReports;
+  late Future<List<Map<String, dynamic>>> _evidence;
 
   @override
   void initState() {
@@ -61,6 +70,9 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
       _parts = _list('/api/v1/work-orders/${widget.orderId}/parts');
       _sessions = widget.api.get('/api/v1/work-orders/${widget.orderId}/work-sessions')
           .then((value) => Map<String, dynamic>.from(value as Map));
+      _inspections = _list('/api/v1/work-orders/${widget.orderId}/inspections');
+      _scannerReports = _list('/api/v1/vehicles/${widget.vehicleId}/scanner-reports');
+      _evidence = _list('/api/v1/work-orders/${widget.orderId}/evidence');
     });
   }
 
@@ -170,6 +182,7 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
         if (assignee != null) 'assigned_user_id': assignee,
       });
       _reload();
+      widget.onChanged?.call();
     } catch (error) { _notice(error); }
     finally { name.dispose(); description.dispose(); }
   }
@@ -282,6 +295,48 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
     } catch (error) { _notice(error); }
   }
 
+  Future<void> _attachScannerReport(Map<String, dynamic> service) async {
+    try {
+      final picked = await FilePicker.pickFiles(type: FileType.custom,
+        allowedExtensions: ['pdf'], withData: true);
+      final file = picked?.files.single;
+      if (file == null || file.bytes == null) return;
+      await widget.api.uploadBytes(
+        '/api/v1/scanner-reports?vehicle_id=${widget.vehicleId}'
+        '&work_order_id=${widget.orderId}&work_order_service_id=${service['id']}',
+        file.bytes!, file.name);
+      _reload();
+    } catch (error) { _notice(error); }
+  }
+
+  Future<void> _attachInspectionEvidence(Map<String, dynamic> inspection) async {
+    try {
+      final picked = await FilePicker.pickFiles(type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'], withData: true);
+      final file = picked?.files.single;
+      if (file == null || file.bytes == null) return;
+      await widget.api.uploadBytes('/api/v1/work-orders/${widget.orderId}/evidence'
+        '?work_order_service_id=${inspection['work_order_service_id']}',
+        file.bytes!, file.name, fields: {'inspection_id': '${inspection['id']}'});
+      _reload();
+    } catch (error) { _notice(error); }
+  }
+
+  Future<void> _openEvidence(Map<String, dynamic> evidence) async {
+    try {
+      final path = '${evidence['download_url']}';
+      if ('${evidence['content_type']}' == 'application/pdf') {
+        await openGudexPdf(widget.api, path, '${evidence['filename']}');
+        return;
+      }
+      final bytes = await widget.api.getBytes(path);
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => Dialog(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+          child: Image.memory(bytes, fit: BoxFit.contain))));
+    } catch (error) { _notice(error); }
+  }
+
   Future<void> _viewPhoto(Map<String, dynamic> part) async {
     try {
       final bytes = await widget.api.getBytes('${part['photo_url']}');
@@ -333,8 +388,24 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
         ])));
       return FutureBuilder<List<Map<String, dynamic>>>(future: _parts, builder: (context, partSnapshot) {
         final parts = partSnapshot.data ?? [];
-        return Column(children: services.map((service) {
+        return FutureBuilder<List<Map<String, dynamic>>>(future: _inspections, builder: (context, inspectionSnapshot) {
+        final inspections = inspectionSnapshot.data ?? [];
+        return FutureBuilder<List<Map<String, dynamic>>>(future: _scannerReports, builder: (context, scannerSnapshot) {
+        final scannerReports = scannerSnapshot.data ?? [];
+        return FutureBuilder<List<Map<String, dynamic>>>(future: _evidence, builder: (context, evidenceSnapshot) {
+        final evidence = evidenceSnapshot.data ?? [];
+        final legacyInspections = inspections.where((row) => row['work_order_service_id'] == null);
+        final legacyReports = scannerReports.where((row) => row['work_order_id'] == widget.orderId &&
+            row['work_order_service_id'] == null);
+        final linkedInspectionIds = inspections.where((row) => row['work_order_service_id'] != null)
+            .map((row) => row['id']).toSet();
+        final legacyEvidence = evidence.where((row) => !linkedInspectionIds.contains(row['inspection_id']));
+        return Column(children: [...services.map((service) {
           final serviceParts = parts.where((part) => part['work_order_service_id'] == service['id']);
+          final serviceInspections = inspections.where((row) => row['work_order_service_id'] == service['id']);
+          final serviceReports = scannerReports.where((row) => row['work_order_service_id'] == service['id']);
+          final isInspection = const {'inspection', 'pre_purchase', 'pre_technical_review'}
+              .contains(service['kind']);
           final canEdit = service['can_edit'] == true;
           return Card(child: ExpansionTile(initiallyExpanded: services.length == 1,
             leading: Icon(_kindIcons[service['kind']] ?? Icons.handyman_outlined),
@@ -346,6 +417,52 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
               if ('${service['findings'] ?? ''}'.isNotEmpty)
                 ListTile(title: Text('Hallazgos: ${service['findings']}')),
               if (canEdit) _serviceTimer(service),
+              if (isInspection || serviceInspections.isNotEmpty) ...[
+                Wrap(spacing: 8, children: [
+                  if (isInspection && canEdit && widget.onApplyTemplate != null) OutlinedButton.icon(
+                    onPressed: () async { await widget.onApplyTemplate!(service['id'] as int); _reload(); },
+                    icon: const Icon(Icons.playlist_add_check), label: const Text('Aplicar lista')),
+                  if (isInspection && canEdit && widget.onAddInspection != null) OutlinedButton.icon(
+                    onPressed: () async { await widget.onAddInspection!(service['id'] as int); _reload(); },
+                    icon: const Icon(Icons.add), label: const Text('Agregar punto')),
+                ]),
+                if (isInspection && serviceInspections.isEmpty) const ListTile(
+                  title: Text('Sin puntos de inspección registrados')),
+                ...serviceInspections.map((row) => ListTile(
+                  leading: Icon(row['result'] == 'normal' ? Icons.check_circle_outline
+                      : Icons.fact_check_outlined),
+                  title: Text('${row['category']}: ${row['item']}'),
+                  subtitle: Text('${row['result']}${row['notes'] == null ? '' : ' · ${row['notes']}'}'),
+                  onTap: canEdit && widget.onEditInspection != null ? () async {
+                    await widget.onEditInspection!(row);
+                    _reload();
+                  } : null,
+                  trailing: canEdit ? IconButton(
+                    onPressed: () => _attachInspectionEvidence(row),
+                    tooltip: 'Adjuntar evidencia', icon: const Icon(Icons.attach_file)) : null,
+                )),
+                ...evidence.where((item) => serviceInspections.any(
+                  (inspection) => inspection['id'] == item['inspection_id']))
+                    .map((item) => ListTile(
+                      leading: const Icon(Icons.attachment_outlined),
+                      title: Text('${item['filename']}'),
+                      subtitle: Text('Evidencia de inspección'),
+                      onTap: () => _openEvidence(item),
+                    )),
+              ],
+              if (service['kind'] == 'scanner') ...[
+                if (canEdit) OutlinedButton.icon(
+                  onPressed: () => _attachScannerReport(service),
+                  icon: const Icon(Icons.upload_file), label: const Text('Adjuntar informe PDF')),
+                if (serviceReports.isEmpty) const ListTile(title: Text('Sin informes de escáner')),
+                ...serviceReports.map((report) => ListTile(
+                  leading: const Icon(Icons.picture_as_pdf_outlined),
+                  title: Text('${report['filename']}'),
+                  subtitle: Text('Informe de diagnóstico'),
+                  onTap: () => openGudexPdf(widget.api,
+                    '/api/v1/scanner-reports/${report['id']}/file', '${report['filename']}'),
+                )),
+              ],
               Wrap(spacing: 8, children: [
                 if (widget.role == 'admin') OutlinedButton.icon(onPressed: () => _assignService(service),
                   icon: const Icon(Icons.person_outline), label: const Text('Asignar')),
@@ -388,7 +505,34 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
                 ]),
               )),
             ]));
-        }).toList());
+        }),
+          if (legacyInspections.isNotEmpty || legacyReports.isNotEmpty || legacyEvidence.isNotEmpty)
+            Card(child: ExpansionTile(title: const Text('Registros anteriores sin módulo'),
+              subtitle: const Text('Historial conservado de órdenes previas'),
+              children: [
+                ...legacyInspections.map((row) => ListTile(
+                  leading: const Icon(Icons.fact_check_outlined),
+                  title: Text('${row['category']}: ${row['item']}'),
+                  subtitle: const Text('Inspección anterior'),
+                  onTap: widget.role != 'admin' || widget.onEditInspection == null
+                      ? null : () => widget.onEditInspection!(row),
+                )),
+                ...legacyReports.map((row) => ListTile(
+                  leading: const Icon(Icons.picture_as_pdf_outlined),
+                  title: Text('${row['filename']}'),
+                  onTap: () => openGudexPdf(widget.api,
+                    '/api/v1/scanner-reports/${row['id']}/file', '${row['filename']}'),
+                )),
+                ...legacyEvidence.map((row) => ListTile(
+                  leading: const Icon(Icons.attachment_outlined),
+                  title: Text('${row['filename']}'),
+                  onTap: () => _openEvidence(row),
+                )),
+              ])),
+        ]);
+        });
+        });
+        });
       });
     }),
   ]);

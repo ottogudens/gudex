@@ -119,9 +119,10 @@ class ApiClient {
   }
 
   Future<dynamic> uploadBytes(String path, List<int> bytes, String filename,
-      {String? contentType}) async {
+      {String? contentType, Map<String, String>? fields}) async {
     final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
     request.headers.addAll(_headers);
+    if (fields != null) request.fields.addAll(fields);
     request.files
         .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     final streamed = await request.send();

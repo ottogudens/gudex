@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../core/constants.dart';
 import '../services/api_client.dart';
@@ -1435,12 +1433,11 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
   bool get _canManageOrder => widget.role != 'mechanic' || widget.order['can_manage_order'] != false;
   late final TextEditingController _diagnosis;
   late String _status;
-  late Future<List<Map<String, dynamic>>> _inspections;
   late Future<List<Map<String, dynamic>>> _quotes;
   late Future<List<Map<String, dynamic>>> _templates;
-  late Future<List<Map<String, dynamic>>> _evidence;
-  late Future<Map<String, dynamic>> _report;
   late Future<Map<String, dynamic>> _workSessions;
+  Set<String> _moduleKinds = {};
+  Set<int> _inspectionModuleIds = {};
   bool _saving = false;
   bool _restoringDraft = true;
   String? _error;
@@ -1504,30 +1501,32 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     _diagnosis =
         TextEditingController(text: '${widget.order['diagnosis'] ?? ''}');
     _status = '${widget.order['status'] ?? 'received'}';
-    _inspections = _loadInspections();
     _quotes = _loadQuotes();
     _templates = _loadList('/api/v1/inspection-templates');
-    _evidence = _loadList('/api/v1/work-orders/${widget.order['id']}/evidence');
-    _report = _loadReport();
     _workSessions = _loadWorkSessions();
+    _refreshModules();
     _restoreDraft();
+  }
+
+  Future<void> _refreshModules() async {
+    try {
+      final modules = await _loadList('/api/v1/work-orders/${widget.order['id']}/services');
+      if (!mounted) return;
+      setState(() {
+        _moduleKinds = modules.map((row) => '${row['kind']}').toSet();
+        _inspectionModuleIds = modules.where((row) => const {
+          'inspection', 'pre_purchase', 'pre_technical_review'
+        }.contains(row['kind'])).map((row) => row['id'] as int).toSet();
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = 'No se pudieron cargar los módulos: $error');
+    }
   }
 
   @override
   void dispose() {
     _diagnosis.dispose();
     super.dispose();
-  }
-
-  Future<List<Map<String, dynamic>>> _loadInspections() async {
-    final result = await widget.api
-        .get('/api/v1/work-orders/${widget.order['id']}/inspections');
-    return result is List
-        ? result
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList()
-        : [];
   }
 
   Future<List<Map<String, dynamic>>> _loadQuotes() async {
@@ -1549,14 +1548,6 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
             .map((item) => Map<String, dynamic>.from(item))
             .toList()
         : [];
-  }
-
-  Future<Map<String, dynamic>> _loadReport() async {
-    final result = await widget.api
-        .get('/api/v1/work-orders/${widget.order['id']}/inspection-report');
-    return result is Map
-        ? Map<String, dynamic>.from(result)
-        : <String, dynamic>{};
   }
 
   Future<Map<String, dynamic>> _loadWorkSessions() async {
@@ -1676,17 +1667,15 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     }
   }
 
-  Future<void> _addInspection() async {
+  Future<void> _addInspection([int? selectedServiceId]) async {
     final form = GlobalKey<FormState>();
     final category = TextEditingController();
     final item = TextEditingController();
     final notes = TextEditingController();
     final measured = TextEditingController();
     String result = 'normal';
-    int? serviceId;
+    final serviceId = selectedServiceId;
     try {
-      final services = (await _loadList('/api/v1/work-orders/${widget.order['id']}/services'))
-          .where((service) => service['can_edit'] == true).toList();
       if (!mounted) return;
       final data = await showDialog<Map<String, dynamic>>(
         context: context,
@@ -1698,15 +1687,6 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                       child: SingleChildScrollView(
                           child:
                               Column(mainAxisSize: MainAxisSize.min, children: [
-                        DropdownButtonFormField<int?>(
-                            initialValue: serviceId,
-                            decoration: const InputDecoration(labelText: 'Servicio de la orden'),
-                            items: [const DropdownMenuItem<int?>(value: null, child: Text('Inspección general')),
-                              ...services.map((s) => DropdownMenuItem<int?>(value: s['id'] as int,
-                                  child: Text('${s['name']}')))],
-                            onChanged: (value) => updateDialog(() => serviceId = value),
-                            validator: (value) => !_canManageOrder && value == null
-                                ? 'Selecciona un servicio asignado' : null),
                         TextFormField(
                             controller: category,
                             decoration: const InputDecoration(
@@ -1784,7 +1764,6 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
       await widget.api.postJson(
           '/api/v1/work-orders/${widget.order['id']}/inspections', data);
       if (!mounted) return;
-      setState(() => _inspections = _loadInspections());
       await widget.onChanged();
       if (mounted)
         ScaffoldMessenger.of(context)
@@ -1802,7 +1781,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     }
   }
 
-  Future<void> _applyTemplate() async {
+  Future<void> _applyTemplate([int? selectedServiceId]) async {
     try {
       final templates = await _templates;
       if (!mounted) return;
@@ -1825,23 +1804,18 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
       );
       if (selected == null) return;
       final services = (await _loadList('/api/v1/work-orders/${widget.order['id']}/services'))
-          .where((service) => service['can_edit'] == true).toList();
+          .where((service) => service['can_edit'] == true &&
+              _inspectionModuleIds.contains(service['id'])).toList();
       if (!mounted) return;
-      final serviceId = await showDialog<int>(context: context, builder: (context) => SimpleDialog(
+      final serviceId = selectedServiceId ?? await showDialog<int>(context: context, builder: (context) => SimpleDialog(
         title: const Text('Asociar lista al servicio'),
-        children: [if (_canManageOrder) SimpleDialogOption(onPressed: () => Navigator.pop(context, 0),
-          child: const Text('Inspección general de la orden')),
-          ...services.map((s) => SimpleDialogOption(onPressed: () => Navigator.pop(context, s['id'] as int),
+        children: [ ...services.map((s) => SimpleDialogOption(onPressed: () => Navigator.pop(context, s['id'] as int),
             child: Text('${s['name']}')))]));
       if (serviceId == null) return;
       setState(() => _saving = true);
       final response = await widget.api.post(
-          '/api/v1/work-orders/${widget.order['id']}/inspection-templates/${selected['id']}/apply${serviceId == 0 ? '' : '?work_order_service_id=$serviceId'}');
+          '/api/v1/work-orders/${widget.order['id']}/inspection-templates/${selected['id']}/apply?work_order_service_id=$serviceId');
       if (!mounted) return;
-      setState(() {
-        _inspections = _loadInspections();
-        _report = _loadReport();
-      });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('${response['created_count']} puntos agregados')));
     } catch (error) {
@@ -1929,10 +1903,6 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
       if (orderId != null && inspectionId != null)
         await WorkOrderDraftStore.clearInspection(orderId, inspectionId);
       if (!mounted) return;
-      setState(() {
-        _inspections = _loadInspections();
-        _report = _loadReport();
-      });
     } catch (error) {
       if (orderId != null && inspectionId != null) {
         try {
@@ -2055,7 +2025,6 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
           .putJson('/api/v1/work-orders/${widget.order['id']}/reception', data);
       if (orderId != null) await WorkOrderDraftStore.clearReception(orderId);
       if (!mounted) return;
-      setState(() => _report = _loadReport());
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Recepción actualizada')));
     } catch (error) {
@@ -2082,63 +2051,6 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
       accessories.dispose();
       observations.dispose();
       acceptedBy.dispose();
-    }
-  }
-
-  Future<void> _attachEvidence() async {
-    final source = await showModalBottomSheet<String>(
-        context: context,
-        builder: (context) => SafeArea(
-                child: Wrap(children: [
-              ListTile(
-                  leading: const Icon(Icons.photo_camera_outlined),
-                  title: const Text('Tomar fotografía'),
-                  onTap: () => Navigator.pop(context, 'camera')),
-              ListTile(
-                  leading: const Icon(Icons.photo_library_outlined),
-                  title: const Text('Elegir fotografía'),
-                  onTap: () => Navigator.pop(context, 'gallery')),
-              ListTile(
-                  leading: const Icon(Icons.picture_as_pdf_outlined),
-                  title: const Text('Adjuntar archivo o PDF'),
-                  onTap: () => Navigator.pop(context, 'file')),
-            ])));
-    if (source == null) return;
-    try {
-      List<int>? bytes;
-      String? name;
-      if (source == 'file') {
-        final picked = await FilePicker.pickFiles(
-            type: FileType.custom,
-            allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
-            withData: true);
-        if (picked == null) return;
-        bytes = picked.files.single.bytes;
-        name = picked.files.single.name;
-      } else {
-        final picked = await ImagePicker().pickImage(
-            source:
-                source == 'camera' ? ImageSource.camera : ImageSource.gallery,
-            imageQuality: 85);
-        if (picked == null) return;
-        bytes = await picked.readAsBytes();
-        name = picked.name;
-      }
-      if (bytes == null) throw Exception('No fue posible leer el archivo');
-      await widget.api.uploadBytes(
-          '/api/v1/work-orders/${widget.order['id']}/evidence', bytes, name);
-      if (!mounted) return;
-      setState(() {
-        _evidence =
-            _loadList('/api/v1/work-orders/${widget.order['id']}/evidence');
-        _report = _loadReport();
-      });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Evidencia adjuntada')));
-    } catch (error) {
-      if (mounted)
-        setState(
-            () => _error = error.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -2355,92 +2267,34 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
           const SizedBox(height: 18),
           Text('${widget.order['code'] ?? 'Orden de trabajo'}',
               style: Theme.of(context).textTheme.headlineSmall),
-          if (widget.role == 'admin') ...[
+          if ('${widget.order['reported_symptoms'] ?? ''}'.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-                onPressed: _saving ? null : _assignTechnician,
-                icon: const Icon(Icons.person_add_alt_1),
-                label: Text(widget.order['technician_name'] == null
-                    ? 'Asignar mecánico'
-                    : 'Responsable: ${widget.order['technician_name']}')),
+            Text('Síntomas informados: ${widget.order['reported_symptoms']}'),
           ],
-          const SizedBox(height: 8),
-          Text(
-              'Síntomas informados: ${widget.order['reported_symptoms'] ?? 'Sin síntomas registrados'}'),
-          if (widget.order['initial_notes'] != null) ...[
+          if ('${widget.order['initial_notes'] ?? ''}'.trim().isNotEmpty) ...[
             const SizedBox(height: 4),
             Text('Recepción: ${widget.order['initial_notes']}'),
           ],
           const SizedBox(height: 16),
           WorkOrderServicesPanel(api: widget.api, orderId: widget.order['id'] as int,
-              role: widget.role),
-          const Divider(height: 28),
-          const SizedBox(height: 14),
+              vehicleId: widget.order['vehicle_id'] as int,
+              role: widget.role, onChanged: _refreshModules,
+              onAddInspection: (id) => _addInspection(id),
+              onApplyTemplate: (id) => _applyTemplate(id),
+              onEditInspection: _editInspection),
+          if (_moduleKinds.isNotEmpty || widget.order['status'] != 'received')
+          Card(child: ExpansionTile(
+            title: const Text('Gestión general de la orden'),
+            subtitle: Text(spanishStatus(_status)),
+            childrenPadding: const EdgeInsets.all(12),
+            children: [
+          if (widget.role == 'admin') OutlinedButton.icon(
+                onPressed: _saving ? null : _assignTechnician,
+                icon: const Icon(Icons.person_add_alt_1),
+                label: Text(widget.order['technician_name'] == null
+                    ? 'Asignar mecánico'
+                    : 'Responsable: ${widget.order['technician_name']}')),
           if (!_canManageOrder) const Text('Esta orden te aparece por un servicio asignado. Registra el avance dentro de ese servicio; el estado general lo gestiona el responsable de la orden.'),
-          if (_canManageOrder) FutureBuilder<Map<String, dynamic>>(
-            future: _workSessions,
-            builder: (context, snapshot) {
-              final data = snapshot.data ?? <String, dynamic>{};
-              final sessions = data['sessions'] is List
-                  ? (data['sessions'] as List)
-                      .whereType<Map>()
-                      .map((item) => Map<String, dynamic>.from(item))
-                      .toList()
-                  : <Map<String, dynamic>>[];
-              final generalSessions = sessions.where((item) => item['work_order_service_id'] == null).toList();
-              final activeRows = generalSessions.where((item) => item['ended_at'] == null && item['is_mine'] == true).toList();
-              final active = activeRows.isEmpty ? null : activeRows.first;
-              final seconds = generalSessions.fold<int>(0, (total, item) {
-                final start = DateTime.tryParse('${item['started_at']}');
-                final end = DateTime.tryParse('${item['ended_at'] ?? item['paused_at']}') ?? DateTime.now();
-                return total + (start == null ? 0 : (end.difference(start).inSeconds -
-                    ((item['paused_seconds'] as num?)?.toInt() ?? 0)).clamp(0, 999999999).toInt());
-              });
-              final time =
-                  '${(seconds ~/ 3600).toString().padLeft(2, '0')}:${((seconds % 3600) ~/ 60).toString().padLeft(2, '0')}';
-              return Card(
-                  child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(children: [
-                        const Icon(Icons.timer_outlined),
-                        const SizedBox(width: 10),
-                        Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              const Text('Tiempo general de la orden'),
-                              Text('$time acumulado',
-                                  style: Theme.of(context).textTheme.bodySmall)
-                            ])),
-                        if (active == null)
-                          FilledButton.icon(
-                              onPressed:
-                                  _saving ? null : () => _workTimer('start'),
-                              icon: const Icon(Icons.play_arrow),
-                              label: const Text('Iniciar'))
-                        else ...[
-                          IconButton(
-                              onPressed: () => _workTimer(
-                                  active['paused_at'] == null
-                                      ? 'pause'
-                                      : 'resume',
-                                  active['id'] as int?),
-                              icon: Icon(active['paused_at'] == null
-                                  ? Icons.pause_outlined
-                                  : Icons.play_arrow),
-                              tooltip: active['paused_at'] == null
-                                  ? 'Pausar'
-                                  : 'Reanudar'),
-                          IconButton(
-                              onPressed: () =>
-                                  _workTimer('stop', active['id'] as int?),
-                              icon: const Icon(Icons.stop_outlined),
-                              tooltip: 'Finalizar registro'),
-                        ],
-                      ])));
-            },
-          ),
-          const SizedBox(height: 18),
           if (_canManageOrder) DropdownButtonFormField<String>(
             key: ValueKey('work-order-status-$_status-${widget.role}'),
             initialValue: _availableStatuses.contains(_status)
@@ -2462,7 +2316,9 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                   'Puedes avanzar la orden asignada; las etapas comerciales las gestiona administración.'),
             ),
           const SizedBox(height: 12),
-          if (_canManageOrder) TextField(
+          if (_canManageOrder && _moduleKinds.any((kind) => const {
+            'scanner', 'corrective', 'other'
+          }.contains(kind))) TextField(
               controller: _diagnosis,
               maxLines: 4,
               decoration: const InputDecoration(
@@ -2488,116 +2344,20 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               onPressed: _saving ? null : _editReception,
               icon: const Icon(Icons.assignment_outlined),
               label: const Text('Completar recepción')),
-          const Divider(height: 28),
-          Row(children: [
-            Expanded(
-                child: Text('Inspecciones',
-                    style: Theme.of(context).textTheme.titleLarge)),
-            IconButton(
-                onPressed: _saving ? null : _applyTemplate,
-                icon: const Icon(Icons.playlist_add_check),
-                tooltip: 'Aplicar plantilla'),
-            IconButton(
-                onPressed: _saving ? null : _addInspection,
-                icon: const Icon(Icons.add_circle_outline),
-                tooltip: 'Agregar inspección'),
-          ]),
-          FutureBuilder<List<Map<String, dynamic>>>(
-            future: _inspections,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
-                return const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(child: CircularProgressIndicator()));
-              if (snapshot.hasError)
-                return Text(
-                    'No se pudieron cargar las inspecciones: ${snapshot.error}');
-              final records = snapshot.data ?? [];
-              if (records.isEmpty)
-                return const Text(
-                    'Todavía no hay puntos de inspección registrados.');
-              return Column(
-                  children: records
-                      .map((inspection) => Card(
-                              child: ListTile(
-                            leading: Icon(inspection['result'] == 'normal'
-                                ? Icons.check_circle_outline
-                                : Icons.warning_amber_outlined),
-                            title: Text(
-                                '${inspection['category']}: ${inspection['item']}'),
-                            subtitle: Text(
-                                '${inspection['result']}${inspection['measured_value'] == null ? '' : ' · ${inspection['measured_value']}'}${inspection['notes'] == null ? '' : '\n${inspection['notes']}'}'),
-                            isThreeLine: inspection['notes'] != null,
-                            trailing: const Icon(Icons.edit_outlined),
-                            onTap: () => _editInspection(inspection),
-                          )))
-                      .toList());
-            },
-          ),
-          const Divider(height: 28),
-          Row(children: [
-            Expanded(
-                child: Text('Evidencias',
-                    style: Theme.of(context).textTheme.titleLarge)),
-            IconButton(
-                onPressed: _saving ? null : _attachEvidence,
-                icon: const Icon(Icons.attach_file),
-                tooltip: 'Adjuntar foto o archivo'),
-          ]),
-          FutureBuilder<List<Map<String, dynamic>>>(
-              future: _evidence,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  return const LinearProgressIndicator();
-                final records = snapshot.data ?? [];
-                if (records.isEmpty)
-                  return const Text('No hay fotografías o archivos adjuntos.');
-                return Column(
-                    children: records
-                        .map((item) => ListTile(
-                              leading: Icon(
-                                  '${item['content_type']}'.startsWith('image/')
-                                      ? Icons.image_outlined
-                                      : Icons.picture_as_pdf_outlined),
-                              title: Text('${item['filename']}'),
-                              subtitle: Text(
-                                  '${item['caption'] ?? 'Evidencia de la orden'}'),
-                            ))
-                        .toList());
-              }),
-          const Divider(height: 28),
-          Row(children: [
-            Expanded(
-                child: Text('Resumen para el cliente',
-                    style: Theme.of(context).textTheme.titleLarge)),
-            IconButton(
-                tooltip: 'Imprimir / guardar informe PDF',
-                onPressed: _printInspectionReport,
-                icon: const Icon(Icons.picture_as_pdf_outlined)),
-          ]),
-          FutureBuilder<Map<String, dynamic>>(
-              future: _report,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  return const LinearProgressIndicator();
-                if (snapshot.hasError)
-                  return Text(
-                      'No se pudo generar el resumen: ${snapshot.error}');
-                final summary = snapshot.data?['summary'] is Map
-                    ? Map<String, dynamic>.from(
-                        snapshot.data!['summary'] as Map)
-                    : <String, dynamic>{};
-                final scanners = snapshot.data?['scanner_reports'] is List
-                    ? snapshot.data!['scanner_reports'] as List
-                    : const [];
-                return Card(
-                    child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Text(
-                          'Normales: ${summary['normal'] ?? 0} · Observaciones: ${summary['observation'] ?? 0} · Fallas: ${summary['failed'] ?? 0}\n'
-                          'Pendientes: ${summary['not_inspected'] ?? 0} · Informes LAUNCH: ${scanners.length}',
-                        )));
-              }),
+          ])),
+          if (_inspectionModuleIds.isNotEmpty) Card(child: ExpansionTile(
+            title: const Text('Informe consolidado de inspección'),
+            children: [TextButton.icon(
+              onPressed: _printInspectionReport,
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('Abrir informe PDF'),
+            )],
+          )),
+          if (_moduleKinds.isNotEmpty) ...[
+          Card(child: ExpansionTile(
+            title: const Text('Cotización de la orden'),
+            childrenPadding: const EdgeInsets.all(12),
+            children: [
           const Divider(height: 28),
           Row(children: [
             Expanded(
@@ -2646,6 +2406,8 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               }).toList());
             },
           ),
+          ])),
+          ],
         ]),
       );
 }
