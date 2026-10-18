@@ -44,6 +44,7 @@ class ScannerReportRead(SQLModel):
     id: int
     vehicle_id: int
     work_order_id: Optional[int]
+    work_order_service_id: Optional[int] = None
     filename: str
     source: str
     scanned_at: datetime
@@ -184,6 +185,14 @@ class VehicleUpdate(SQLModel):
     notes: Optional[str] = None
 
 
+class WorkOrderServiceDraft(SQLModel):
+    kind: str
+    name: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    catalog_service_id: Optional[int] = None
+    assigned_user_id: Optional[int] = None
+
+
 class WorkOrderCreate(SQLModel):
     customer_id: int
     vehicle_id: int
@@ -192,6 +201,7 @@ class WorkOrderCreate(SQLModel):
     reported_symptoms: Optional[str] = None
     initial_notes: Optional[str] = None
     technician_name: Optional[str] = None
+    services: list[WorkOrderServiceDraft] = Field(default_factory=list)
 
     @field_validator("mileage_km")
     @classmethod
@@ -210,6 +220,23 @@ class WorkOrderUpdate(SQLModel):
     mileage_km: Optional[int] = None
     reported_symptoms: Optional[str] = None
     initial_notes: Optional[str] = None
+
+
+class AssignedWorkOrderRead(SQLModel):
+    id: int
+    code: str
+    customer_id: int
+    vehicle_id: int
+    status: WorkStatus
+    opened_at: datetime
+    promised_at: Optional[datetime] = None
+    mileage_km: Optional[int] = None
+    reported_symptoms: Optional[str] = None
+    initial_notes: Optional[str] = None
+    diagnosis: Optional[str] = None
+    technician_name: Optional[str] = None
+    total_clp: int = 0
+    can_manage_order: bool = False
 
 
 class ProductUpdate(SQLModel):
@@ -232,6 +259,7 @@ class AIModelUpdate(SQLModel):
 
 
 class InspectionCreate(SQLModel):
+    work_order_service_id: Optional[int] = None
     category: str
     item: str
     result: str

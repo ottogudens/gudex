@@ -55,6 +55,16 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
           .showSnackBar(SnackBar(content: Text('$error')));
   }
 
+  Future<void> _partPhoto(Map<String, dynamic> part) async {
+    try {
+      final bytes = await widget.api.getBytes('${part['photo_url']}');
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => Dialog(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+          child: Image.memory(bytes, fit: BoxFit.contain))));
+    } catch (error) { _error(error); }
+  }
+
   String _status(dynamic status) => switch (status) {
         'verified' => 'Verificado',
         'suggested' => 'Sugerido por IA',
@@ -620,8 +630,31 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
   Widget _maintenance(Map<String, dynamic> data) {
     final plans = _maps(data['maintenance_plans']);
     final orders = _maps(data['work_orders']);
+    final services = _maps(data['work_order_services']);
     final reports = _maps(data['scanner_reports']);
+    final parts = _maps(data['installed_parts']);
+    final verifiedParts = _maps(data['verified_part_references']);
     return _page([
+      _heading('Repuestos instalados y referencias'),
+      const Text('Referencias verificadas para este vehículo; confirmar siempre por VIN y documentación técnica antes de comprar.'),
+      if (verifiedParts.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text('Compatibilidad verificada', style: Theme.of(context).textTheme.titleMedium),
+        ...verifiedParts.map((p) => ListTile(
+          leading: const Icon(Icons.verified_outlined),
+          title: Text('${p['name']} · ${p['brand'] ?? ''}'),
+          subtitle: Text('OEM: ${p['oem_number'] == '' ? '—' : p['oem_number']} · Parte: ${p['part_number'] == '' ? '—' : p['part_number']}'),
+        )),
+      ],
+      if (parts.isEmpty) const ListTile(title: Text('Sin repuestos registrados')),
+      ...parts.map((p) => Card(child: ListTile(
+        leading: const Icon(Icons.settings_outlined),
+        title: Text('${p['name']} · ${p['quantity']} unidad(es)'),
+          subtitle: Text('${p['supplied_by'] == 'customer' ? 'Aportado por cliente' : 'Aportado por taller'} · ${p['status']} · ${_date(p['installed_at'] ?? p['recorded_at'])}\nOEM: ${p['oem_number'] == '' ? '—' : p['oem_number']} · ${p['needs_review'] == true ? 'compatibilidad por revisar' : p['fitment_status']}'),
+        trailing: p['photo_url'] == null ? null : IconButton(
+          tooltip: 'Ver imagen de la pieza', icon: const Icon(Icons.image_outlined),
+          onPressed: () => _partPhoto(p)),
+      ))),
       _heading('Próximas mantenciones'),
       if (_canEdit)
         Align(
@@ -678,6 +711,13 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
               title: Text('${o['code']} · ${spanishStatus(o['status'])}'),
               subtitle: Text(
                   '${_date(o['opened_at'])} · ${o['mileage_km'] ?? '—'} km\n${o['diagnosis'] ?? o['reported_symptoms'] ?? ''}')))),
+      _heading('Servicios realizados por orden'),
+      if (services.isEmpty) const ListTile(title: Text('Sin servicios detallados')),
+      ...services.map((s) => Card(child: ListTile(
+        leading: const Icon(Icons.handyman_outlined),
+        title: Text('${s['name']}'),
+        subtitle: Text('Orden #${s['work_order_id']} · ${s['status']} · ${_date(s['completed_at'] ?? s['created_at'])}\n${s['findings'] ?? ''}'),
+      ))),
       _heading('Informes scanner LAUNCH'),
       if (reports.isEmpty) const ListTile(title: Text('Sin informes adjuntos')),
       ...reports.map((r) => Card(

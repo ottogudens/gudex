@@ -22,10 +22,10 @@ from app.database import create_db_and_tables, engine, get_session
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, Sale, SaleItem, ScannerReport, Service,
-    StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkSession, WorkStatus,
+    StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
 )
 from app.schemas import (
-    AppointmentCreate, AppointmentUpdate, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
+    AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
     PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, MaintenancePlanUpdate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
@@ -42,6 +42,7 @@ from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
 from app.services.work_orders import editable_order, transition_order
 from app.routers.maintenance import router as maintenance_router, Completion, record_completion
+from app.routers.work_order_services import router as work_order_services_router, vehicle_parts, _can_edit, _service, _assignee, KINDS
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -87,6 +88,7 @@ app.include_router(catalog_router)
 app.include_router(bulk_import_router)
 app.include_router(vehicle_technical_router)
 app.include_router(maintenance_router)
+app.include_router(work_order_services_router)
 
 
 def on_startup() -> None:
@@ -609,18 +611,24 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
                                 .order_by(Appointment.starts_at.desc())).all()
     quotes = session.exec(select(Quote).where(Quote.vehicle_id == vehicle.id)
                           .order_by(Quote.created_at.desc())).all()
+    services = session.exec(select(WorkOrderService).where(
+        WorkOrderService.work_order_id.in_([order.id for order in orders]))
+        .order_by(WorkOrderService.created_at.desc())).all() if orders else []
     return {
         "vehicle": vehicle,
         "technical": technical_payload(session, vehicle.id),
         "maintenance_plans": session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id == vehicle.id)).all(),
         "maintenance_executions": session.exec(select(MaintenanceExecution).where(
             MaintenanceExecution.vehicle_id == vehicle.id).order_by(MaintenanceExecution.performed_at.desc())).all(),
+        **vehicle_parts(session, vehicle.id),
         "customer": session.get(Customer, vehicle.customer_id),
         "work_orders": orders,
+        "work_order_services": services,
         "quotes": quotes,
         "appointments": appointments,
         "scanner_reports": [
             {"id": report.id, "vehicle_id": report.vehicle_id, "work_order_id": report.work_order_id,
+             "work_order_service_id": report.work_order_service_id,
              "filename": report.filename, "source": report.source, "scanned_at": report.scanned_at,
              "mileage_km": report.mileage_km, "summary": report.summary,
              "download_url": f"/api/v1/scanner-reports/{report.id}/file"}
@@ -754,9 +762,18 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
     data["quotes"] = [quote for quote in data["quotes"] if quote.status != "draft"]
     data["work_orders"] = [order.model_dump(exclude={"initial_notes", "technician_name", "total_clp"})
                            for order in data["work_orders"]]
+    data["work_order_services"] = [service.model_dump(exclude={"assigned_user_id", "description"})
+                                    for service in data["work_order_services"]
+                                    if service.status == "completed"]
     data["technical"] = technical_payload(session, vehicle_id, portal=True)
     data["maintenance_executions"] = [row.model_dump(exclude={"recorded_by", "request_key"})
                                       for row in data["maintenance_executions"]]
+    for key in ("installed_parts", "verified_part_references"):
+        data[key] = [{**{field: value for field, value in part.items()
+                        if field not in {"recorded_by_email", "verification_source", "notes"}},
+                      "photo_url": f"/api/v1/portal/evidence/{part['evidence_id']}/file"
+                      if part["evidence_id"] else None}
+                     for part in data[key] if part["status"] == "installed"]
     for report in data["scanner_reports"]:
         report["download_url"] = f"/api/v1/portal/scanner-reports/{report['id']}/file"
     return data
@@ -772,9 +789,18 @@ def create_work_order(data: WorkOrderCreate, session: Session = Depends(get_sess
         raise HTTPException(409, "No se pueden crear órdenes para un cliente archivado")
     if vehicle.customer_id != data.customer_id:
         raise HTTPException(409, "El vehículo no pertenece al cliente indicado")
+    for service in data.services:
+        if service.kind not in KINDS:
+            raise HTTPException(422, "Tipo de servicio no reconocido")
+        if service.catalog_service_id and not session.get(Service, service.catalog_service_id):
+            raise HTTPException(422, "Servicio de catálogo no encontrado")
+        _assignee(session, service.assigned_user_id)
     code = f"OT-{datetime.now():%y%m%d}-{uuid4().hex[:6].upper()}"
-    order = WorkOrder.model_validate(data, update={"code": code})
+    order = WorkOrder.model_validate(data.model_dump(exclude={"services"}), update={"code": code})
     session.add(order)
+    session.flush()
+    for service in data.services:
+        session.add(WorkOrderService(work_order_id=order.id, **service.model_dump()))
     session.commit()
     session.refresh(order)
     return order
@@ -820,23 +846,33 @@ def mechanic_productivity(from_date: datetime | None = None, to_date: datetime |
         net_seconds = sum(max(0, int(((item.ended_at or item.paused_at or now) - item.started_at).total_seconds()) - item.paused_seconds) for item in sessions)
         active = [item for item in sessions if item.ended_at is None]
         assignments = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.technician_user_id == mechanic.id)).all()
-        active_orders = sum(1 for assignment in assignments if (order := session.get(WorkOrder, assignment.work_order_id)) and order.status not in {WorkStatus.delivered, WorkStatus.cancelled})
+        assigned_ids = {assignment.work_order_id for assignment in assignments}
+        assigned_ids.update(service.work_order_id for service in session.exec(select(WorkOrderService).where(
+            WorkOrderService.assigned_user_id == mechanic.id)).all())
+        active_orders = sum(1 for order_id in assigned_ids if (order := session.get(WorkOrder, order_id))
+                            and order.status not in {WorkStatus.delivered, WorkStatus.cancelled})
         rows.append({"user_id": mechanic.id, "full_name": mechanic.full_name, "net_seconds": net_seconds,
                      "completed_sessions": sum(1 for item in sessions if item.ended_at),
                      "active_sessions": len(active), "active_orders": active_orders})
     return rows
 
 
-@app.get("/api/v1/work-orders/mine", response_model=list[WorkOrder], dependencies=[Depends(require_staff)])
+@app.get("/api/v1/work-orders/mine", response_model=list[AssignedWorkOrderRead], dependencies=[Depends(require_staff)])
 def my_work_orders(request: Request, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.email == request.state.user_email)).first()
     if not user:
         raise HTTPException(401, "Usuario no encontrado")
     assignments = session.exec(select(WorkOrderAssignment).where(WorkOrderAssignment.technician_user_id == user.id)).all()
-    order_ids = [assignment.work_order_id for assignment in assignments]
+    primary_ids = {assignment.work_order_id for assignment in assignments}
+    order_ids = set(primary_ids)
+    order_ids.update(row.work_order_id for row in session.exec(select(WorkOrderService).where(
+        WorkOrderService.assigned_user_id == user.id)).all())
     if not order_ids:
         return []
-    return session.exec(select(WorkOrder).where(WorkOrder.id.in_(order_ids)).order_by(WorkOrder.promised_at, WorkOrder.opened_at.desc())).all()
+    orders = session.exec(select(WorkOrder).where(WorkOrder.id.in_(order_ids)).order_by(
+        WorkOrder.promised_at, WorkOrder.opened_at.desc())).all()
+    return [AssignedWorkOrderRead.model_validate({**order.model_dump(), "can_manage_order": order.id in primary_ids})
+            for order in orders]
 
 
 @app.put("/api/v1/work-orders/{order_id}/assignment", response_model=WorkOrder, dependencies=[Depends(require_admin)])
@@ -886,6 +922,12 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, se
             raise HTTPException(403, "El mecánico solo puede registrar diagnóstico, kilometraje y avance de su orden")
 
     if "status" in changes:
+        if changes["status"] in {WorkStatus.ready, WorkStatus.delivered}:
+            unfinished = session.exec(select(WorkOrderService).where(
+                WorkOrderService.work_order_id == order_id,
+                WorkOrderService.status.not_in(["completed", "cancelled"]))).first()
+            if unfinished:
+                raise HTTPException(409, "Completa o cancela los servicios pendientes antes de cerrar la orden")
         transition_order(order, changes["status"], request.state.user_role)
     for key, value in changes.items():
         setattr(order, key, value)
@@ -895,11 +937,15 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, se
     return order
 
 
-def _work_session_actor(order_id: int, request: Request, session: Session) -> User:
+def _work_session_actor(order_id: int, request: Request, session: Session,
+                        service_id: int | None = None) -> User:
     user = session.exec(select(User).where(User.email == request.state.user_email)).first()
     if not user:
         raise HTTPException(401, "Usuario no encontrado")
     if request.state.user_role == UserRole.mechanic.value:
+        if service_id is not None:
+            _can_edit(session, order_id, service_id, request)
+            return user
         assigned = session.exec(select(WorkOrderAssignment).where(
             WorkOrderAssignment.work_order_id == order_id, WorkOrderAssignment.technician_user_id == user.id)).first()
         if not assigned:
@@ -908,25 +954,31 @@ def _work_session_actor(order_id: int, request: Request, session: Session) -> Us
 
 
 @app.get("/api/v1/work-orders/{order_id}/work-sessions", dependencies=[Depends(require_staff)])
-def list_work_sessions(order_id: int, session: Session = Depends(get_session)):
+def list_work_sessions(order_id: int, request: Request, session: Session = Depends(get_session)):
     if not session.get(WorkOrder, order_id):
         raise HTTPException(404, "Orden de trabajo no encontrada")
     rows = session.exec(select(WorkSession).where(WorkSession.work_order_id == order_id)
                         .order_by(WorkSession.started_at.desc())).all()
     now = datetime.now(timezone.utc)
     total = sum(max(0, int(((row.ended_at or row.paused_at or now) - row.started_at).total_seconds()) - row.paused_seconds) for row in rows)
-    return {"total_seconds": total, "sessions": rows}
+    actor = session.exec(select(User).where(User.email == request.state.user_email)).first()
+    return {"total_seconds": total, "sessions": [
+        {**row.model_dump(), "is_mine": bool(actor and row.user_id == actor.id)} for row in rows]}
 
 
 @app.post("/api/v1/work-orders/{order_id}/work-sessions/start", dependencies=[Depends(require_staff)])
-def start_work_session(order_id: int, request: Request, session: Session = Depends(get_session)):
+def start_work_session(order_id: int, request: Request, session: Session = Depends(get_session),
+                       work_order_service_id: int | None = None):
     if not session.get(WorkOrder, order_id):
         raise HTTPException(404, "Orden de trabajo no encontrada")
-    user = _work_session_actor(order_id, request, session)
+    if work_order_service_id is not None:
+        _service(session, order_id, work_order_service_id)
+    user = _work_session_actor(order_id, request, session, work_order_service_id)
     active = session.exec(select(WorkSession).where(WorkSession.work_order_id == order_id, WorkSession.user_id == user.id, WorkSession.ended_at == None)).first()  # noqa: E711
     if active:
         raise HTTPException(409, "Ya tienes un registro de tiempo activo en esta orden")
-    row = WorkSession(work_order_id=order_id, user_id=user.id)
+    row = WorkSession(work_order_id=order_id, work_order_service_id=work_order_service_id,
+                      user_id=user.id)
     session.add(row); session.commit(); session.refresh(row)
     return row
 
@@ -936,7 +988,9 @@ def pause_work_session(session_id: int, request: Request, session: Session = Dep
     row = session.get(WorkSession, session_id)
     if not row or row.ended_at:
         raise HTTPException(404, "Registro activo no encontrado")
-    _work_session_actor(row.work_order_id, request, session)
+    actor = _work_session_actor(row.work_order_id, request, session, row.work_order_service_id)
+    if request.state.user_role == UserRole.mechanic.value and row.user_id != actor.id:
+        raise HTTPException(403, "Solo puedes modificar tu propio registro de tiempo")
     if row.paused_at:
         raise HTTPException(409, "El registro ya está en pausa")
     row.paused_at = datetime.now(timezone.utc); session.add(row); session.commit(); session.refresh(row)
@@ -948,7 +1002,9 @@ def resume_work_session(session_id: int, request: Request, session: Session = De
     row = session.get(WorkSession, session_id)
     if not row or row.ended_at or not row.paused_at:
         raise HTTPException(409, "El registro no está pausado")
-    _work_session_actor(row.work_order_id, request, session)
+    actor = _work_session_actor(row.work_order_id, request, session, row.work_order_service_id)
+    if request.state.user_role == UserRole.mechanic.value and row.user_id != actor.id:
+        raise HTTPException(403, "Solo puedes modificar tu propio registro de tiempo")
     row.paused_seconds += int((datetime.now(timezone.utc) - row.paused_at).total_seconds())
     row.paused_at = None; session.add(row); session.commit(); session.refresh(row)
     return row
@@ -959,7 +1015,9 @@ def stop_work_session(session_id: int, request: Request, session: Session = Depe
     row = session.get(WorkSession, session_id)
     if not row or row.ended_at:
         raise HTTPException(409, "El registro ya está finalizado")
-    _work_session_actor(row.work_order_id, request, session)
+    actor = _work_session_actor(row.work_order_id, request, session, row.work_order_service_id)
+    if request.state.user_role == UserRole.mechanic.value and row.user_id != actor.id:
+        raise HTTPException(403, "Solo puedes modificar tu propio registro de tiempo")
     now = datetime.now(timezone.utc)
     if row.paused_at:
         row.paused_seconds += int((now - row.paused_at).total_seconds())
@@ -975,7 +1033,8 @@ def delete_work_order(order_id: int, session: Session = Depends(get_session)):
     order = session.get(WorkOrder, order_id)
     if not order:
         raise HTTPException(404, "Orden de trabajo no encontrada")
-    has_history = (session.exec(select(Inspection).where(Inspection.work_order_id == order_id)).first()
+    has_history = (session.exec(select(WorkOrderService).where(WorkOrderService.work_order_id == order_id)).first()
+                   or session.exec(select(Inspection).where(Inspection.work_order_id == order_id)).first()
                    or session.exec(select(Quote).where(Quote.work_order_id == order_id)).first()
                    or session.exec(select(ScannerReport).where(ScannerReport.work_order_id == order_id)).first()
                    or session.exec(select(Sale).where(Sale.work_order_id == order_id)).first())
@@ -992,7 +1051,11 @@ def delete_work_order(order_id: int, session: Session = Depends(get_session)):
 
 @app.post("/api/v1/work-orders/{order_id}/inspections", response_model=Inspection, status_code=201, dependencies=[Depends(require_staff)])
 def add_inspection(order_id: int, data: InspectionCreate, request: Request, session: Session = Depends(get_session)):
-    editable_order(session, order_id, request)
+    if data.work_order_service_id is not None:
+        _service(session, order_id, data.work_order_service_id)
+        _can_edit(session, order_id, data.work_order_service_id, request)
+    else:
+        editable_order(session, order_id, request)
     inspection = Inspection.model_validate(data, update={"work_order_id": order_id})
     session.add(inspection)
     session.commit()
@@ -1685,7 +1748,9 @@ def adjust_stock(product_id: int, data: StockAdjustment, session: Session = Depe
 @app.post("/api/v1/scanner-reports", status_code=201, dependencies=[Depends(require_staff)])
 async def upload_scanner_report(
     vehicle_id: int,
+    request: Request,
     work_order_id: int | None = None,
+    work_order_service_id: int | None = None,
     mileage_km: int | None = None,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
@@ -1697,6 +1762,10 @@ async def upload_scanner_report(
         order = session.get(WorkOrder, work_order_id)
         if not order or order.vehicle_id != vehicle_id:
             raise HTTPException(409, "La orden no corresponde al vehículo")
+    if work_order_service_id is not None:
+        if work_order_id is None or _service(session, work_order_id, work_order_service_id).kind != "scanner":
+            raise HTTPException(422, "Selecciona un servicio de scanner de esta orden")
+        _can_edit(session, work_order_id, work_order_service_id, request)
     if file.content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(415, "Solo se aceptan informes PDF")
     data = await file.read(settings.max_upload_bytes + 1)
@@ -1712,6 +1781,7 @@ async def upload_scanner_report(
     report = ScannerReport(
         vehicle_id=vehicle_id,
         work_order_id=work_order_id,
+        work_order_service_id=work_order_service_id,
         filename=safe_name,
         storage_path=str(destination),
         source="manual_upload",
@@ -1721,6 +1791,7 @@ async def upload_scanner_report(
     session.commit()
     session.refresh(report)
     return {"id": report.id, "filename": report.filename, "vehicle_id": vehicle_id, "work_order_id": work_order_id,
+            "work_order_service_id": work_order_service_id,
             "mileage_km": mileage_km, "download_url": f"/api/v1/scanner-reports/{report.id}/file", "status": "attached"}
 
 

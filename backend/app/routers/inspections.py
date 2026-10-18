@@ -19,6 +19,7 @@ from app.schemas import (
 from app.security import require_admin, require_staff
 from app.services.documents import inspection_report_pdf
 from app.services.work_orders import editable_order
+from app.routers.work_order_services import _can_edit, _service
 
 router = APIRouter(prefix="/api/v1", tags=["inspecciones"], dependencies=[Depends(require_staff)])
 portal_router = APIRouter(prefix="/api/v1/portal", tags=["portal de inspecciones"])
@@ -64,13 +65,19 @@ def create_template(data: InspectionTemplateCreate, session: Session = Depends(g
 
 
 @router.post("/work-orders/{order_id}/inspection-templates/{template_id}/apply", status_code=201)
-def apply_template(order_id: int, template_id: int, request: Request, session: Session = Depends(get_session)):
-    editable_order(session, order_id, request)
+def apply_template(order_id: int, template_id: int, request: Request, session: Session = Depends(get_session),
+                   work_order_service_id: int | None = None):
+    if work_order_service_id is not None:
+        _service(session, order_id, work_order_service_id)
+        _can_edit(session, order_id, work_order_service_id, request)
+    else:
+        editable_order(session, order_id, request)
     template = session.get(InspectionTemplate, template_id)
     if not template or not template.active:
         raise HTTPException(status_code=404, detail="Plantilla no encontrada")
     current = {(row.category, row.item) for row in session.exec(
-        select(Inspection).where(Inspection.work_order_id == order_id)
+        select(Inspection).where(Inspection.work_order_id == order_id,
+                                 Inspection.work_order_service_id == work_order_service_id)
     ).all()}
     items = session.exec(select(InspectionTemplateItem).where(
         InspectionTemplateItem.template_id == template_id
@@ -79,13 +86,15 @@ def apply_template(order_id: int, template_id: int, request: Request, session: S
     for item in items:
         if (item.category, item.item) in current:
             continue
-        row = Inspection(work_order_id=order_id, category=item.category, item=item.item, result="not_inspected")
+        row = Inspection(work_order_id=order_id, work_order_service_id=work_order_service_id,
+                         category=item.category, item=item.item, result="not_inspected")
         session.add(row)
         created.append(row)
     session.commit()
     for row in created:
         session.refresh(row)
-    return {"template_id": template_id, "created_count": len(created), "inspections": created}
+    return {"template_id": template_id, "work_order_service_id": work_order_service_id,
+            "created_count": len(created), "inspections": created}
 
 
 @router.patch("/inspections/{inspection_id}", response_model=Inspection)
@@ -93,7 +102,10 @@ def update_inspection(inspection_id: int, data: InspectionUpdate, request: Reque
     inspection = session.get(Inspection, inspection_id)
     if not inspection:
         raise HTTPException(status_code=404, detail="Inspección no encontrada")
-    editable_order(session, inspection.work_order_id, request)
+    if inspection.work_order_service_id is not None:
+        _can_edit(session, inspection.work_order_id, inspection.work_order_service_id, request)
+    else:
+        editable_order(session, inspection.work_order_id, request)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(inspection, key, value)
     session.add(inspection)
@@ -129,8 +141,12 @@ def save_reception(order_id: int, data: WorkOrderReceptionUpdate, request: Reque
 async def upload_evidence(
     order_id: int, request: Request, file: UploadFile = File(...), inspection_id: int | None = Form(None),
     kind: str = Form("evidence"), caption: str | None = Form(None), session: Session = Depends(get_session),
+    work_order_service_id: int | None = None,
 ):
-    editable_order(session, order_id, request)
+    if work_order_service_id is not None:
+        _can_edit(session, order_id, work_order_service_id, request)
+    else:
+        editable_order(session, order_id, request)
     content_type = file.content_type or "application/octet-stream"
     if content_type == "application/octet-stream":
         extension = Path(file.filename or "").suffix.lower()
@@ -141,6 +157,8 @@ async def upload_evidence(
         inspection = session.get(Inspection, inspection_id)
         if not inspection or inspection.work_order_id != order_id:
             raise HTTPException(status_code=400, detail="La inspección no pertenece a esta orden")
+        if work_order_service_id is not None and inspection.work_order_service_id != work_order_service_id:
+            raise HTTPException(status_code=403, detail="La inspección no pertenece al servicio asignado")
     content = await file.read(settings.max_evidence_bytes + 1)
     if not content or len(content) > settings.max_evidence_bytes:
         raise HTTPException(status_code=413, detail="El archivo está vacío o supera el límite permitido")

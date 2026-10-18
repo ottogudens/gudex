@@ -7,6 +7,7 @@ import '../services/api_client.dart';
 import '../services/draft_store.dart';
 import '../widgets/quick_create_dialogs.dart';
 import 'vehicle_history_screen.dart';
+import 'work_order_services_panel.dart';
 
 class WorkshopScreen extends StatefulWidget {
   const WorkshopScreen(
@@ -754,6 +755,8 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     final mileage = TextEditingController();
     final symptoms = TextEditingController();
     final notes = TextEditingController();
+    final serviceName = TextEditingController(text: 'Inspección inicial');
+    var serviceKind = 'inspection';
     int customerId = _customers.first['id'] as int;
     int? vehicleId = _vehicles.firstWhere((v) => v['customer_id'] == customerId,
         orElse: () => _vehicles.first)['id'] as int;
@@ -850,6 +853,34 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                       maxLines: 2,
                       decoration: const InputDecoration(
                           labelText: 'Notas de recepción')),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: serviceKind,
+                    decoration: const InputDecoration(labelText: 'Primer servicio'),
+                    items: const [
+                      DropdownMenuItem(value: 'inspection', child: Text('Inspección')),
+                      DropdownMenuItem(value: 'scanner', child: Text('Diagnóstico con scanner')),
+                      DropdownMenuItem(value: 'preventive', child: Text('Mantención preventiva')),
+                      DropdownMenuItem(value: 'corrective', child: Text('Reparación correctiva')),
+                      DropdownMenuItem(value: 'pre_purchase', child: Text('Inspección precompra')),
+                      DropdownMenuItem(value: 'pre_technical_review', child: Text('Inspección prerevisión técnica')),
+                    ],
+                    onChanged: (value) => updateDialog(() {
+                      serviceKind = value ?? serviceKind;
+                      serviceName.text = switch (serviceKind) {
+                        'scanner' => 'Diagnóstico con scanner',
+                        'preventive' => 'Mantención preventiva',
+                        'corrective' => 'Reparación correctiva',
+                        'pre_purchase' => 'Inspección precompra',
+                        'pre_technical_review' => 'Inspección prerevisión técnica',
+                        _ => 'Inspección inicial',
+                      };
+                    }),
+                  ),
+                  TextFormField(controller: serviceName,
+                    decoration: const InputDecoration(labelText: 'Trabajo a realizar *'),
+                    validator: (v) => v == null || v.trim().length < 2
+                        ? 'Indica el trabajo' : null),
                 ]))),
             actions: [
               TextButton(
@@ -868,6 +899,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                         'reported_symptoms': symptoms.text.trim(),
                       if (notes.text.trim().isNotEmpty)
                         'initial_notes': notes.text.trim(),
+                      'services': [{'kind': serviceKind, 'name': serviceName.text.trim()}],
                     });
                   },
                   child: const Text('Crear orden')),
@@ -881,6 +913,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
       mileage.dispose();
       symptoms.dispose();
       notes.dispose();
+      serviceName.dispose();
     }
   }
 
@@ -1417,6 +1450,7 @@ class WorkOrderDetails extends StatefulWidget {
 }
 
 class _WorkOrderDetailsState extends State<WorkOrderDetails> {
+  bool get _canManageOrder => widget.role != 'mechanic' || widget.order['can_manage_order'] != false;
   late final TextEditingController _diagnosis;
   late String _status;
   late Future<List<Map<String, dynamic>>> _inspections;
@@ -1667,7 +1701,11 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     final notes = TextEditingController();
     final measured = TextEditingController();
     String result = 'normal';
+    int? serviceId;
     try {
+      final services = (await _loadList('/api/v1/work-orders/${widget.order['id']}/services'))
+          .where((service) => service['can_edit'] == true).toList();
+      if (!mounted) return;
       final data = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (context) => StatefulBuilder(
@@ -1678,6 +1716,15 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                       child: SingleChildScrollView(
                           child:
                               Column(mainAxisSize: MainAxisSize.min, children: [
+                        DropdownButtonFormField<int?>(
+                            initialValue: serviceId,
+                            decoration: const InputDecoration(labelText: 'Servicio de la orden'),
+                            items: [const DropdownMenuItem<int?>(value: null, child: Text('Inspección general')),
+                              ...services.map((s) => DropdownMenuItem<int?>(value: s['id'] as int,
+                                  child: Text('${s['name']}')))],
+                            onChanged: (value) => updateDialog(() => serviceId = value),
+                            validator: (value) => !_canManageOrder && value == null
+                                ? 'Selecciona un servicio asignado' : null),
                         TextFormField(
                             controller: category,
                             decoration: const InputDecoration(
@@ -1736,6 +1783,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                             'category': category.text.trim(),
                             'item': item.text.trim(),
                             'result': result,
+                            if (serviceId != null) 'work_order_service_id': serviceId,
                             if (measured.text.trim().isNotEmpty)
                               'measured_value': measured.text.trim(),
                             if (notes.text.trim().isNotEmpty)
@@ -1794,9 +1842,19 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
         ),
       );
       if (selected == null) return;
+      final services = (await _loadList('/api/v1/work-orders/${widget.order['id']}/services'))
+          .where((service) => service['can_edit'] == true).toList();
+      if (!mounted) return;
+      final serviceId = await showDialog<int>(context: context, builder: (context) => SimpleDialog(
+        title: const Text('Asociar lista al servicio'),
+        children: [if (_canManageOrder) SimpleDialogOption(onPressed: () => Navigator.pop(context, 0),
+          child: const Text('Inspección general de la orden')),
+          ...services.map((s) => SimpleDialogOption(onPressed: () => Navigator.pop(context, s['id'] as int),
+            child: Text('${s['name']}')))]));
+      if (serviceId == null) return;
       setState(() => _saving = true);
       final response = await widget.api.post(
-          '/api/v1/work-orders/${widget.order['id']}/inspection-templates/${selected['id']}/apply');
+          '/api/v1/work-orders/${widget.order['id']}/inspection-templates/${selected['id']}/apply${serviceId == 0 ? '' : '?work_order_service_id=$serviceId'}');
       if (!mounted) return;
       setState(() {
         _inspections = _loadInspections();
@@ -2331,8 +2389,13 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
             const SizedBox(height: 4),
             Text('Recepción: ${widget.order['initial_notes']}'),
           ],
+          const SizedBox(height: 16),
+          WorkOrderServicesPanel(api: widget.api, orderId: widget.order['id'] as int,
+              role: widget.role),
+          const Divider(height: 28),
           const SizedBox(height: 14),
-          FutureBuilder<Map<String, dynamic>>(
+          if (!_canManageOrder) const Text('Esta orden te aparece por un servicio asignado. Registra el avance dentro de ese servicio; el estado general lo gestiona el responsable de la orden.'),
+          if (_canManageOrder) FutureBuilder<Map<String, dynamic>>(
             future: _workSessions,
             builder: (context, snapshot) {
               final data = snapshot.data ?? <String, dynamic>{};
@@ -2342,12 +2405,15 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                       .map((item) => Map<String, dynamic>.from(item))
                       .toList()
                   : <Map<String, dynamic>>[];
-              final activeRows =
-                  sessions.where((item) => item['ended_at'] == null).toList();
+              final generalSessions = sessions.where((item) => item['work_order_service_id'] == null).toList();
+              final activeRows = generalSessions.where((item) => item['ended_at'] == null && item['is_mine'] == true).toList();
               final active = activeRows.isEmpty ? null : activeRows.first;
-              final seconds = data['total_seconds'] is num
-                  ? (data['total_seconds'] as num).toInt()
-                  : 0;
+              final seconds = generalSessions.fold<int>(0, (total, item) {
+                final start = DateTime.tryParse('${item['started_at']}');
+                final end = DateTime.tryParse('${item['ended_at'] ?? item['paused_at']}') ?? DateTime.now();
+                return total + (start == null ? 0 : (end.difference(start).inSeconds -
+                    ((item['paused_seconds'] as num?)?.toInt() ?? 0)).clamp(0, 999999999).toInt());
+              });
               final time =
                   '${(seconds ~/ 3600).toString().padLeft(2, '0')}:${((seconds % 3600) ~/ 60).toString().padLeft(2, '0')}';
               return Card(
@@ -2360,7 +2426,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                             child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                              const Text('Tiempo de trabajo'),
+                              const Text('Tiempo general de la orden'),
                               Text('$time acumulado',
                                   style: Theme.of(context).textTheme.bodySmall)
                             ])),
@@ -2393,7 +2459,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
             },
           ),
           const SizedBox(height: 18),
-          DropdownButtonFormField<String>(
+          if (_canManageOrder) DropdownButtonFormField<String>(
             key: ValueKey('work-order-status-$_status-${widget.role}'),
             initialValue: _availableStatuses.contains(_status)
                 ? _status
@@ -2407,14 +2473,14 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               if (value != null) setState(() => _status = value);
             },
           ),
-          if (widget.role == 'mechanic')
+          if (_canManageOrder && widget.role == 'mechanic')
             const Padding(
               padding: EdgeInsets.only(top: 6),
               child: Text(
                   'Puedes avanzar la orden asignada; las etapas comerciales las gestiona administración.'),
             ),
           const SizedBox(height: 12),
-          TextField(
+          if (_canManageOrder) TextField(
               controller: _diagnosis,
               maxLines: 4,
               decoration: const InputDecoration(
@@ -2426,17 +2492,17 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
           if (_error != null)
             Text(_error!,
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          FilledButton.icon(
+          if (_canManageOrder) FilledButton.icon(
               onPressed: _saving ? null : _saveOrder,
               icon: const Icon(Icons.save_outlined),
               label: Text(_saving ? 'Guardando…' : 'Guardar cambios')),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
+          if (_canManageOrder) OutlinedButton.icon(
               onPressed: _saving ? null : _saveLocalDraft,
               icon: const Icon(Icons.save_as_outlined),
               label: const Text('Guardar borrador local')),
           const SizedBox(height: 10),
-          OutlinedButton.icon(
+          if (_canManageOrder) OutlinedButton.icon(
               onPressed: _saving ? null : _editReception,
               icon: const Icon(Icons.assignment_outlined),
               label: const Text('Completar recepción')),

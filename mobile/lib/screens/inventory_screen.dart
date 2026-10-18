@@ -82,6 +82,32 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   }
 
   Future<void> _createProduct() => _editProduct();
+
+  Future<void> _showPartUsage() async {
+    try {
+      final response = await widget.api.get('/api/v1/parts/usage?days=180');
+      if (!mounted) return;
+      final rows = response is List ? response.whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row)).toList() : <Map<String, dynamic>>[];
+      await showModalBottomSheet<void>(context: context, isScrollControlled: true,
+        useSafeArea: true, builder: (context) => FractionallySizedBox(
+          heightFactor: .8, child: Padding(padding: const EdgeInsets.all(16),
+          child: ListView(children: [
+            Text('Consumo de repuestos · 180 días', style: Theme.of(context).textTheme.titleLarge),
+            const Text('Uso real registrado en órdenes. Separa piezas aportadas por clientes; no equivale a compras pendientes.'),
+            if (rows.isEmpty) const ListTile(title: Text('Sin instalaciones registradas')),
+            ...rows.map((row) => Card(child: ListTile(
+              title: Text('${row['name']} · ${row['brand'] ?? ''}'),
+              subtitle: Text('OEM: ${row['oem_number'] == '' ? '—' : row['oem_number']} · Parte: ${row['part_number'] == '' ? '—' : row['part_number']}\n'
+                'Total: ${row['total']} · Cliente: ${row['customer_supplied']} · Taller: ${row['workshop_supplied']} · Verificados: ${row['verified']}'),
+              isThreeLine: true,
+            ))),
+          ]))));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    }
+  }
   Future<void> _adjustStock(Map<String, dynamic> product) =>
       _editProduct(product, true);
 
@@ -180,6 +206,9 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                     icon: const Icon(Icons.refresh),
                   ),
                   if (widget.canManage) ...[
+                    OutlinedButton.icon(onPressed: _showPartUsage,
+                      icon: const Icon(Icons.analytics_outlined),
+                      label: const Text('Consumo en servicios')),
                     OutlinedButton.icon(
                       onPressed: () async {
                         await Navigator.push(

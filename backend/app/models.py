@@ -170,10 +170,53 @@ class WorkOrderAssignment(SQLModel, table=True):
     assigned_at: datetime = Field(default_factory=now_utc)
 
 
+class WorkOrderService(SQLModel, table=True):
+    """A separately tracked job inside an order; catalog details are snapshotted."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    catalog_service_id: Optional[int] = Field(default=None, foreign_key="service.id")
+    kind: str = Field(max_length=32, index=True)
+    name: str = Field(max_length=160)
+    description: str = Field(default="", max_length=2000)
+    status: str = Field(default="pending", max_length=24)
+    assigned_user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    findings: str = Field(default="", max_length=4000)
+    created_at: datetime = Field(default_factory=now_utc)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class InstalledPart(SQLModel, table=True):
+    """Part used on a vehicle; customer-supplied parts never change inventory."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    work_order_service_id: int = Field(foreign_key="workorderservice.id", index=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id")
+    supplied_by: str = Field(max_length=16)
+    name: str = Field(max_length=160)
+    category: str = Field(default="", max_length=80)
+    brand: str = Field(default="", max_length=80)
+    part_number: str = Field(default="", max_length=100)
+    oem_number: str = Field(default="", max_length=100, index=True)
+    specifications: str = Field(default="", max_length=2000)
+    quantity: float = Field(gt=0)
+    status: str = Field(default="received", max_length=20)
+    fitment_status: str = Field(default="pending", max_length=20)
+    verification_source: str = Field(default="", max_length=250)
+    vehicle_identity_signature: str = Field(default="", max_length=64)
+    evidence_id: Optional[int] = Field(default=None, foreign_key="workorderevidence.id")
+    notes: str = Field(default="", max_length=2000)
+    recorded_by_email: str = Field(max_length=254)
+    recorded_at: datetime = Field(default_factory=now_utc)
+    installed_at: Optional[datetime] = None
+
+
 class WorkSession(SQLModel, table=True):
     """Time worked on an order, including pauses, for operational reporting."""
     id: Optional[int] = Field(default=None, primary_key=True)
     work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    work_order_service_id: Optional[int] = Field(default=None, foreign_key="workorderservice.id", index=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     started_at: datetime = Field(default_factory=now_utc)
     ended_at: Optional[datetime] = None
@@ -193,6 +236,7 @@ class AIConfiguration(SQLModel, table=True):
 class Inspection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    work_order_service_id: Optional[int] = Field(default=None, foreign_key="workorderservice.id", index=True)
     category: str = Field(max_length=80)
     item: str = Field(max_length=120)
     result: str = Field(max_length=40)
@@ -301,6 +345,7 @@ class ScannerReport(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
     work_order_id: Optional[int] = Field(default=None, foreign_key="workorder.id", index=True)
+    work_order_service_id: Optional[int] = Field(default=None, foreign_key="workorderservice.id", index=True)
     filename: str = Field(max_length=255)
     storage_path: str = Field(max_length=500)
     source: str = Field(default="manual_upload", max_length=32)

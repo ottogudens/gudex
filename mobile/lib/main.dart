@@ -209,10 +209,6 @@ class _HomePageState extends ConsumerState<HomePage> {
             icon: Icons.assignment_outlined,
             path: '/api/v1/work-orders/mine'),
         AppModule(
-            title: 'Órdenes de trabajo',
-            icon: Icons.assignment_outlined,
-            path: '/api/v1/work-orders'),
-        AppModule(
             title: 'Inventario',
             icon: Icons.inventory_2_outlined,
             path: '/api/v1/products'),

@@ -49,7 +49,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
     if (picked == null || picked.files.single.bytes == null) return;
     try {
       var path = '/api/v1/scanner-reports?vehicle_id=$_vehicleId';
-      if (_orderId != null) path += '&work_order_id=$_orderId';
+      if (_orderId != null) {
+        path += '&work_order_id=$_orderId';
+        final services = (await _list('/api/v1/work-orders/$_orderId/services'))
+            .where((row) => row['kind'] == 'scanner').toList();
+        if (!mounted) return;
+        if (services.isNotEmpty) {
+          final serviceId = await showDialog<int>(context: context, builder: (context) => SimpleDialog(
+            title: const Text('Asociar informe al diagnóstico'),
+            children: [SimpleDialogOption(onPressed: () => Navigator.pop(context, 0),
+              child: const Text('Solo a la orden')),
+              ...services.map((s) => SimpleDialogOption(onPressed: () => Navigator.pop(context, s['id'] as int),
+                child: Text('${s['name']}')))]));
+          if (serviceId == null) return;
+          if (serviceId != 0) path += '&work_order_service_id=$serviceId';
+        }
+      }
       await widget.api.uploadBytes(path, picked.files.single.bytes!, picked.files.single.name, contentType: 'application/pdf');
       if (mounted) { 
         setState(() => _reports = _list('/api/v1/vehicles/$_vehicleId/scanner-reports')); 
