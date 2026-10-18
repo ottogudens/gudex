@@ -1438,6 +1438,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
   late Future<Map<String, dynamic>> _workSessions;
   Set<String> _moduleKinds = {};
   Set<int> _inspectionModuleIds = {};
+  bool _hasExistingQuotes = false;
   bool _saving = false;
   bool _restoringDraft = true;
   String? _error;
@@ -1532,12 +1533,16 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
   Future<List<Map<String, dynamic>>> _loadQuotes() async {
     final result = await widget.api
         .get('/api/v1/work-orders/${widget.order['id']}/quotes');
-    return result is List
+    final rows = result is List
         ? result
             .whereType<Map>()
             .map((item) => Map<String, dynamic>.from(item))
             .toList()
-        : [];
+        : <Map<String, dynamic>>[];
+    if (mounted && _hasExistingQuotes != rows.isNotEmpty) {
+      setState(() => _hasExistingQuotes = rows.isNotEmpty);
+    }
+    return rows;
   }
 
   Future<List<Map<String, dynamic>>> _loadList(String path) async {
@@ -2282,7 +2287,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               onAddInspection: (id) => _addInspection(id),
               onApplyTemplate: (id) => _applyTemplate(id),
               onEditInspection: _editInspection),
-          if (_moduleKinds.isNotEmpty || widget.order['status'] != 'received')
+          if (_moduleKinds.isNotEmpty || _hasExistingQuotes || widget.order['status'] != 'received')
           Card(child: ExpansionTile(
             title: const Text('Gestión general de la orden'),
             subtitle: Text(spanishStatus(_status)),
@@ -2353,7 +2358,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               label: const Text('Abrir informe PDF'),
             )],
           )),
-          if (_moduleKinds.isNotEmpty) ...[
+          if (_moduleKinds.isNotEmpty || _hasExistingQuotes) ...[
           Card(child: ExpansionTile(
             title: const Text('Cotización de la orden'),
             childrenPadding: const EdgeInsets.all(12),

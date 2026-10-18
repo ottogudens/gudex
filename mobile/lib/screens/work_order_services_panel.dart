@@ -362,6 +362,41 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
     finally { source.dispose(); }
   }
 
+  Widget _legacyRecords(List<Map<String, dynamic>> inspections,
+      List<Map<String, dynamic>> reports, List<Map<String, dynamic>> evidence) {
+    final legacyInspections = inspections.where((row) => row['work_order_service_id'] == null);
+    final legacyReports = reports.where((row) => row['work_order_id'] == widget.orderId &&
+        row['work_order_service_id'] == null);
+    final linkedInspectionIds = inspections.where((row) => row['work_order_service_id'] != null)
+        .map((row) => row['id']).toSet();
+    final legacyEvidence = evidence.where((row) => !linkedInspectionIds.contains(row['inspection_id']));
+    if (legacyInspections.isEmpty && legacyReports.isEmpty && legacyEvidence.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Card(child: ExpansionTile(title: const Text('Registros anteriores sin módulo'),
+      subtitle: const Text('Historial conservado de órdenes previas'),
+      children: [
+        ...legacyInspections.map((row) => ListTile(
+          leading: const Icon(Icons.fact_check_outlined),
+          title: Text('${row['category']}: ${row['item']}'),
+          subtitle: const Text('Inspección anterior'),
+          onTap: widget.role != 'admin' || widget.onEditInspection == null
+              ? null : () => widget.onEditInspection!(row),
+        )),
+        ...legacyReports.map((row) => ListTile(
+          leading: const Icon(Icons.picture_as_pdf_outlined),
+          title: Text('${row['filename']}'),
+          onTap: () => openGudexPdf(widget.api,
+            '/api/v1/scanner-reports/${row['id']}/file', '${row['filename']}'),
+        )),
+        ...legacyEvidence.map((row) => ListTile(
+          leading: const Icon(Icons.attachment_outlined),
+          title: Text('${row['filename']}'),
+          onTap: () => _openEvidence(row),
+        )),
+      ]));
+  }
+
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center,
@@ -376,7 +411,13 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
       if (snapshot.hasError) return Text('Error al cargar servicios: ${snapshot.error}');
       if (!snapshot.hasData) return const LinearProgressIndicator();
       final services = snapshot.data!;
-      if (services.isEmpty) return Card(child: Padding(
+      if (services.isEmpty) return FutureBuilder<List<Map<String, dynamic>>>(
+        future: _inspections, builder: (context, inspectionSnapshot) =>
+        FutureBuilder<List<Map<String, dynamic>>>(future: _scannerReports,
+          builder: (context, scannerSnapshot) =>
+          FutureBuilder<List<Map<String, dynamic>>>(future: _evidence,
+            builder: (context, evidenceSnapshot) => Column(children: [
+      Card(child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(children: [
           const Icon(Icons.dashboard_customize_outlined, size: 36),
@@ -385,7 +426,10 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
           const SizedBox(height: 8),
           if (widget.role == 'admin') OutlinedButton.icon(onPressed: _chooseModule,
             icon: const Icon(Icons.add), label: const Text('Elegir primer módulo')),
-        ])));
+        ]))),
+      _legacyRecords(inspectionSnapshot.data ?? [], scannerSnapshot.data ?? [],
+        evidenceSnapshot.data ?? []),
+      ]))));
       return FutureBuilder<List<Map<String, dynamic>>>(future: _parts, builder: (context, partSnapshot) {
         final parts = partSnapshot.data ?? [];
         return FutureBuilder<List<Map<String, dynamic>>>(future: _inspections, builder: (context, inspectionSnapshot) {
@@ -394,12 +438,6 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
         final scannerReports = scannerSnapshot.data ?? [];
         return FutureBuilder<List<Map<String, dynamic>>>(future: _evidence, builder: (context, evidenceSnapshot) {
         final evidence = evidenceSnapshot.data ?? [];
-        final legacyInspections = inspections.where((row) => row['work_order_service_id'] == null);
-        final legacyReports = scannerReports.where((row) => row['work_order_id'] == widget.orderId &&
-            row['work_order_service_id'] == null);
-        final linkedInspectionIds = inspections.where((row) => row['work_order_service_id'] != null)
-            .map((row) => row['id']).toSet();
-        final legacyEvidence = evidence.where((row) => !linkedInspectionIds.contains(row['inspection_id']));
         return Column(children: [...services.map((service) {
           final serviceParts = parts.where((part) => part['work_order_service_id'] == service['id']);
           final serviceInspections = inspections.where((row) => row['work_order_service_id'] == service['id']);
@@ -506,29 +544,7 @@ class _WorkOrderServicesPanelState extends State<WorkOrderServicesPanel> {
               )),
             ]));
         }),
-          if (legacyInspections.isNotEmpty || legacyReports.isNotEmpty || legacyEvidence.isNotEmpty)
-            Card(child: ExpansionTile(title: const Text('Registros anteriores sin módulo'),
-              subtitle: const Text('Historial conservado de órdenes previas'),
-              children: [
-                ...legacyInspections.map((row) => ListTile(
-                  leading: const Icon(Icons.fact_check_outlined),
-                  title: Text('${row['category']}: ${row['item']}'),
-                  subtitle: const Text('Inspección anterior'),
-                  onTap: widget.role != 'admin' || widget.onEditInspection == null
-                      ? null : () => widget.onEditInspection!(row),
-                )),
-                ...legacyReports.map((row) => ListTile(
-                  leading: const Icon(Icons.picture_as_pdf_outlined),
-                  title: Text('${row['filename']}'),
-                  onTap: () => openGudexPdf(widget.api,
-                    '/api/v1/scanner-reports/${row['id']}/file', '${row['filename']}'),
-                )),
-                ...legacyEvidence.map((row) => ListTile(
-                  leading: const Icon(Icons.attachment_outlined),
-                  title: Text('${row['filename']}'),
-                  onTap: () => _openEvidence(row),
-                )),
-              ])),
+          _legacyRecords(inspections, scannerReports, evidence),
         ]);
         });
         });
