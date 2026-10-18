@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.config import settings
@@ -29,7 +30,17 @@ def upgrade_schema() -> None:
     config = Config(str(backend_root / "alembic.ini"))
     config.set_main_option("script_location", str(backend_root / "alembic"))
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
+    if engine.dialect.name == "postgresql":
+        # Session-level lock serializes startup migrations across replicas.
+        # Alembic uses a separate connection, so this lock must outlive it.
+        with engine.connect() as connection:
+            connection.execute(text("SELECT pg_advisory_lock(732418021)"))
+            try:
+                command.upgrade(config, "head")
+            finally:
+                connection.execute(text("SELECT pg_advisory_unlock(732418021)"))
+    else:
+        command.upgrade(config, "head")
 
 
 def create_db_and_tables() -> None:

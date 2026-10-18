@@ -18,7 +18,7 @@ from sqlmodel import Session, select
 
 from app.config import settings, uploads_are_persistent
 from app.rate_limit import client_ip, limiter, rate_limit, too_many
-from app.database import create_db_and_tables, engine, get_session
+from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, Sale, SaleItem, ScannerReport, Service,
@@ -98,10 +98,11 @@ def on_startup() -> None:
         if settings.seed_default_users:
             raise RuntimeError("SEED_DEFAULT_USERS debe ser false en producción")
     if _is_production:
-        # Railway ejecuta Alembic una única vez en preDeployCommand. No se
-        # repite desde el proceso web: dos migraciones concurrentes pueden
-        # esperar un bloqueo de PostgreSQL y dejar la API sin health check.
-        logger.info("Producción: esquema administrado por Alembic antes del arranque.")
+        # The repository pre-deploy command may be overridden by Railway's
+        # service settings. Never serve a newer API against an older schema.
+        # upgrade_schema serializes concurrent replicas with an advisory lock.
+        upgrade_schema()
+        logger.info("Producción: migraciones de Alembic verificadas antes del arranque.")
     else:
         create_db_and_tables()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
