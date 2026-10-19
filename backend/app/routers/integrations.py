@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 import hashlib
@@ -14,10 +14,10 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import get_session
-from app.models import AIConfiguration, Appointment, Customer, ExternalImport, GoogleIntegrationConfig, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
-from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, GoogleIntegrationConfigUpdate, WhatsAppBusinessConfigUpdate
+from app.models import AIConfiguration, Appointment, Customer, ExternalImport, GoogleIntegrationConfig, IntegrationCredential, MetaIntegrationConfig, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
+from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, GoogleIntegrationConfigUpdate, MetaIntegrationConfigUpdate, MetaPageSelection, WhatsAppBusinessConfigUpdate
 from app.security import require_admin
-from app.services import google
+from app.services import google, meta
 from app.services.crypto import decrypt_secret, encrypt_secret
 
 router = APIRouter()
@@ -129,6 +129,7 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
     response.headers["Pragma"] = "no-cache"
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
     google_settings = session.get(GoogleIntegrationConfig, 1)
+    meta_settings = session.get(MetaIntegrationConfig, 1)
     whatsapp_config = session.get(WhatsAppBusinessConfig, 1)
     mp_token = settings.mercadopago_access_token
     return {
@@ -144,11 +145,16 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
                "model": selected_ai_model(session), "available": bool(settings.ai_provider and settings.ai_api_key)},
         "social": {
             "provider": "meta",
-            "credentials_present": bool(settings.meta_app_id and settings.meta_app_secret and settings.meta_redirect_uri),
-            "connected": bool(settings.meta_access_token),
-            "instagram": {"configured": bool(settings.meta_instagram_account_id), "account_id": settings.meta_instagram_account_id},
-            "facebook": {"configured": bool(settings.meta_facebook_page_id), "page_id": settings.meta_facebook_page_id},
-            "redirect_uri": settings.meta_redirect_uri,
+            "credentials_present": bool(meta_settings or (settings.meta_app_id and settings.meta_app_secret and settings.meta_redirect_uri)),
+            "authorized": bool(meta_settings and meta_settings.encrypted_user_token),
+            "connected": bool(meta_settings.encrypted_page_token if meta_settings else settings.meta_access_token),
+            "instagram": {"configured": bool(meta_settings.instagram_account_id if meta_settings else settings.meta_instagram_account_id),
+                          "account_id": meta_settings.instagram_account_id if meta_settings else settings.meta_instagram_account_id,
+                          "username": meta_settings.instagram_username if meta_settings else None},
+            "facebook": {"configured": bool(meta_settings.page_id if meta_settings else settings.meta_facebook_page_id),
+                         "page_id": meta_settings.page_id if meta_settings else settings.meta_facebook_page_id,
+                         "page_name": meta_settings.page_name if meta_settings else None},
+            "redirect_uri": meta_settings.redirect_uri if meta_settings else settings.meta_redirect_uri,
         },
         "whatsapp": {
             "business": _whatsapp_business_status(whatsapp_config),
@@ -279,6 +285,122 @@ def _google_settings_status(config: GoogleIntegrationConfig | None) -> dict:
         "calendar_id": config.calendar_id if config else settings.google_calendar_id,
         "gmail_query": config.gmail_query if config else settings.google_gmail_query,
     }
+
+
+def _meta_settings_status(config: MetaIntegrationConfig | None) -> dict:
+    return {
+        "configured_in_app": config is not None,
+        "app_id": config.app_id if config else settings.meta_app_id,
+        "app_secret_configured": bool(config.encrypted_app_secret if config else settings.meta_app_secret),
+        "redirect_uri": config.redirect_uri if config else (settings.meta_redirect_uri or "https://bknd.gudex.cl/auth/meta/callback"),
+        "authorized": bool(config and config.encrypted_user_token),
+        "page_id": config.page_id if config else settings.meta_facebook_page_id,
+        "page_name": config.page_name if config else None,
+        "instagram_account_id": config.instagram_account_id if config else settings.meta_instagram_account_id,
+        "instagram_username": config.instagram_username if config else None,
+    }
+
+
+@router.get("/api/v1/integrations/meta/config", dependencies=[Depends(require_admin)])
+def get_meta_settings(session: Session = Depends(get_session)):
+    return _meta_settings_status(session.get(MetaIntegrationConfig, 1))
+
+
+@router.put("/api/v1/integrations/meta/config", dependencies=[Depends(require_admin)])
+def save_meta_settings(data: MetaIntegrationConfigUpdate, request: Request,
+                       session: Session = Depends(get_session)):
+    parsed = urlsplit(data.redirect_uri)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path != "/auth/meta/callback"):
+        raise HTTPException(422, "La URL de retorno debe ser HTTPS y terminar en /auth/meta/callback")
+    config = session.get(MetaIntegrationConfig, 1)
+    if not config and not data.app_secret:
+        raise HTTPException(422, "Ingresa el App Secret para la primera configuración")
+    changed = bool(config and (config.app_id != data.app_id
+                   or config.redirect_uri != data.redirect_uri or data.app_secret))
+    if not config:
+        config = MetaIntegrationConfig(id=1, app_id=data.app_id, encrypted_app_secret="",
+            redirect_uri=data.redirect_uri, updated_by_email=request.state.user_email)
+    config.app_id = data.app_id
+    config.redirect_uri = data.redirect_uri
+    if data.app_secret:
+        config.encrypted_app_secret = encrypt_secret(data.app_secret)
+    if changed:
+        config.encrypted_user_token = None
+        config.user_token_expires_at = None
+        config.encrypted_page_token = None
+        config.page_id = config.page_name = None
+        config.instagram_account_id = config.instagram_username = None
+        for state in session.exec(select(OAuthState).where(OAuthState.provider == "meta", OAuthState.used_at == None)).all():  # noqa: E711
+            session.delete(state)
+    config.updated_by_email = request.state.user_email
+    config.updated_at = datetime.now(timezone.utc)
+    session.add(config)
+    session.commit()
+    return _meta_settings_status(config)
+
+
+@router.post("/api/v1/integrations/meta/authorize", dependencies=[Depends(require_admin)])
+def authorize_meta(request: Request, session: Session = Depends(get_session)):
+    return {"authorization_url": meta.create_authorization(session, request.state.user_email)}
+
+
+@router.get("/auth/meta/callback", response_class=HTMLResponse)
+async def meta_callback(code: str | None = None, state: str | None = None, error: str | None = None,
+                        session: Session = Depends(get_session)):
+    if error:
+        return HTMLResponse("<h2>No se completó la autorización de Meta. Puedes cerrar esta pestaña.</h2>", status_code=400)
+    if not code or not state:
+        raise HTTPException(400, "Falta el código OAuth o el estado")
+    state_hash = hashlib.sha256(state.encode()).hexdigest()
+    oauth_state = session.exec(select(OAuthState).where(OAuthState.provider == "meta", OAuthState.state_hash == state_hash)).first()
+    now = datetime.now(timezone.utc)
+    expires_at = oauth_state.expires_at if oauth_state and oauth_state.expires_at.tzinfo else (oauth_state.expires_at.replace(tzinfo=timezone.utc) if oauth_state else now)
+    if not oauth_state or oauth_state.used_at or expires_at <= now:
+        raise HTTPException(400, "El estado OAuth venció o ya fue utilizado; inicia la conexión nuevamente")
+    oauth_state.used_at = now
+    session.add(oauth_state)
+    session.commit()
+    token, seconds = await meta.exchange_code(session, code)
+    config = meta.configured(session)
+    config.encrypted_user_token = encrypt_secret(token)
+    config.user_token_expires_at = now + timedelta(seconds=seconds) if seconds > 0 else None
+    config.encrypted_page_token = None
+    config.page_id = config.page_name = None
+    config.instagram_account_id = config.instagram_username = None
+    session.add(config)
+    session.commit()
+    try:
+        pages = await meta.list_pages(session)
+        if len(pages) == 1:
+            await meta.select_page(session, pages[0]["id"])
+    except HTTPException:
+        pass  # Authorization succeeded; the administrator can retry Page discovery in the app.
+    return HTMLResponse("<h2>Meta autorizado en Gudex.</h2><p>Vuelve a Integraciones y selecciona la página de Facebook. Instagram se detectará si está vinculada.</p>")
+
+
+@router.get("/api/v1/integrations/meta/pages", dependencies=[Depends(require_admin)])
+async def meta_pages(session: Session = Depends(get_session)):
+    return await meta.list_pages(session)
+
+
+@router.post("/api/v1/integrations/meta/select-page", dependencies=[Depends(require_admin)])
+async def select_meta_page(data: MetaPageSelection, session: Session = Depends(get_session)):
+    return _meta_settings_status(await meta.select_page(session, data.page_id))
+
+
+@router.delete("/api/v1/integrations/meta", dependencies=[Depends(require_admin)])
+def disconnect_meta(session: Session = Depends(get_session)):
+    config = session.get(MetaIntegrationConfig, 1)
+    if config:
+        config.encrypted_user_token = None
+        config.user_token_expires_at = None
+        config.encrypted_page_token = None
+        config.page_id = config.page_name = None
+        config.instagram_account_id = config.instagram_username = None
+        session.add(config)
+        session.commit()
+    return {"connected": False}
 
 
 @router.get("/api/v1/integrations/google/config", dependencies=[Depends(require_admin)])

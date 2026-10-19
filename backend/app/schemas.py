@@ -552,6 +552,21 @@ class GoogleIntegrationConfigUpdate(SQLModel):
         return value.strip() if value is not None else None
 
 
+class MetaIntegrationConfigUpdate(SQLModel):
+    app_id: str = Field(min_length=1, max_length=100)
+    app_secret: Optional[str] = Field(default=None, max_length=1000)
+    redirect_uri: str = Field(min_length=1, max_length=500)
+
+    @field_validator("app_id", "app_secret", "redirect_uri")
+    @classmethod
+    def trim_meta_fields(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
+class MetaPageSelection(SQLModel):
+    page_id: str = Field(min_length=1, max_length=100)
+
+
 class AssistantQuery(SQLModel):
     mode: Literal["general", "diagnostic"] = "general"
     message: str = Field(min_length=2, max_length=2000)

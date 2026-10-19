@@ -469,6 +469,23 @@ class GoogleIntegrationConfig(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=now_utc)
 
 
+class MetaIntegrationConfig(SQLModel, table=True):
+    """Meta OAuth app and selected Facebook Page, with encrypted secrets/tokens."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    app_id: str = Field(max_length=100)
+    encrypted_app_secret: str
+    redirect_uri: str = Field(max_length=500)
+    encrypted_user_token: Optional[str] = None
+    user_token_expires_at: Optional[datetime] = None
+    page_id: Optional[str] = Field(default=None, max_length=100)
+    page_name: Optional[str] = Field(default=None, max_length=200)
+    encrypted_page_token: Optional[str] = None
+    instagram_account_id: Optional[str] = Field(default=None, max_length=100)
+    instagram_username: Optional[str] = Field(default=None, max_length=200)
+    updated_by_email: str = Field(max_length=254)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
 class OAuthState(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str = Field(index=True, max_length=32)

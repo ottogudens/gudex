@@ -126,6 +126,139 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     }
   }
 
+  Future<void> _configureMeta() async {
+    try {
+      final current = Map<String, dynamic>.from(
+        await widget.api.get('/api/v1/integrations/meta/config') as Map);
+      if (!mounted) return;
+      final appId = TextEditingController(text: '${current['app_id'] ?? ''}');
+      final secret = TextEditingController();
+      final redirect = TextEditingController(text: '${current['redirect_uri'] ?? ''}');
+      final form = GlobalKey<FormState>();
+      try {
+        final data = await showDialog<Map<String, dynamic>>(context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Configurar Facebook e Instagram'),
+            content: SizedBox(width: 500, child: Form(key: form,
+              child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Crea una app empresarial en Meta for Developers, habilita Facebook Login '
+                  'y agrega la URL de retorno como URI OAuth válida. Para Instagram se requiere una '
+                  'cuenta profesional vinculada a una página de Facebook.'),
+                const SizedBox(height: 12),
+                TextFormField(controller: appId,
+                  decoration: const InputDecoration(labelText: 'Meta App ID'),
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Obligatorio' : null),
+                TextFormField(controller: secret, obscureText: true,
+                  decoration: InputDecoration(labelText: 'Meta App Secret',
+                    helperText: current['configured_in_app'] == true
+                      ? 'Deja vacío para conservar el secreto guardado.' : 'Obligatorio la primera vez'),
+                  validator: (value) => current['configured_in_app'] != true &&
+                    (value == null || value.trim().isEmpty) ? 'Obligatorio' : null),
+                TextFormField(controller: redirect,
+                  decoration: const InputDecoration(labelText: 'URL de retorno autorizada',
+                    helperText: 'Regístrala exactamente igual en Meta for Developers'),
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Obligatoria' : null),
+                const SizedBox(height: 8),
+                const Text('El secreto se cifra en el servidor y nunca se vuelve a mostrar.'),
+              ])))),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+              FilledButton(onPressed: () {
+                if (!form.currentState!.validate()) return;
+                Navigator.pop(dialogContext, {
+                  'app_id': appId.text.trim(),
+                  'app_secret': secret.text.trim().isEmpty ? null : secret.text.trim(),
+                  'redirect_uri': redirect.text.trim(),
+                });
+              }, child: const Text('Guardar')),
+            ],
+          ));
+        if (data == null) return;
+        setState(() => _busy = true);
+        await widget.api.putJson('/api/v1/integrations/meta/config', data);
+        await _refresh();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Configuración guardada. Ya puedes autorizar Meta.')));
+      } finally {
+        appId.dispose(); secret.dispose(); redirect.dispose();
+      }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _connectMeta() async {
+    setState(() => _busy = true);
+    try {
+      final data = Map<String, dynamic>.from(
+        await widget.api.post('/api/v1/integrations/meta/authorize') as Map);
+      final url = Uri.parse(data['authorization_url'] as String);
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        throw Exception('No se pudo abrir la autorización de Meta');
+      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Autoriza en Meta, vuelve a Gudex y pulsa Actualizar.')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _selectMetaPage() async {
+    setState(() => _busy = true);
+    try {
+      final pages = List<Map<String, dynamic>>.from(
+        (await widget.api.get('/api/v1/integrations/meta/pages') as List)
+          .map((page) => Map<String, dynamic>.from(page as Map)));
+      if (!mounted) return;
+      if (pages.isEmpty) throw Exception('No hay páginas disponibles. Revisa los permisos de Meta y tu acceso a la página.');
+      final pageId = await showDialog<String>(context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: const Text('Seleccionar página de Facebook'),
+          children: pages.map((page) => SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialogContext, '${page['id']}'),
+            child: ListTile(
+              title: Text('${page['name'] ?? 'Página'}'),
+              subtitle: Text(page['instagram_username'] == null
+                ? 'Instagram no vinculado' : 'Instagram: @${page['instagram_username']}'),
+            ),
+          )).toList(),
+        ));
+      if (pageId == null) return;
+      await widget.api.postJson('/api/v1/integrations/meta/select-page', {'page_id': pageId});
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Página de Facebook seleccionada.')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _disconnectMeta() async {
+    final confirmed = await showDialog<bool>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Desconectar Meta'),
+        content: const Text('Se eliminarán los tokens guardados de Facebook e Instagram. La configuración de la app permanecerá.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Desconectar')),
+        ],
+      ));
+    if (confirmed != true) return;
+    try {
+      await widget.api.delete('/api/v1/integrations/meta');
+      await _refresh();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    }
+  }
+
   Future<void> _syncCalendar() async {
     final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: const Text('Sincronizar agenda'), content: const Text('Crear o actualizar en Google Calendar las citas pendientes de Gudex?'),
@@ -332,13 +465,30 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
           Text('Redes sociales', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(social['credentials_present'] == true
-              ? (social['connected'] == true ? 'Meta configurado y con token disponible.' : 'Meta configurado; falta autorizar una cuenta.')
-              : 'Configura Meta OAuth en Railway para conectar Instagram y Facebook.'),
+              ? (social['connected'] == true ? 'Página de Facebook conectada.'
+                : social['authorized'] == true ? 'Cuenta autorizada; selecciona la página de Facebook.'
+                : 'App de Meta configurada; falta autorizar la cuenta.')
+              : 'Configura Meta desde aquí para conectar Facebook e Instagram.'),
           const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(onPressed: _busy ? null : _configureMeta,
+              icon: const Icon(Icons.settings_outlined), label: const Text('Configurar Meta')),
+            FilledButton.icon(onPressed: _busy || social['credentials_present'] != true ? null : _connectMeta,
+              icon: const Icon(Icons.login), label: const Text('Autorizar Facebook e Instagram')),
+            if (social['authorized'] == true)
+              OutlinedButton(onPressed: _busy ? null : _selectMetaPage,
+                child: const Text('Seleccionar página')),
+            if (social['authorized'] == true)
+              TextButton(onPressed: _busy ? null : _disconnectMeta,
+                child: const Text('Desconectar')),
+          ]),
+          const SizedBox(height: 8),
           _socialConnectionTile(Icons.camera_alt_outlined, 'Instagram', instagram['configured'] == true, social['connected'] == true),
           _socialConnectionTile(Icons.facebook, 'Facebook', facebook['configured'] == true, social['connected'] == true),
+          if (facebook['page_name'] != null) Text('Página: ${facebook['page_name']}'),
+          if (instagram['username'] != null) Text('Instagram: @${instagram['username']}'),
           const SizedBox(height: 8),
-          const Text('Variables requeridas: META_APP_ID, META_APP_SECRET, META_REDIRECT_URI, META_ACCESS_TOKEN y el ID de cada cuenta. Las publicaciones siguen requiriendo aprobación humana.'),
+          const Text('Instagram requiere una cuenta profesional vinculada a la página seleccionada. Las publicaciones siguen requiriendo aprobación humana.'),
         ]))),
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -383,7 +533,7 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
             TextButton(onPressed: _busy ? null : () async { try { await _baileysStatus(); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); } }, child: const Text('Actualizar sesión')),
           ]),
         ]))),
-        const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('La conexión OAuth y las claves del proveedor se administran en Railway. Esta pantalla muestra el estado y permite iniciar flujos autorizados.'))),
+        const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Las credenciales de Google y Meta se ingresan aquí y se guardan cifradas en el servidor. La clave maestra de cifrado permanece protegida en Railway.'))),
       ]));
   }
 
@@ -391,7 +541,7 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     contentPadding: EdgeInsets.zero,
     leading: Icon(icon),
     title: Text(name),
-    subtitle: Text(accountConfigured && tokenAvailable ? 'Cuenta lista para conectar' : accountConfigured ? 'Cuenta identificada; falta autorización' : 'ID de cuenta no configurado'),
+    subtitle: Text(accountConfigured && tokenAvailable ? 'Conectada' : accountConfigured ? 'Cuenta identificada; falta autorización' : 'Cuenta no vinculada'),
     trailing: Icon(accountConfigured && tokenAvailable ? Icons.check_circle : Icons.warning_amber_outlined),
   );
 }
