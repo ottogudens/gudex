@@ -7,7 +7,7 @@ import secrets
 import hashlib
 import hmac
 from uuid import uuid4
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -296,7 +296,13 @@ def _issue_customer_access_token(session: Session, user: User, customer: Custome
 
 
 def _customer_access_link(request: Request, token: str, purpose: str) -> str:
-    base = (settings.customer_portal_url or str(request.base_url)).rstrip("/")
+    # Password forms live in Flutter, never on this API host. Some older
+    # Railway environments lack CUSTOMER_PORTAL_URL or point it to the API.
+    configured = (settings.customer_portal_url or "").strip().rstrip("/")
+    api_host = urlparse(str(request.base_url)).hostname
+    portal = urlparse(configured)
+    base = (configured if portal.scheme == "https" and portal.hostname and portal.hostname != api_host
+            and portal.hostname != "bknd.gudex.cl" and not portal.username else "https://admin.gudex.cl")
     parameter = "invite" if purpose == "activation" else "reset"
     return f"{base}/?{urlencode({parameter: token})}"
 

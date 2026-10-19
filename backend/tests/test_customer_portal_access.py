@@ -5,7 +5,8 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
-from app.main import create_customer_with_portal_access, request_customer_password_reset
+from app.main import _customer_access_link, create_customer_with_portal_access, request_customer_password_reset
+from app.config import settings
 from app.models import CustomerAccessToken, User, UserRole
 from app.schemas import CustomerPasswordResetRequest, CustomerPortalAccessCreate
 
@@ -14,6 +15,24 @@ def _admin_request():
     return SimpleNamespace(
         base_url="https://api.gudex.test/",
         state=SimpleNamespace(user_email="admin@gudex.test", user_role="admin"),
+    )
+
+
+@pytest.mark.parametrize("configured", [None, "", "https://bknd.gudex.cl", "https://api.gudex.test"])
+def test_customer_access_links_never_open_api_host(monkeypatch, configured):
+    monkeypatch.setattr(settings, "customer_portal_url", configured)
+    assert _customer_access_link(_admin_request(), "private-token", "activation") == (
+        "https://admin.gudex.cl/?invite=private-token"
+    )
+    assert _customer_access_link(_admin_request(), "private-token", "reset") == (
+        "https://admin.gudex.cl/?reset=private-token"
+    )
+
+
+def test_customer_access_link_uses_configured_frontend(monkeypatch):
+    monkeypatch.setattr(settings, "customer_portal_url", "https://preview.gudex.cl/")
+    assert _customer_access_link(_admin_request(), "private-token", "activation") == (
+        "https://preview.gudex.cl/?invite=private-token"
     )
 
 
