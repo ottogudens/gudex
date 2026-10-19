@@ -1,19 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/widgets/theme_button.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
+import '../../utils/customer_access_url.dart';
 
-class CustomerAccessPage extends StatefulWidget {
+class CustomerAccessPage extends ConsumerStatefulWidget {
   const CustomerAccessPage({required this.token, required this.passwordReset, required this.apiBaseUrl, super.key});
   final String token;
   final bool passwordReset;
   final String apiBaseUrl;
   
   @override
-  State<CustomerAccessPage> createState() => _CustomerAccessPageState();
+  ConsumerState<CustomerAccessPage> createState() => _CustomerAccessPageState();
 }
 
-class _CustomerAccessPageState extends State<CustomerAccessPage> {
+class _CustomerAccessPageState extends ConsumerState<CustomerAccessPage> {
   final _password = TextEditingController();
   final _confirm = TextEditingController();
   bool _busy = false;
@@ -33,7 +36,9 @@ class _CustomerAccessPageState extends State<CustomerAccessPage> {
     try {
       final path = widget.passwordReset ? '/auth/customer/password-reset/confirm' : '/auth/customer/activate';
       await ApiClient(widget.apiBaseUrl).postJson(path, {'token': widget.token, 'password': _password.text});
-      if (mounted) setState(() => _error = 'Listo. Ya puedes cerrar esta página e iniciar sesión.');
+      if (!mounted) return;
+      clearCustomerAccessUrl();
+      await ref.read(authProvider.notifier).finishCustomerPasswordSetup();
     } catch (error) { 
       if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', '')); 
     } finally { 

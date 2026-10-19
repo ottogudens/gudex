@@ -61,6 +61,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     child: Padding(
                       padding: EdgeInsets.all(constraints.maxWidth < 380 ? 22 : 30),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        if (ref.watch(authProvider).passwordCreated) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text('Contraseña creada correctamente. Ingresa con tu correo y nueva contraseña.'),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
                         Align(alignment: Alignment.centerLeft, child: Container(
                           width: 250, height: 70,
                           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),

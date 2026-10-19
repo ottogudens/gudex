@@ -17,6 +17,7 @@ class AuthState {
     this.isLoading = true,
     this.accessToken,
     this.isPasswordReset = false,
+    this.passwordCreated = false,
   });
 
   final String? token;
@@ -27,6 +28,7 @@ class AuthState {
   /// Deep-link invite / password-reset token from URL params.
   final String? accessToken;
   final bool isPasswordReset;
+  final bool passwordCreated;
 
   bool get isAuthenticated => token != null && role != null;
 
@@ -37,6 +39,7 @@ class AuthState {
     bool? isLoading,
     String? accessToken,
     bool? isPasswordReset,
+    bool? passwordCreated,
   }) =>
       AuthState(
         token: token ?? this.token,
@@ -45,6 +48,7 @@ class AuthState {
         isLoading: isLoading ?? this.isLoading,
         accessToken: accessToken ?? this.accessToken,
         isPasswordReset: isPasswordReset ?? this.isPasswordReset,
+        passwordCreated: passwordCreated ?? this.passwordCreated,
       );
 }
 
@@ -68,6 +72,7 @@ class AuthNotifier extends Notifier<AuthState> {
       isLoading: false,
       accessToken: state.accessToken,
       isPasswordReset: state.isPasswordReset,
+      passwordCreated: state.passwordCreated,
     );
   }
 
@@ -90,6 +95,16 @@ class AuthNotifier extends Notifier<AuthState> {
       await _storage.write(key: 'theme_mode', value: themePreference);
     }
     state = const AuthState(isLoading: false);
+  }
+
+  /// End the one-time invitation flow and require a fresh customer login.
+  Future<void> finishCustomerPasswordSetup() async {
+    final themePreference = await _storage.read(key: 'theme_mode');
+    await _storage.deleteAll();
+    if (themePreference != null) {
+      await _storage.write(key: 'theme_mode', value: themePreference);
+    }
+    state = const AuthState(isLoading: false, passwordCreated: true);
   }
 
   /// Attempt to log in with email/password credentials.
