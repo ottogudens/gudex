@@ -135,7 +135,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               leading: const Icon(Icons.picture_as_pdf_outlined), 
               title: Text(report['filename'].toString()), 
               subtitle: Text(report['scanned_at'].toString().replaceFirst('T', ' ').substring(0, 16)), 
-              trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               if (widget.role == 'admin') IconButton(
                 tooltip: 'Enviar por Gmail', onPressed: () => _emailReport(report), icon: const Icon(Icons.email_outlined)),
               IconButton(
