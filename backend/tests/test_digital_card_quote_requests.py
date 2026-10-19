@@ -38,6 +38,15 @@ def test_public_oil_card_is_opt_in_and_contains_no_customer_identity():
     assert "private-" not in response.text
 
 
+def test_public_oil_card_demo_uses_only_fictitious_data():
+    response = TestClient(app).get("/tarjeta-aceite?demo=true")
+    assert response.status_code == 200
+    assert "VISTA DEMOSTRATIVA · DATOS FICTICIOS" in response.text
+    assert "DEMO-00" in response.text
+    assert "Vehículo de ejemplo" in response.text
+    assert "60,000 km" in response.text
+
+
 def test_customer_can_request_quote_only_for_own_vehicle():
     create_db_and_tables()
     suffix = uuid4().hex[:8].upper()

@@ -1,5 +1,5 @@
 """Opt-in, minimal public oil-service card. No customer or vehicle history data."""
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 
 from fastapi import APIRouter, Depends, Query
@@ -51,12 +51,17 @@ def _date(value) -> str:
 
 @router.get("/tarjeta-aceite", response_class=HTMLResponse,
             dependencies=[Depends(rate_limit("public-oil-card", 30, 300))])
-def public_oil_card(patente: str = Query(default="", max_length=16), session: Session = Depends(get_session)):
-    card = oil_card(session, patente) if patente else None
+def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool = False,
+                    session: Session = Depends(get_session)):
+    card = ({
+        "plate": "DEMO-00", "vehicle": "Vehículo de ejemplo", "service": "Cambio de aceite y filtro",
+        "performed_at": datetime(2026, 10, 18, tzinfo=timezone.utc), "mileage_km": 50000,
+        "next_due_km": 60000, "next_due_at": datetime(2027, 4, 18, tzinfo=timezone.utc),
+    } if demo else oil_card(session, patente) if patente else None)
     searched = bool(patente)
     content = ""
     if card:
-        content = f"""<article class="card" aria-label="Tarjeta digital de cambio de aceite">
+        content = f"""{'<p class="demo">VISTA DEMOSTRATIVA · DATOS FICTICIOS</p>' if demo else ''}<article class="card" aria-label="Tarjeta digital de cambio de aceite">
           <div class="card-top"><span>GUDEX / SERVITECA</span><span>MANTENCIÓN DIGITAL</span></div>
           <div class="plate">{escape(card['plate'])}</div>
           <h2>{escape(card['vehicle'])}</h2><p class="service">{escape(card['service'])}</p>
@@ -82,7 +87,7 @@ def public_oil_card(patente: str = Query(default="", max_length=16), session: Se
       h2{{margin:0;font-size:23px}}.service{{color:#ffdc5b;margin:8px 0 25px}}.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
       .grid div{{background:#ffffff0c;border:1px solid #ffffff18;border-radius:15px;padding:18px;transition:transform .2s,border-color .2s}}.grid div:hover{{transform:translateY(-3px);border-color:#ffdc5b}}
       small{{display:block;color:#b6bac4;font-size:11px;letter-spacing:.09em;margin-bottom:8px}}strong{{font-size:clamp(18px,4vw,25px)}}.foot{{color:#b6bac4;font-size:13px;line-height:1.5;margin:24px 0 0}}
-      .empty{{padding:20px;border:1px solid #555;border-radius:15px;color:#d7d9df}}@keyframes arrive{{from{{opacity:0;transform:translateY(12px)}}to{{opacity:1;transform:translateY(0)}}}}
+      .empty{{padding:20px;border:1px solid #555;border-radius:15px;color:#d7d9df}}.demo{{color:#111318;background:#ffdc5b;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:900;letter-spacing:.08em;display:inline-block}}@keyframes arrive{{from{{opacity:0;transform:translateY(12px)}}to{{opacity:1;transform:translateY(0)}}}}
       @media(max-width:500px){{form{{flex-direction:column}}.grid{{grid-template-columns:1fr}}.card-top{{flex-direction:column}}}}
       </style></head><body><main><a href="https://gudex.cl">← Volver a Gudex</a><p class="brand">GUDEX / PUCÓN</p>
       <h1>Tu cambio de aceite, ahora digital.</h1><p class="intro">Consulta la próxima mantención por patente. Solo se muestran tarjetas autorizadas por el taller; la ficha completa está en el portal del cliente.</p>
