@@ -54,6 +54,19 @@ class CustomerAccessToken(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class CustomerEngagementVisit(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("customer_id", "vehicle_id", "channel", "visitor_hash",
+                                     "window_start", name="uq_customer_engagement_visit"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    customer_id: int = Field(foreign_key="customer.id", index=True)
+    vehicle_id: int = Field(default=0, index=True)  # 0 means the customer portal, not a vehicle.
+    channel: str = Field(max_length=24, index=True)
+    visitor_hash: str = Field(max_length=64)
+    window_start: datetime = Field(index=True)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class Appointment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     customer_id: int = Field(foreign_key="customer.id", index=True)

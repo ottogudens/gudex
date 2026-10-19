@@ -14,7 +14,7 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text, update
+from sqlalchemy import func, text, update
 from sqlmodel import Session, select
 
 from app.config import settings, uploads_are_persistent
@@ -22,7 +22,7 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, CalendarImportSettings, Customer, CustomerAccessToken, ExternalCalendarEvent, Inspection, IntegrationCredential, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
+    Appointment, CalendarImportSettings, Customer, CustomerAccessToken, CustomerEngagementVisit, ExternalCalendarEvent, Inspection, IntegrationCredential, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
     WorkOrderReception, WorkOrderEvidence, InstalledPart,
 )
@@ -42,6 +42,7 @@ from app.routers.vehicle_technical import router as vehicle_technical_router, te
 from app.security import AuthenticationMiddleware, authenticate, create_access_token, hash_password, require_admin, require_staff, verify_password
 from app.services.documents import sale_receipt_pdf, quote_pdf
 from app.services import google
+from app.services.customer_engagement import record_visit
 from app.services.work_orders import editable_order, transition_order
 from app.routers.maintenance import router as maintenance_router, Completion, record_completion
 from app.routers.work_order_services import router as work_order_services_router, vehicle_parts, _can_edit, _service, _assignee, KINDS
@@ -542,6 +543,31 @@ def list_customers(q: str | None = None, include_archived: bool = False,
     if q:
         statement = statement.where(Customer.full_name.contains(q))
     return session.exec(statement).all()
+
+
+@app.get("/api/v1/customers/engagement", dependencies=[Depends(require_staff)])
+def customer_engagement(session: Session = Depends(get_session)):
+    invited = set(session.exec(select(CustomerAccessToken.customer_id).where(
+        CustomerAccessToken.sent_at != None)).all())  # noqa: E711
+    active = set(session.exec(select(User.customer_id).where(
+        User.role == UserRole.customer, User.active == True,
+        User.customer_id != None)).all())  # noqa: E711
+    counts = {}
+    for customer_id, channel, total, last_at in session.exec(select(
+        CustomerEngagementVisit.customer_id, CustomerEngagementVisit.channel,
+        func.count(CustomerEngagementVisit.id), func.max(CustomerEngagementVisit.created_at),
+    ).group_by(CustomerEngagementVisit.customer_id, CustomerEngagementVisit.channel)).all():
+        counts.setdefault(customer_id, {})[channel] = {"visits": total, "last_at": last_at}
+    return [{"customer_id": customer.id,
+             "invitation_sent": customer.id in invited,
+             "password_configured": customer.id in active,
+             "portal_visits": counts.get(customer.id, {}).get("portal", {}).get("visits", 0),
+             "public_card_visits": counts.get(customer.id, {}).get("public_card", {}).get("visits", 0),
+             "last_portal_visit_at": counts.get(customer.id, {}).get("portal", {}).get("last_at"),
+             "last_public_card_visit_at": counts.get(customer.id, {}).get("public_card", {}).get("last_at"),
+             "portal_ready": customer.id in invited and customer.id in active
+                 and counts.get(customer.id, {}).get("portal", {}).get("visits", 0) > 0}
+            for customer in session.exec(select(Customer).where(Customer.archived_at == None)).all()]  # noqa: E711
 
 
 @app.patch("/api/v1/customers/{customer_id}", response_model=Customer, dependencies=[Depends(require_admin)])
@@ -1444,6 +1470,8 @@ def customer_portal_profile(request: Request, session: Session = Depends(get_ses
     customer = session.get(Customer, request.state.customer_id)
     if not customer:
         raise HTTPException(404, "Perfil de cliente no encontrado")
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    record_visit(session, customer_id=customer.id, channel="portal", visitor_identifier=bearer)
     vehicles = session.exec(select(Vehicle).where(Vehicle.customer_id == customer.id)).all()
     orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id == customer.id).order_by(WorkOrder.opened_at.desc())).all()
     return {"customer": customer, "vehicles": vehicles, "work_orders": orders}

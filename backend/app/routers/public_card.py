@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
+import secrets
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -14,6 +15,7 @@ from app.database import get_session
 from app.models import MaintenanceExecution, MaintenancePlan, OilServiceCard, Vehicle
 from app.rate_limit import rate_limit
 from app.security import require_admin
+from app.services.customer_engagement import record_visit
 from app.validators import normalize_plate
 
 router = APIRouter(tags=["tarjeta pública"])
@@ -74,6 +76,7 @@ def oil_card(session: Session, plate: str) -> dict | None:
     if not card:
         return None
     return {
+        "_vehicle_id": vehicle.id, "_customer_id": vehicle.customer_id,
         "plate": vehicle.plate, "vehicle": f"{vehicle.make} {vehicle.model}",
         "service": card["service_name"], "performed_at": card["performed_at"],
         "mileage_km": card["mileage_km"], "next_due_km": card["next_due_km"],
@@ -204,7 +207,7 @@ def _date(value) -> str:
 
 @router.get("/tarjeta-aceite", response_class=HTMLResponse,
             dependencies=[Depends(rate_limit("public-oil-card", 30, 300))])
-def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool = False,
+def public_oil_card(request: Request, patente: str = Query(default="", max_length=16), demo: bool = False,
                     session: Session = Depends(get_session)):
     card = ({
         "plate": "DEMO-00", "vehicle": "Vehículo de ejemplo", "service": "Cambio de aceite y filtro",
@@ -240,7 +243,7 @@ def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool 
         </article>"""
     elif searched:
         content = '<p class="empty" role="status">No hay una tarjeta pública disponible para esta patente. Verifica el dato o consulta al taller.</p>'
-    return HTMLResponse(f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
+    response = HTMLResponse(f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
       <title>Tarjeta digital de aceite · Gudex</title><style>
       :root{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#f6f7fa;background:#111318}}
@@ -263,3 +266,13 @@ def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool 
       <h1>Tu cambio de aceite, ahora digital.</h1><p class="intro">Consulta la próxima mantención por patente. Solo se muestran tarjetas autorizadas por el taller; la ficha completa está en el portal del cliente.</p>
       <form method="get"><label for="patente" class="sr">Patente del vehículo</label><input id="patente" name="patente" required maxlength="16" autocomplete="off" placeholder="Ingresa tu patente" value="{escape(patente, quote=True)}">
       <button type="submit">Ver tarjeta</button></form>{content}</main></body></html>""", headers={"Cache-Control": "private, no-store"})
+    if card and not demo:
+        visitor = request.cookies.get("gudex_card_visitor", "")
+        if not (16 <= len(visitor) <= 96 and all(character.isalnum() or character in "-_" for character in visitor)):
+            visitor = secrets.token_urlsafe(24)
+        record_visit(session, customer_id=card["_customer_id"], vehicle_id=card["_vehicle_id"],
+                     channel="public_card", visitor_identifier=visitor)
+        response.set_cookie("gudex_card_visitor", visitor, max_age=30 * 24 * 60 * 60,
+                            httponly=True, secure=settings.app_env.lower() == "production",
+                            samesite="lax", path="/tarjeta-aceite")
+    return response

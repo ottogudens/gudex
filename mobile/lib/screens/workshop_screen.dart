@@ -24,6 +24,7 @@ class WorkshopScreen extends StatefulWidget {
 class _WorkshopScreenState extends State<WorkshopScreen> {
   List<Map<String, dynamic>> _records = [];
   List<Map<String, dynamic>> _customers = [];
+  Map<int, Map<String, dynamic>> _customerEngagement = {};
   List<Map<String, dynamic>> _vehicles = [];
   int _customerSection = 0;
   bool _kanbanView = true;
@@ -74,6 +75,13 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         await Future.wait([
           load('/api/v1/customers', 'Clientes', (rows) => _customers = rows),
           load('/api/v1/vehicles', 'Vehículos', (rows) => _vehicles = rows),
+          if (widget.role == 'admin')
+            load('/api/v1/customers/engagement', 'Interacción de clientes', (rows) {
+              _customerEngagement = {
+                for (final row in rows)
+                  if (row['customer_id'] is int) row['customer_id'] as int: row,
+              };
+            }),
         ]);
         _error = errors.isEmpty ? null : errors.join('\n');
         _records = _customerSection == 0 ? _customers : _vehicles;
@@ -1284,16 +1292,47 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
   }
 
   Widget _customerTile(Map<String, dynamic> item) {
+    final hasEngagement = _customerEngagement.containsKey(item['id']);
+    final engagement = _customerEngagement[item['id']] ?? <String, dynamic>{};
+    final ready = engagement['portal_ready'] == true;
+    final accessStatus = !hasEngagement ? 'Estado de acceso no disponible'
+        : ready ? 'Acceso al portal configurado'
+        : engagement['invitation_sent'] != true ? 'Acceso aún no enviado'
+        : engagement['password_configured'] != true ? 'Invitado · falta crear contraseña'
+        : 'Contraseña creada · falta entrar al portal';
     final owned = _vehicles
         .where((vehicle) => vehicle['customer_id'] == item['id'])
         .length;
     return Card(
         child: ListTile(
-      leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+      leading: Stack(clipBehavior: Clip.none, children: [
+        const CircleAvatar(child: Icon(Icons.person_outline)),
+        Positioned(right: -6, bottom: -5, child: Tooltip(
+          message: accessStatus,
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(shape: BoxShape.circle,
+              color: ready ? const Color(0xFFE7F2FF) : const Color(0xFF6B7280)),
+            child: Icon(Icons.verified_rounded, size: 20,
+              color: ready ? const Color(0xFF1265BD) : Colors.white),
+          ),
+        )),
+      ]),
       title: Text('${item['full_name'] ?? 'Cliente'}'),
-      subtitle: Text([item['phone'], item['email'], '$owned vehículo(s)']
-          .where((value) => value != null && '$value'.isNotEmpty)
-          .join(' · ')),
+      subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text([item['phone'], item['email'], '$owned vehículo(s)']
+            .where((value) => value != null && '$value'.isNotEmpty).join(' · ')),
+        const SizedBox(height: 5),
+        Text(accessStatus, style: TextStyle(fontWeight: FontWeight.w600,
+          color: ready ? const Color(0xFF1265BD) : Theme.of(context).colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 5),
+        if (hasEngagement)
+          Wrap(spacing: 8, runSpacing: 4, children: [
+            _engagementBadge(Icons.login_rounded, 'Portal: ${engagement['portal_visits'] ?? 0}'),
+            _engagementBadge(Icons.oil_barrel_outlined,
+                'Tarjeta pública: ${engagement['public_card_visits'] ?? 0}'),
+          ]),
+      ]),
       trailing: widget.role != 'admin'
           ? null
           : PopupMenuButton<String>(
@@ -1334,6 +1373,18 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
       onTap: widget.role == 'admin' ? () => _editCustomer(item) : null,
     ));
   }
+
+  Widget _engagementBadge(IconData icon, String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 14), const SizedBox(width: 4),
+      Text(label, style: Theme.of(context).textTheme.labelSmall),
+    ]),
+  );
 
   Widget _vehicleTile(Map<String, dynamic> item) {
     final owner =
