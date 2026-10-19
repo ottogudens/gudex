@@ -9,7 +9,7 @@ class _QuotesScreen extends StatefulWidget {
 }
 
 class _QuotesScreenState extends State<_QuotesScreen> {
-  List<Map<String, dynamic>> _quotes = [], _customers = [], _orders = [], _vehicles = [], _services = [], _products = [];
+  List<Map<String, dynamic>> _quotes = [], _customers = [], _orders = [], _vehicles = [], _services = [], _products = [], _requests = [];
   bool _loading = true, _busy = false;
   String? _error;
   String _search = '', _status = 'all';
@@ -30,12 +30,14 @@ class _QuotesScreenState extends State<_QuotesScreen> {
         widget.api.get('/api/v1/quotes'), widget.api.get('/api/v1/customers'),
         widget.api.get('/api/v1/work-orders'), widget.api.get('/api/v1/vehicles'),
         widget.api.get('/api/v1/services'), widget.api.get('/api/v1/products'),
+        widget.api.get('/api/v1/quote-requests'),
       ]);
       if (!mounted) return;
       setState(() {
         _quotes = _records(results[0]); _customers = _records(results[1]);
         _orders = _records(results[2]); _vehicles = _records(results[3]);
         _services = _records(results[4]); _products = _records(results[5]);
+        _requests = _records(results[6]);
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -297,6 +299,11 @@ class _QuotesScreenState extends State<_QuotesScreen> {
     await _run(() async { await widget.api.post('/api/v1/quotes/${quote['id']}/email'); }, 'Cotización enviada por Gmail');
   }
 
+  Future<void> _convertRequest(Map<String, dynamic> request) async {
+    await _run(() async { await widget.api.post('/api/v1/quote-requests/${request['id']}/draft'); },
+      'Borrador creado desde la solicitud del cliente. Revisa los precios antes de publicarlo.');
+  }
+
   @override
   Widget build(BuildContext context) {
     final records = _quotes.where((q) => (_status == 'all' || q['status'] == _status) &&
@@ -321,6 +328,18 @@ class _QuotesScreenState extends State<_QuotesScreen> {
         DropdownMenuItem(value: 'rejected', child: Text('Rechazadas')),
       ], onChanged: (value) => setState(() => _status = value ?? 'all')),
       if (_busy) const LinearProgressIndicator(),
+      if (_requests.any((r) => r['status'] == 'pending')) Card(child: Padding(
+        padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Solicitudes de clientes', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          ..._requests.where((r) => r['status'] == 'pending').take(4).map((r) => ListTile(
+            leading: const Icon(Icons.mark_email_unread_outlined),
+            title: Text('${r['customer_name']} · ${r['vehicle_plate']}'),
+            subtitle: Text('${r['description']}', maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: TextButton(onPressed: _busy ? null : () => _convertRequest(r),
+              child: const Text('Crear borrador')),
+          )),
+        ]))),
       Expanded(child: _loading ? const Center(child: CircularProgressIndicator())
         : _error != null ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text('No se pudieron cargar las cotizaciones: $_error'),

@@ -139,6 +139,7 @@ class VehicleCreate(SQLModel):
     engine: Optional[str] = None
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
+    public_service_card_enabled: bool = False
 
     @field_validator("plate")
     @classmethod
@@ -167,6 +168,7 @@ class VehicleCreate(SQLModel):
 class MaintenancePlanCreate(SQLModel):
     vehicle_id: int
     name: str = Field(min_length=2, max_length=120)
+    category: Literal["oil", "filters", "preventive", "general"] = "general"
     interval_km: Optional[int] = Field(default=None, ge=1)
     interval_days: Optional[int] = Field(default=None, ge=1)
     last_service_km: Optional[int] = Field(default=None, ge=0)
@@ -174,9 +176,22 @@ class MaintenancePlanCreate(SQLModel):
 
 class MaintenancePlanUpdate(SQLModel):
     name: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    category: Optional[Literal["oil", "filters", "preventive", "general"]] = None
     interval_km: Optional[int] = Field(default=None, ge=1)
     interval_days: Optional[int] = Field(default=None, ge=1)
     active: Optional[bool] = None
+
+
+class QuoteRequestCreate(SQLModel):
+    vehicle_id: int
+    description: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, value: str) -> str:
+        if len(value.strip()) < 10:
+            raise ValueError("Describe el servicio en al menos 10 caracteres")
+        return value.strip()
 
 
 class VehicleUpdate(SQLModel):
@@ -189,6 +204,7 @@ class VehicleUpdate(SQLModel):
     engine: Optional[str] = None
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
+    public_service_card_enabled: Optional[bool] = None
 
 
 class WorkOrderServiceDraft(SQLModel):

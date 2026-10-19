@@ -456,7 +456,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                     value: next == ThemeMode.dark ? 'dark' : 'light');
               },
             ),
-            IconButton(
+            if (widget.role != 'customer') IconButton(
                 tooltip: 'Asistente IA',
                 icon: const Icon(Icons.auto_awesome),
                 onPressed: () => Navigator.push(

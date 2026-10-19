@@ -93,6 +93,7 @@ class Vehicle(SQLModel, table=True):
     engine: Optional[str] = Field(default=None, max_length=80)
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
+    public_service_card_enabled: bool = False
     customer: Optional[Customer] = Relationship(back_populates="vehicles")
     work_orders: list["WorkOrder"] = Relationship(back_populates="vehicle")
 
@@ -115,6 +116,7 @@ class MaintenancePlan(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
     name: str = Field(max_length=120)
+    category: str = Field(default="general", max_length=32)
     interval_km: Optional[int] = Field(default=None, ge=1)
     interval_days: Optional[int] = Field(default=None, ge=1)
     last_service_km: Optional[int] = Field(default=None, ge=0)
@@ -134,6 +136,8 @@ class MaintenanceExecution(SQLModel, table=True):
     mileage_km: int = Field(ge=0)
     interval_km: Optional[int] = None
     interval_days: Optional[int] = None
+    next_due_km: Optional[int] = None
+    next_due_at: Optional[datetime] = None
     materials: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=4000)
     recorded_by: str = Field(max_length=254)
@@ -305,6 +309,17 @@ class Quote(SQLModel, table=True):
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=now_utc)
     work_order: Optional[WorkOrder] = Relationship(back_populates="quotes")
+
+
+class QuoteRequest(SQLModel, table=True):
+    """Customer request; never treated as a priced or approved quotation."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    customer_id: int = Field(foreign_key="customer.id", index=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    description: str = Field(max_length=2000)
+    status: str = Field(default="pending", max_length=24)
+    quote_id: Optional[int] = Field(default=None, foreign_key="quote.id")
+    created_at: datetime = Field(default_factory=now_utc)
 
 
 class QuoteItem(SQLModel, table=True):

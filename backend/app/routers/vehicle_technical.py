@@ -172,9 +172,19 @@ async def enrich_vehicle(vehicle_id: int, bind=None):
         signature = identity_signature(session, vehicle_id)
         identity = {**original, **{k: v["value"] for k, v in values.items()
                     if k in {"version", "engine_code", "displacement", "fuel", "transmission", "drive", "market"}}}
-        fields = [f for f in FIELDS if f["key"] not in values and f["key"] != "research_status"]
+        # Retry AI suggestions (which are not verified), but preserve manual
+        # drafts and verified data. A previous search must not freeze the card.
+        fields = [f for f in FIELDS if f["key"] != "research_status" and
+                  (f["key"] not in values or values[f["key"]].get("changed_by") == "Asistente Gudex") and
+                  values.get(f["key"], {}).get("status") != "verified"]
         try:
-            proposals = await research_vehicle(identity, fields) if fields else []
+            proposals = []
+            failed_groups = []
+            for group in sorted({f["group"] for f in fields}):
+                try:
+                    proposals.extend(await research_vehicle(identity, [f for f in fields if f["group"] == group]))
+                except HTTPException as exc:
+                    failed_groups.append(f"{group}: {exc.detail}")
             session.expire_all()
             vehicle = session.get(Vehicle, vehicle_id)
             current = technical_payload(session, vehicle_id)["values"]
@@ -185,15 +195,19 @@ async def enrich_vehicle(vehicle_id: int, bind=None):
                 return 0
             count = 0
             for p in proposals:
-                if p.key in technical_payload(session, vehicle_id)["values"]:
+                latest = technical_payload(session, vehicle_id)["values"].get(p.key)
+                if latest and (latest.get("changed_by") != "Asistente Gudex" or latest.get("status") == "verified"):
                     continue
                 try:
                     append_entry(session, vehicle_id, p.key, p.value,
-                        f"{p.source_url}\nAplicación: {p.application}", "suggested", 0, "Asistente Gudex")
+                        f"{p.source_url}\nAplicación: {p.application}", "suggested",
+                        latest["revision"] if latest else 0, "Asistente Gudex")
                     count += 1
                 except HTTPException:
                     continue
             message = f"Búsqueda finalizada: {count} sugerencias con fuentes. Los campos sin coincidencia documental quedan pendientes."
+            if failed_groups:
+                message += " No se completaron estas secciones: " + "; ".join(failed_groups)
         except HTTPException as exc:
             count = 0
             message = str(exc.detail)

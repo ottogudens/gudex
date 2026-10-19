@@ -53,8 +53,58 @@ class _ModuleListState extends State<ModuleList> {
     return <dynamic>[];
   }
 
+  Future<void> _requestQuote() async {
+    try {
+      final profile = Map<String, dynamic>.from(await widget.api.get('/api/v1/portal/profile') as Map);
+      final vehicles = (profile['vehicles'] as List? ?? []).whereType<Map>().map((v) => Map<String, dynamic>.from(v)).toList();
+      if (!mounted) return;
+      if (vehicles.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registra un vehículo antes de solicitar una cotización.')));
+        return;
+      }
+      int? vehicleId = vehicles.first['id'] as int?;
+      final description = TextEditingController();
+      final saved = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Solicitar cotización'),
+          content: SizedBox(width: 440, child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Describe el servicio o problema. El taller revisará tu solicitud antes de emitir una cotización con precio.'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<int>(initialValue: vehicleId, isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Vehículo'),
+              items: vehicles.map((v) => DropdownMenuItem<int>(value: v['id'] as int,
+                child: Text('${v['plate']} · ${v['make']} ${v['model']}'))).toList(),
+              onChanged: (id) => update(() => vehicleId = id)),
+            const SizedBox(height: 12),
+            TextField(controller: description, maxLines: 4, maxLength: 2000,
+              decoration: const InputDecoration(labelText: '¿Qué necesitas cotizar?')),
+          ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancelar')),
+            FilledButton(onPressed: () async {
+              if (vehicleId == null || description.text.trim().length < 10) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Describe el trabajo en al menos 10 caracteres.')));
+                return;
+              }
+              try {
+                await widget.api.postJson('/api/v1/portal/quote-requests',
+                  {'vehicle_id': vehicleId, 'description': description.text.trim()});
+                if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+              } catch (error) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+              }
+            }, child: const Text('Enviar solicitud')),
+          ],
+        )));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      description.dispose();
+      if (saved == true && mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Solicitud recibida. El taller preparará tu cotización.')));
+    } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
+  }
+
   @override
-  Widget build(BuildContext context) => FutureBuilder<List<dynamic>>(
+  Widget build(BuildContext context) => Stack(children: [FutureBuilder<List<dynamic>>(
         future: _items,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) return const Center(
@@ -110,7 +160,11 @@ class _ModuleListState extends State<ModuleList> {
             ),
           );
         },
-      );
+      ),
+      if (widget.module.path == '/api/v1/portal/quotes')
+        Positioned(right: 16, bottom: 16, child: FloatingActionButton.extended(
+          onPressed: _requestQuote, icon: const Icon(Icons.add), label: const Text('Solicitar cotización'))),
+    ]);
 
   Future<void> _answerQuote(int id, bool approved) async {
     try {

@@ -21,12 +21,12 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, Sale, SaleItem, ScannerReport, Service,
+    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
     WorkOrderReception, WorkOrderEvidence, InstalledPart,
 )
 from app.schemas import (
-    AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
+    AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead, QuoteRequestCreate,
     PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StaffPasswordReset, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, MaintenancePlanUpdate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
@@ -44,6 +44,7 @@ from app.services import google
 from app.services.work_orders import editable_order, transition_order
 from app.routers.maintenance import router as maintenance_router, Completion, record_completion
 from app.routers.work_order_services import router as work_order_services_router, vehicle_parts, _can_edit, _service, _assignee, KINDS
+from app.routers.public_card import router as public_card_router
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -90,6 +91,7 @@ app.include_router(bulk_import_router)
 app.include_router(vehicle_technical_router)
 app.include_router(maintenance_router)
 app.include_router(work_order_services_router)
+app.include_router(public_card_router)
 
 
 def on_startup() -> None:
@@ -743,8 +745,14 @@ def due_maintenance_plans(session: Session = Depends(get_session)):
         vehicle = session.get(Vehicle, plan.vehicle_id)
         if not vehicle:
             continue
-        km_due = plan.interval_km and vehicle.current_mileage_km is not None and plan.last_service_km is not None and vehicle.current_mileage_km >= plan.last_service_km + plan.interval_km
-        date_due = plan.interval_days and now >= plan.last_service_at + timedelta(days=plan.interval_days)
+        latest = session.exec(select(MaintenanceExecution).where(MaintenanceExecution.plan_id == plan.id)
+                              .order_by(MaintenanceExecution.performed_at.desc(), MaintenanceExecution.id.desc())).first()
+        next_km = latest.next_due_km if latest else (plan.last_service_km + plan.interval_km if plan.last_service_km is not None and plan.interval_km else None)
+        next_at = latest.next_due_at if latest else (plan.last_service_at + timedelta(days=plan.interval_days) if plan.interval_days else None)
+        if next_at and next_at.tzinfo is None:
+            next_at = next_at.replace(tzinfo=timezone.utc)
+        km_due = next_km is not None and vehicle.current_mileage_km is not None and vehicle.current_mileage_km >= next_km
+        date_due = next_at is not None and now >= next_at
         if km_due or date_due:
             due.append({"plan": plan, "vehicle": vehicle, "customer": session.get(Customer, vehicle.customer_id), "due_by_km": bool(km_due), "due_by_date": bool(date_due)})
     return due
@@ -1255,6 +1263,47 @@ def list_quotes(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0, session: Sessi
              "vehicle_plate": vehicle.plate,
              "lines": [item.model_dump() for item in session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()]}
             for quote, order, customer, vehicle in rows]
+
+
+@app.post("/api/v1/portal/quote-requests", status_code=201)
+def create_portal_quote_request(data: QuoteRequestCreate, request: Request, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, data.vehicle_id)
+    if not vehicle or vehicle.customer_id != request.state.customer_id:
+        raise HTTPException(404, "Vehículo no encontrado")
+    row = QuoteRequest(customer_id=request.state.customer_id, vehicle_id=vehicle.id,
+                       description=data.description.strip())
+    session.add(row); session.commit(); session.refresh(row)
+    return row
+
+
+@app.get("/api/v1/portal/quote-requests")
+def list_portal_quote_requests(request: Request, session: Session = Depends(get_session)):
+    return session.exec(select(QuoteRequest).where(QuoteRequest.customer_id == request.state.customer_id)
+                        .order_by(QuoteRequest.created_at.desc())).all()
+
+
+@app.get("/api/v1/quote-requests", dependencies=[Depends(require_admin)])
+def list_quote_requests(session: Session = Depends(get_session)):
+    rows = session.exec(select(QuoteRequest).order_by(QuoteRequest.created_at.desc())).all()
+    return [{**row.model_dump(), "customer_name": session.get(Customer, row.customer_id).full_name,
+             "vehicle_plate": session.get(Vehicle, row.vehicle_id).plate}
+            for row in rows]
+
+
+@app.post("/api/v1/quote-requests/{request_id}/draft", dependencies=[Depends(require_admin)])
+def convert_quote_request(request_id: int, session: Session = Depends(get_session)):
+    row = session.get(QuoteRequest, request_id)
+    if not row:
+        raise HTTPException(404, "Solicitud no encontrada")
+    if row.quote_id:
+        return session.get(Quote, row.quote_id)
+    quote = Quote(customer_id=row.customer_id, vehicle_id=row.vehicle_id,
+                  description=row.description[:250], status="draft")
+    session.add(quote); session.flush()
+    row.status = "draft_created"
+    row.quote_id = quote.id
+    session.add(row); session.commit(); session.refresh(quote)
+    return quote
 
 
 @app.put("/api/v1/quotes/{quote_id}", response_model=Quote, dependencies=[Depends(require_admin)])

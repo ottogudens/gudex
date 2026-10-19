@@ -87,6 +87,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
     };
     bool saving = false;
     bool saved = false;
+    bool publicCard = vehicle['public_service_card_enabled'] == true;
     String? error;
     await _showEditor(
         context: context,
@@ -113,6 +114,12 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                       : TextInputType.text,
                                   decoration:
                                       InputDecoration(labelText: field.value))),
+                        SwitchListTile(
+                          value: publicCard,
+                          title: const Text('Tarjeta de aceite pública'),
+                          subtitle: const Text('Permite consultar solo la última mantención de aceite y la próxima por patente. No muestra datos del cliente.'),
+                          onChanged: saving ? null : (value) => update(() => publicCard = value),
+                        ),
                         if (error != null)
                           Text(error!,
                               style: TextStyle(
@@ -153,6 +160,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                           ? int.parse(text)
                                           : text;
                                 }
+                                payload['public_service_card_enabled'] = publicCard;
                                 update(() {
                                   saving = true;
                                   error = null;
@@ -373,13 +381,22 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
         .map((f) {
       final entry = _map(values[f['key']]);
       final filled = '${entry['value'] ?? ''}'.trim().isNotEmpty;
-      return Card(
+      final accent = entry['status'] == 'verified' ? Colors.green :
+          entry['status'] == 'suggested' ? Colors.amber.shade700 : Theme.of(context).colorScheme.outline;
+      return TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1), duration: const Duration(milliseconds: 280),
+        builder: (context, value, child) => Opacity(opacity: value,
+          child: Transform.translate(offset: Offset(0, 8 * (1 - value)), child: child)),
+        child: Card(
+          clipBehavior: Clip.antiAlias,
           child: Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
+                      Container(width: 5, height: 34, margin: const EdgeInsets.only(right: 12),
+                        decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(4))),
                       Expanded(
                           child: Text('${f['label']}',
                               style: Theme.of(context).textTheme.titleSmall)),
@@ -423,7 +440,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                       Text('Actualizado: ${_date(entry['created_at'])}',
                           style: Theme.of(context).textTheme.bodySmall),
                     ],
-                  ])));
+                  ]))));
     }).toList();
   }
 
@@ -458,6 +475,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
             ? '${_map(data['vehicle'])['current_mileage_km'] ?? ''}'
             : '');
     final days = TextEditingController();
+    final nextKm = TextEditingController();
     final materials = TextEditingController();
     final notes = TextEditingController();
     final requestKey = List.generate(
@@ -466,6 +484,8 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                 Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'))
         .join();
     int? orderId;
+    String category = 'general';
+    DateTime? nextDate;
     bool saving = false, saved = false;
     String? error;
     final orders = _maps(data['work_orders'])
@@ -496,6 +516,18 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                               enabled: !saving,
                               decoration: const InputDecoration(
                                   labelText: 'Nombre del plan *')),
+                        if (!completing)
+                          DropdownButtonFormField<String>(
+                            initialValue: category,
+                            decoration: const InputDecoration(labelText: 'Tipo de mantención'),
+                            items: const [
+                              DropdownMenuItem(value: 'oil', child: Text('Aceite de motor')),
+                              DropdownMenuItem(value: 'filters', child: Text('Filtros')),
+                              DropdownMenuItem(value: 'preventive', child: Text('Preventiva')),
+                              DropdownMenuItem(value: 'general', child: Text('General')),
+                            ],
+                            onChanged: saving ? null : (value) => update(() => category = value ?? 'general'),
+                          ),
                         TextField(
                             controller: km,
                             enabled: !saving,
@@ -512,6 +544,22 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                               decoration: const InputDecoration(
                                   labelText: 'Intervalo en días')),
                         if (completing) ...[
+                          TextField(controller: nextKm, enabled: !saving,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Próxima mantención a los km (opcional)',
+                              helperText: 'Si se deja vacío, se calcula con el intervalo del plan')),
+                          OutlinedButton.icon(
+                            onPressed: saving ? null : () async {
+                              final selected = await showDatePicker(context: dialogContext,
+                                initialDate: DateTime.now().add(const Duration(days: 1)),
+                                firstDate: DateTime.now().add(const Duration(days: 1)),
+                                lastDate: DateTime.now().add(const Duration(days: 3650)));
+                              if (selected != null) update(() => nextDate = selected);
+                            },
+                            icon: const Icon(Icons.event_outlined),
+                            label: Text(nextDate == null ? 'Elegir próxima fecha (opcional)' :
+                              'Próxima fecha: ${nextDate!.day}/${nextDate!.month}/${nextDate!.year}'),
+                          ),
                           DropdownButtonFormField<int>(
                               initialValue: orderId,
                               isExpanded: true,
@@ -559,8 +607,10 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                 final mileage = int.tryParse(km.text.trim());
                                 final intervalDays =
                                     int.tryParse(days.text.trim());
+                                final nextMileage = int.tryParse(nextKm.text.trim());
                                 if ((km.text.trim().isNotEmpty &&
                                         mileage == null) ||
+                                    (nextKm.text.trim().isNotEmpty && nextMileage == null) ||
                                     (!completing &&
                                         days.text.trim().isNotEmpty &&
                                         intervalDays == null) ||
@@ -594,10 +644,13 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                               'materials':
                                                   materials.text.trim(),
                                               'notes': notes.text.trim(),
+                                              'next_due_km': nextMileage,
+                                              'next_due_at': nextDate?.toIso8601String(),
                                             }
                                           : {
                                               'vehicle_id': widget.vehicleId,
                                               'name': name.text.trim(),
+                                              'category': category,
                                               'interval_km': mileage,
                                               'interval_days': intervalDays
                                             });
@@ -615,7 +668,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                         child: Text(saving ? 'Guardando…' : 'Guardar')),
                   ],
                 ))));
-    for (final controller in [name, km, days, materials, notes]) {
+    for (final controller in [name, km, days, nextKm, materials, notes]) {
       controller.dispose();
     }
     if (saved && mounted) {
@@ -627,6 +680,75 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
     }
   }
 
+  Widget _oilCard(Map<String, dynamic> data) {
+    final vehicle = _map(data['vehicle']);
+    final plans = _maps(data['maintenance_plans']);
+    final oilPlans = plans.where((p) => p['category'] == 'oil').toList();
+    final executions = _maps(data['maintenance_executions'])
+        .where((e) => oilPlans.any((p) => p['id'] == e['plan_id'])).toList();
+    if (executions.isEmpty) return const SizedBox.shrink();
+    final latest = executions.first;
+    final plate = vehicle['plate']?.toString() ?? '';
+    final color = Theme.of(context).colorScheme;
+    Widget metric(String label, String value, IconData icon) => Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: .10), borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, color: color.onPrimary), const SizedBox(height: 10),
+        Text(label, style: TextStyle(color: color.onPrimary.withValues(alpha: .75), fontSize: 12)),
+        const SizedBox(height: 4), Text(value, style: TextStyle(color: color.onPrimary, fontSize: 19, fontWeight: FontWeight.bold)),
+      ]),
+    );
+    return Padding(padding: const EdgeInsets.only(bottom: 18), child: AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [color.primary, color.primary.withValues(alpha: .78)]),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: color.primary.withValues(alpha: .24), blurRadius: 24, offset: const Offset(0, 10))]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('GUDEX · TARJETA DIGITAL DE ACEITE', style: TextStyle(color: color.onPrimary.withValues(alpha: .8), fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+        const SizedBox(height: 14),
+        Text(plate, style: TextStyle(color: color.onPrimary, fontSize: 34, fontWeight: FontWeight.w900)),
+        Text('${vehicle['make']} ${vehicle['model']}', style: TextStyle(color: color.onPrimary)),
+        const SizedBox(height: 18),
+        LayoutBuilder(builder: (context, constraints) => Wrap(spacing: 10, runSpacing: 10, children: [
+          SizedBox(width: constraints.maxWidth > 600 ? (constraints.maxWidth - 30) / 4 : (constraints.maxWidth - 10) / 2,
+            child: metric('Último servicio', _date(latest['performed_at']).split(' ').first, Icons.check_circle_outline)),
+          SizedBox(width: constraints.maxWidth > 600 ? (constraints.maxWidth - 30) / 4 : (constraints.maxWidth - 10) / 2,
+            child: metric('Kilometraje', '${latest['mileage_km']} km', Icons.speed_outlined)),
+          SizedBox(width: constraints.maxWidth > 600 ? (constraints.maxWidth - 30) / 4 : (constraints.maxWidth - 10) / 2,
+            child: metric('Próximo km', latest['next_due_km'] == null ? 'No definido' : '${latest['next_due_km']} km', Icons.route_outlined)),
+          SizedBox(width: constraints.maxWidth > 600 ? (constraints.maxWidth - 30) / 4 : (constraints.maxWidth - 10) / 2,
+            child: metric('Próxima fecha', latest['next_due_at'] == null ? 'No definida' : _date(latest['next_due_at']).split(' ').first, Icons.event_outlined)),
+        ])),
+        const SizedBox(height: 12),
+        Text('Vence por fecha o kilometraje, lo que ocurra primero.', style: TextStyle(color: color.onPrimary.withValues(alpha: .8))),
+        if (vehicle['public_service_card_enabled'] == true) TextButton.icon(
+          onPressed: () => launchUrl(Uri.parse('https://bknd.gudex.cl/tarjeta-aceite?patente=${Uri.encodeQueryComponent(plate)}'),
+              mode: LaunchMode.externalApplication),
+          icon: Icon(Icons.open_in_new, color: color.onPrimary),
+          label: Text('Ver tarjeta pública', style: TextStyle(color: color.onPrimary))),
+      ]),
+    )));
+  }
+
+  Future<void> _markOilPlan(Map<String, dynamic> plan) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Clasificar plan de aceite'),
+      content: Text('¿Confirmas que “${plan['name']}” corresponde a cambio de aceite de motor? Solo sus servicios realizados podrán aparecer en la tarjeta digital.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmar')),
+      ],
+    ));
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.api.patchJson('/api/v1/maintenance-plans/${plan['id']}', {'category': 'oil'});
+      await _refresh();
+    } catch (error) { _error(error); }
+  }
+
   Widget _maintenance(Map<String, dynamic> data) {
     final plans = _maps(data['maintenance_plans']);
     final orders = _maps(data['work_orders']);
@@ -635,6 +757,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
     final parts = _maps(data['installed_parts']);
     final verifiedParts = _maps(data['verified_part_references']);
     return _page([
+      _oilCard(data),
       _heading('Repuestos instalados y referencias'),
       const Text('Referencias verificadas para este vehículo; confirmar siempre por VIN y documentación técnica antes de comprar.'),
       if (verifiedParts.isNotEmpty) ...[
@@ -668,21 +791,30 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
       if (plans.isEmpty)
         const ListTile(title: Text('Sin planes de mantención registrados')),
       ...plans.map((p) {
-        final nextKm = p['interval_km'] is num && p['last_service_km'] is num
+        final history = _maps(data['maintenance_executions']).where((e) => e['plan_id'] == p['id']).toList();
+        final latest = history.isEmpty ? <String, dynamic>{} : history.first;
+        final calculatedKm = p['interval_km'] is num && p['last_service_km'] is num
             ? (p['interval_km'] as num) + (p['last_service_km'] as num)
             : null;
+        final nextKm = latest['next_due_km'] ?? calculatedKm;
         final last = DateTime.tryParse('${p['last_service_at']}');
-        final nextDate = last != null && p['interval_days'] is int
+        final calculatedDate = last != null && p['interval_days'] is int
             ? last.add(Duration(days: p['interval_days'] as int))
             : null;
+        final nextDate = DateTime.tryParse('${latest['next_due_at']}') ?? calculatedDate;
         return Card(
             child: ListTile(
                 leading: const Icon(Icons.event_repeat),
                 trailing: _canEdit && p['active'] == true
-                    ? IconButton(
+                    ? Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (p['category'] != 'oil') IconButton(
+                        tooltip: 'Clasificar como cambio de aceite', icon: const Icon(Icons.oil_barrel_outlined),
+                        onPressed: () => _markOilPlan(p)),
+                      IconButton(
                         tooltip: 'Registrar mantención',
                         icon: const Icon(Icons.playlist_add_check),
-                        onPressed: () => _maintenanceEditor(data, plan: p))
+                        onPressed: () => _maintenanceEditor(data, plan: p)),
+                    ])
                     : null,
                 title: Text(
                     '${p['name']}${p['active'] == true ? '' : ' · Inactivo'}'),
@@ -805,15 +937,29 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                 final data = snapshot.data!;
                 final vehicle = _map(data['vehicle']);
                 final technical = _map(data['technical']);
+                final values = _map(technical['values']);
+                final verified = values.values.where((v) => _map(v)['status'] == 'verified').length;
+                final suggested = values.values.where((v) => _map(v)['status'] == 'suggested').length;
                 return Column(children: [
                   Padding(
                       padding: const EdgeInsets.all(12),
-                      child: ListTile(
-                          leading: const Icon(Icons.directions_car, size: 36),
-                          title: Text(
-                              '${vehicle['plate']} · ${vehicle['make']} ${vehicle['model']}'),
-                          subtitle: Text(
-                              'Año ${vehicle['year'] ?? '—'} · ${vehicle['current_mileage_km'] ?? '—'} km'))),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: [Theme.of(context).colorScheme.primaryContainer,
+                            Theme.of(context).colorScheme.surfaceContainerHigh]),
+                          borderRadius: BorderRadius.circular(22)),
+                        child: Wrap(spacing: 16, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                          const Icon(Icons.directions_car_outlined, size: 34),
+                          Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                            Text('${vehicle['plate']} · ${vehicle['make']} ${vehicle['model']}',
+                              style: Theme.of(context).textTheme.titleLarge),
+                            Text('Año ${vehicle['year'] ?? '—'} · ${vehicle['current_mileage_km'] ?? '—'} km'),
+                          ]),
+                          Chip(label: Text('$verified datos verificados')),
+                          Chip(label: Text('$suggested sugerencias por revisar')),
+                        ]))),
                   Expanded(
                       child: TabBarView(children: [
                     _page([
@@ -850,6 +996,12 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                     _page([
                       const Text(
                           'Las sugerencias requieren revisión técnica. Los datos pendientes no confirman compatibilidad.'),
+                      if (values['research_status'] is Map)
+                        Card(child: ListTile(
+                          leading: const Icon(Icons.travel_explore_outlined),
+                          title: const Text('Resultado de la investigación'),
+                          subtitle: Text('${_map(values['research_status'])['value']}'),
+                        )),
                       if (_canEdit)
                         Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),

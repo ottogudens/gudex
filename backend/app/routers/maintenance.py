@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
@@ -15,6 +17,8 @@ class Completion(BaseModel):
     work_order_id: int | None = None
     materials: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=4000)
+    next_due_km: int | None = Field(default=None, ge=0)
+    next_due_at: datetime | None = None
 
 
 def record_completion(session: Session, plan_id: int, data: Completion, actor: str):
@@ -38,6 +42,16 @@ def record_completion(session: Session, plan_id: int, data: Completion, actor: s
     minimum = max(vehicle.current_mileage_km or 0, plan.last_service_km or 0)
     if data.mileage_km < minimum:
         raise HTTPException(409, "El kilometraje no puede ser menor al último registrado")
+    next_due_km = data.next_due_km if data.next_due_km is not None else (
+        data.mileage_km + plan.interval_km if plan.interval_km else None)
+    now = datetime.now(timezone.utc)
+    next_due_at = data.next_due_at or (now + timedelta(days=plan.interval_days) if plan.interval_days else None)
+    if next_due_km is not None and next_due_km <= data.mileage_km:
+        raise HTTPException(422, "La próxima mantención debe tener mayor kilometraje")
+    if next_due_at is not None and (next_due_at.replace(tzinfo=timezone.utc) if next_due_at.tzinfo is None else next_due_at) <= now:
+        raise HTTPException(422, "La próxima mantención debe tener una fecha futura")
+    if next_due_km is None and next_due_at is None:
+        raise HTTPException(422, "Registra kilometraje o fecha de próxima mantención")
     if data.work_order_id is not None:
         order = session.get(WorkOrder, data.work_order_id)
         if not order or order.vehicle_id != vehicle.id or order.status not in {
@@ -46,7 +60,7 @@ def record_completion(session: Session, plan_id: int, data: Completion, actor: s
             raise HTTPException(409, "Selecciona una orden del vehículo en trabajo, lista o entregada")
     execution = MaintenanceExecution(plan_id=plan.id, vehicle_id=vehicle.id,
         plan_name=plan.name, interval_km=plan.interval_km, interval_days=plan.interval_days,
-        recorded_by=actor, **data.model_dump())
+        recorded_by=actor, **{**data.model_dump(), "next_due_km": next_due_km, "next_due_at": next_due_at})
     plan.last_service_km = data.mileage_km
     plan.last_service_at = execution.performed_at
     vehicle.current_mileage_km = data.mileage_km

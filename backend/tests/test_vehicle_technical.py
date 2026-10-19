@@ -151,5 +151,6 @@ async def test_research_preserves_manual_entries_and_reports_failure(vehicle, mo
     await technical.enrich_vehicle(vehicle.id)
     with Session(engine) as session:
         values = technical.technical_payload(session, vehicle.id)["values"]
-        assert values["research_status"]["value"] == "Búsqueda no disponible"
+        assert "Búsqueda no disponible" in values["research_status"]["value"]
+        assert "filters:" in values["research_status"]["value"]
         assert values["filter_air_mann"]["value"] == "TEST-CODE"

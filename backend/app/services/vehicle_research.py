@@ -41,8 +41,11 @@ def parse_proposals(body: dict, allowed_keys: set[str]):
     except (ValidationError, ValueError):
         raise HTTPException(502, "La investigación no devolvió datos estructurados válidos. Puedes reintentar.")
     # A URL merely generated in the response is not evidence of a search result.
-    return [p for p in result.entries if p.key in allowed_keys and p.source_url in sources
-            and urlparse(p.source_url).scheme == "https" and urlparse(p.source_url).hostname]
+    accepted = [p for p in result.entries if p.key in allowed_keys and p.source_url in sources
+                and urlparse(p.source_url).scheme == "https" and urlparse(p.source_url).hostname]
+    if result.entries and not accepted:
+        raise HTTPException(502, "La IA propuso datos sin respaldo en las fuentes consultadas; no se guardaron. Completa versión, motor y VIN o revisa el modelo de búsqueda.")
+    return accepted
 
 
 async def research_vehicle(identity: dict, fields: list[dict]):
