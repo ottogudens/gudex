@@ -730,7 +730,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
           icon: Icon(Icons.open_in_new, color: color.onPrimary),
           label: Text('Ver tarjeta pública', style: TextStyle(color: color.onPrimary))),
       ]),
-    )));
+    ));
   }
 
   Future<void> _markOilPlan(Map<String, dynamic> plan) async {
