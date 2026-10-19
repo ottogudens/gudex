@@ -538,6 +538,20 @@ class WhatsAppBusinessConfigUpdate(SQLModel):
         return value.strip() if value is not None else None
 
 
+class GoogleIntegrationConfigUpdate(SQLModel):
+    client_id: str = Field(min_length=1, max_length=300)
+    client_secret: Optional[str] = Field(default=None, max_length=1000)
+    redirect_uri: str = Field(min_length=1, max_length=500)
+    drive_folder_id: Optional[str] = Field(default=None, max_length=250)
+    calendar_id: str = Field(default="primary", min_length=1, max_length=250)
+    gmail_query: str = Field(default="has:attachment filename:pdf newer_than:30d", max_length=500)
+
+    @field_validator("client_id", "client_secret", "redirect_uri", "drive_folder_id", "calendar_id", "gmail_query")
+    @classmethod
+    def trim_google_fields(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
 class AssistantQuery(SQLModel):
     mode: Literal["general", "diagnostic"] = "general"
     message: str = Field(min_length=2, max_length=2000)

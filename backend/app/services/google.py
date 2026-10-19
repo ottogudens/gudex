@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.config import settings
-from app.models import Appointment, Customer, IntegrationCredential, OAuthState, Vehicle
+from app.models import Appointment, Customer, GoogleIntegrationConfig, IntegrationCredential, OAuthState, Vehicle
 from app.services.crypto import decrypt_secret, encrypt_secret
 
 GOOGLE_SCOPES = (
@@ -26,20 +26,43 @@ GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 
 
-def ensure_google_configured() -> None:
-    if not (settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri):
-        raise HTTPException(503, "Configura Google OAuth en Railway antes de conectar la cuenta")
+def google_config(session: Session) -> dict[str, str | None]:
+    saved = session.get(GoogleIntegrationConfig, 1)
+    if saved:
+        return {
+            "client_id": saved.client_id,
+            "client_secret": decrypt_secret(saved.encrypted_client_secret),
+            "redirect_uri": saved.redirect_uri,
+            "drive_folder_id": saved.drive_folder_id,
+            "calendar_id": saved.calendar_id,
+            "gmail_query": saved.gmail_query,
+        }
+    return {
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "redirect_uri": settings.google_redirect_uri,
+        "drive_folder_id": settings.google_drive_folder_id,
+        "calendar_id": settings.google_calendar_id,
+        "gmail_query": settings.google_gmail_query,
+    }
+
+
+def ensure_google_configured(session: Session) -> dict[str, str | None]:
+    config = google_config(session)
+    if not all((config["client_id"], config["client_secret"], config["redirect_uri"])):
+        raise HTTPException(503, "Configura Google OAuth desde Integraciones antes de conectar la cuenta")
+    return config
 
 
 def create_authorization(session: Session, email: str) -> str:
-    ensure_google_configured()
+    config = ensure_google_configured(session)
     state = secrets.token_urlsafe(32)
     session.add(OAuthState(provider="google", state_hash=hashlib.sha256(state.encode()).hexdigest(),
                            requested_by_email=email, expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)))
     session.commit()
     return GOOGLE_AUTH + "?" + urlencode({
-        "client_id": settings.google_client_id,
-        "redirect_uri": settings.google_redirect_uri,
+        "client_id": config["client_id"],
+        "redirect_uri": config["redirect_uri"],
         "response_type": "code",
         "scope": " ".join(GOOGLE_SCOPES),
         "access_type": "offline",
@@ -49,13 +72,13 @@ def create_authorization(session: Session, email: str) -> str:
     })
 
 
-async def exchange_code(code: str) -> dict:
-    ensure_google_configured()
+async def exchange_code(session: Session, code: str) -> dict:
+    config = ensure_google_configured(session)
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(GOOGLE_TOKEN, data={
-            "code": code, "client_id": settings.google_client_id,
-            "client_secret": settings.google_client_secret,
-            "redirect_uri": settings.google_redirect_uri, "grant_type": "authorization_code",
+            "code": code, "client_id": config["client_id"],
+            "client_secret": config["client_secret"],
+            "redirect_uri": config["redirect_uri"], "grant_type": "authorization_code",
         })
     if response.is_error:
         raise HTTPException(502, "Google no pudo completar la autorización")
@@ -87,7 +110,7 @@ def save_credentials(session: Session, tokens: dict, email: str | None) -> None:
 
 
 async def access_token(session: Session) -> str:
-    ensure_google_configured()
+    config = ensure_google_configured(session)
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
     if not credential:
         raise HTTPException(409, "Conecta Google desde Configuración")
@@ -96,7 +119,7 @@ async def access_token(session: Session) -> str:
         return decrypt_secret(credential.encrypted_access_token)
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(GOOGLE_TOKEN, data={
-            "client_id": settings.google_client_id, "client_secret": settings.google_client_secret,
+            "client_id": config["client_id"], "client_secret": config["client_secret"],
             "refresh_token": decrypt_secret(credential.encrypted_refresh_token), "grant_type": "refresh_token",
         })
     if response.is_error:
@@ -129,7 +152,7 @@ async def google_request(session: Session, method: str, url: str, **kwargs) -> h
 
 
 async def gmail_candidates(session: Session) -> list[dict]:
-    query = urlencode({"q": settings.google_gmail_query, "maxResults": 30})
+    query = urlencode({"q": google_config(session)["gmail_query"], "maxResults": 30})
     listing = await google_request(session, "GET", f"https://gmail.googleapis.com/gmail/v1/users/me/messages?{query}")
     result = []
     for item in listing.json().get("messages", []):
@@ -164,9 +187,10 @@ def _gmail_attachments(part: dict):
 
 
 async def drive_candidates(session: Session) -> list[dict]:
-    if not settings.google_drive_folder_id:
-        raise HTTPException(503, "Configura GOOGLE_DRIVE_FOLDER_ID para importar desde Drive")
-    params = urlencode({"q": f"'{settings.google_drive_folder_id}' in parents and mimeType='application/pdf' and trashed=false",
+    folder_id = google_config(session)["drive_folder_id"]
+    if not folder_id:
+        raise HTTPException(503, "Configura el ID de la carpeta de Drive desde Integraciones")
+    params = urlencode({"q": f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false",
                         "fields": "files(id,name,mimeType,modifiedTime,size)", "pageSize": 50})
     response = await google_request(session, "GET", f"https://www.googleapis.com/drive/v3/files?{params}")
     return [{"external_id": f"drive:{item['id']}", "filename": item["name"], "modified_at": item.get("modifiedTime"),
@@ -209,7 +233,7 @@ def calendar_event(appointment: Appointment, customer: Customer, vehicle: Vehicl
 
 
 async def sync_calendar_appointment(session: Session, appointment: Appointment, customer: Customer, vehicle: Vehicle | None) -> str | None:
-    base = f"https://www.googleapis.com/calendar/v3/calendars/{settings.google_calendar_id}/events"
+    base = f"https://www.googleapis.com/calendar/v3/calendars/{google_config(session)['calendar_id']}/events"
     if appointment.status == "cancelled":
         if appointment.google_event_id:
             await google_request(session, "DELETE", f"{base}/{appointment.google_event_id}")

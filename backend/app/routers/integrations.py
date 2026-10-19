@@ -14,8 +14,8 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import get_session
-from app.models import AIConfiguration, Appointment, Customer, ExternalImport, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
-from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, WhatsAppBusinessConfigUpdate
+from app.models import AIConfiguration, Appointment, Customer, ExternalImport, GoogleIntegrationConfig, IntegrationCredential, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
+from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, GoogleIntegrationConfigUpdate, WhatsAppBusinessConfigUpdate
 from app.security import require_admin
 from app.services import google
 from app.services.crypto import decrypt_secret, encrypt_secret
@@ -128,6 +128,7 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
+    google_settings = session.get(GoogleIntegrationConfig, 1)
     whatsapp_config = session.get(WhatsAppBusinessConfig, 1)
     mp_token = settings.mercadopago_access_token
     return {
@@ -135,10 +136,10 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
                           "connected": bool(mp_token and settings.mercadopago_webhook_secret),
                           "mode": "test" if mp_token and mp_token.startswith("TEST-") else ("production" if mp_token else "not_configured"),
                           "checkout": "pro" if mp_token else None},
-        "google": {"credentials_present": bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri),
+        "google": {"credentials_present": bool(google_settings or (settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri)),
                    "connected": bool(credential), "account_email": credential.account_email if credential else None,
                    "granted_scopes": credential.granted_scopes.split() if credential else [],
-                   "drive_folder_configured": bool(settings.google_drive_folder_id)},
+                   "drive_folder_configured": bool(google_settings.drive_folder_id if google_settings else settings.google_drive_folder_id)},
         "ai": {"credentials_present": bool(settings.ai_provider and settings.ai_api_key), "provider": settings.ai_provider,
                "model": selected_ai_model(session), "available": bool(settings.ai_provider and settings.ai_api_key)},
         "social": {
@@ -268,6 +269,62 @@ async def update_ai_model(data: AIModelUpdate, request: Request, session: Sessio
     return {"model": configuration.selected_model, "updated_at": configuration.updated_at}
 
 
+def _google_settings_status(config: GoogleIntegrationConfig | None) -> dict:
+    return {
+        "configured_in_app": config is not None,
+        "client_id": config.client_id if config else settings.google_client_id,
+        "client_secret_configured": bool(config.encrypted_client_secret if config else settings.google_client_secret),
+        "redirect_uri": config.redirect_uri if config else (settings.google_redirect_uri or "https://bknd.gudex.cl/auth/google/callback"),
+        "drive_folder_id": config.drive_folder_id if config else settings.google_drive_folder_id,
+        "calendar_id": config.calendar_id if config else settings.google_calendar_id,
+        "gmail_query": config.gmail_query if config else settings.google_gmail_query,
+    }
+
+
+@router.get("/api/v1/integrations/google/config", dependencies=[Depends(require_admin)])
+def get_google_settings(session: Session = Depends(get_session)):
+    return _google_settings_status(session.get(GoogleIntegrationConfig, 1))
+
+
+@router.put("/api/v1/integrations/google/config", dependencies=[Depends(require_admin)])
+def save_google_settings(data: GoogleIntegrationConfigUpdate, request: Request,
+                         session: Session = Depends(get_session)):
+    parsed = urlsplit(data.redirect_uri)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path != "/auth/google/callback"):
+        raise HTTPException(422, "La URL de retorno debe ser HTTPS y terminar en /auth/google/callback")
+    config = session.get(GoogleIntegrationConfig, 1)
+    if not config and not data.client_secret:
+        raise HTTPException(422, "Ingresa el Client Secret para la primera configuración")
+    changed_oauth = bool((not config and (settings.google_client_id != data.client_id
+                          or settings.google_redirect_uri != data.redirect_uri
+                          or settings.google_client_secret != data.client_secret))
+                         or (config and (config.client_id != data.client_id
+                          or config.redirect_uri != data.redirect_uri or data.client_secret)))
+    if not config:
+        config = GoogleIntegrationConfig(id=1, client_id=data.client_id,
+            encrypted_client_secret="", redirect_uri=data.redirect_uri,
+            updated_by_email=request.state.user_email)
+    config.client_id = data.client_id
+    config.redirect_uri = data.redirect_uri
+    if data.client_secret:
+        config.encrypted_client_secret = encrypt_secret(data.client_secret)
+    config.drive_folder_id = data.drive_folder_id or None
+    config.calendar_id = data.calendar_id
+    config.gmail_query = data.gmail_query
+    config.updated_by_email = request.state.user_email
+    config.updated_at = datetime.now(timezone.utc)
+    if changed_oauth:
+        credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
+        if credential:
+            session.delete(credential)
+        for state in session.exec(select(OAuthState).where(OAuthState.provider == "google", OAuthState.used_at == None)).all():  # noqa: E711
+            session.delete(state)
+    session.add(config)
+    session.commit()
+    return _google_settings_status(config)
+
+
 @router.post("/api/v1/integrations/google/authorize", dependencies=[Depends(require_admin)])
 def authorize_google(request: Request, session: Session = Depends(get_session)):
     return {"authorization_url": google.create_authorization(session, request.state.user_email)}
@@ -289,7 +346,7 @@ async def google_callback(code: str | None = None, state: str | None = None, err
     oauth_state.used_at = now
     session.add(oauth_state)
     session.commit()
-    tokens = await google.exchange_code(code)
+    tokens = await google.exchange_code(session, code)
     email = await google.account_email(tokens["access_token"])
     google.save_credentials(session, tokens, email)
     if settings.google_frontend_redirect_url:

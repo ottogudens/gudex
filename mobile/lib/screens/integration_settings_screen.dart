@@ -47,6 +47,85 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     finally { if (mounted) setState(() => _busy = false); }
   }
 
+  Future<void> _configureGoogle() async {
+    try {
+      final current = Map<String, dynamic>.from(
+        await widget.api.get('/api/v1/integrations/google/config') as Map);
+      if (!mounted) return;
+      final clientId = TextEditingController(text: '${current['client_id'] ?? ''}');
+      final secret = TextEditingController();
+      final redirect = TextEditingController(text: '${current['redirect_uri'] ?? ''}');
+      final folder = TextEditingController(text: '${current['drive_folder_id'] ?? ''}');
+      final calendar = TextEditingController(text: '${current['calendar_id'] ?? 'primary'}');
+      final query = TextEditingController(text: '${current['gmail_query'] ?? ''}');
+      final form = GlobalKey<FormState>();
+      try {
+        final data = await showDialog<Map<String, dynamic>>(context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Configurar Google'),
+            content: SizedBox(width: 500, child: Form(key: form,
+              child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Crea un cliente OAuth de tipo Aplicación web en Google Cloud. '
+                  'Habilita Gmail, Drive y Calendar y agrega la URL de retorno indicada abajo.'),
+                const SizedBox(height: 12),
+                TextFormField(controller: clientId,
+                  decoration: const InputDecoration(labelText: 'Client ID'),
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Obligatorio' : null),
+                TextFormField(controller: secret, obscureText: true,
+                  decoration: InputDecoration(labelText: 'Client Secret',
+                    helperText: current['configured_in_app'] == true
+                      ? 'Ya hay uno guardado. Deja vacío para conservarlo.'
+                      : 'Obligatorio para guardar la configuración en Gudex'),
+                  validator: (value) => current['configured_in_app'] != true &&
+                    (value == null || value.trim().isEmpty) ? 'Obligatorio' : null),
+                TextFormField(controller: redirect,
+                  decoration: const InputDecoration(labelText: 'URL de retorno autorizada',
+                    helperText: 'Regístrala exactamente igual en Google Cloud'),
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Obligatoria' : null),
+                TextFormField(controller: folder,
+                  decoration: const InputDecoration(labelText: 'ID carpeta de Drive (opcional)')),
+                TextFormField(controller: calendar,
+                  decoration: const InputDecoration(labelText: 'ID calendario', hintText: 'primary'),
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Obligatorio' : null),
+                TextFormField(controller: query,
+                  decoration: const InputDecoration(labelText: 'Búsqueda de PDF en Gmail')),
+                const SizedBox(height: 8),
+                const Text('El secreto se guarda cifrado en el servidor y no volverá a mostrarse.'),
+              ])))),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+              FilledButton(onPressed: () {
+                if (!form.currentState!.validate()) return;
+                Navigator.pop(dialogContext, {
+                  'client_id': clientId.text.trim(),
+                  'client_secret': secret.text.trim().isEmpty ? null : secret.text.trim(),
+                  'redirect_uri': redirect.text.trim(),
+                  'drive_folder_id': folder.text.trim().isEmpty ? null : folder.text.trim(),
+                  'calendar_id': calendar.text.trim(),
+                  'gmail_query': query.text.trim(),
+                });
+              }, child: const Text('Guardar')),
+            ],
+          ));
+        if (data == null) return;
+        setState(() => _busy = true);
+        await widget.api.putJson('/api/v1/integrations/google/config', data);
+        await _refresh();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Configuración de Google guardada. Ya puedes conectar la cuenta.')));
+      } finally {
+        clientId.dispose(); secret.dispose(); redirect.dispose();
+        folder.dispose(); calendar.dispose(); query.dispose();
+      }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _syncCalendar() async {
     final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: const Text('Sincronizar agenda'), content: const Text('Crear o actualizar en Google Calendar las citas pendientes de Gudex?'),
@@ -225,7 +304,15 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Google Workspace', style: Theme.of(context).textTheme.titleLarge),
           Text(google['connected'] == true ? 'Conectado: ${google['account_email'] ?? 'cuenta Google'}' : 'Sin conectar'),
-          const SizedBox(height: 10), FilledButton.icon(onPressed: _busy ? null : _connect, icon: const Icon(Icons.login), label: const Text('Conectar o renovar Google')),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(onPressed: _busy ? null : _configureGoogle,
+              icon: const Icon(Icons.settings_outlined), label: const Text('Configurar Google')),
+            FilledButton.icon(onPressed: _busy || google['credentials_present'] != true ? null : _connect,
+              icon: const Icon(Icons.login), label: const Text('Conectar o renovar Google')),
+          ]),
+          if (google['credentials_present'] != true)
+            const Text('Ingresa las credenciales OAuth para habilitar la conexión.'),
           if (google['connected'] == true) ...[
             Wrap(spacing: 8, children: [
               OutlinedButton(onPressed: _busy ? null : () => _loadCandidates('gmail'), child: const Text('Buscar PDFs en Gmail')),

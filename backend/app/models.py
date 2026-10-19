@@ -456,6 +456,19 @@ class WhatsAppBusinessConfig(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=now_utc)
 
 
+class GoogleIntegrationConfig(SQLModel, table=True):
+    """Administrator-entered OAuth settings; the client secret is never returned."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: str = Field(max_length=300)
+    encrypted_client_secret: str
+    redirect_uri: str = Field(max_length=500)
+    drive_folder_id: Optional[str] = Field(default=None, max_length=250)
+    calendar_id: str = Field(default="primary", max_length=250)
+    gmail_query: str = Field(default="has:attachment filename:pdf newer_than:30d", max_length=500)
+    updated_by_email: str = Field(max_length=254)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
 class OAuthState(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider: str = Field(index=True, max_length=32)
