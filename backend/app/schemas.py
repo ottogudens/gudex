@@ -33,6 +33,11 @@ class UserUpdate(SQLModel):
     role: Optional[UserRole] = None
     active: Optional[bool] = None
     customer_id: Optional[int] = None
+    new_password: Optional[str] = Field(default=None, min_length=6, max_length=200)
+
+
+class StaffPasswordReset(SQLModel):
+    new_password: str = Field(min_length=6, max_length=200)
 
 
 class PasswordChange(SQLModel):
@@ -103,6 +108,7 @@ class CustomerUpdate(CustomerCreate):
 class CustomerPortalAccessCreate(CustomerCreate):
     create_portal_access: bool = False
     password: Optional[str] = Field(default=None, min_length=6, max_length=200)
+    send_invitation: bool = True
 
 
 class CustomerPortalPasswordSet(SQLModel):

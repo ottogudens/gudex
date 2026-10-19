@@ -30,25 +30,42 @@ class _UsersScreenState extends State<UsersScreen> {
     final name = TextEditingController(text: user?['full_name']?.toString() ?? '');
     final email = TextEditingController(text: user?['email']?.toString() ?? '');
     final password = TextEditingController();
+    final confirmPassword = TextEditingController();
+    final form = GlobalKey<FormState>();
     String role = user?['role']?.toString() ?? 'mechanic';
     bool active = user?['active'] != false;
     final saved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: Text(isNew ? 'Nuevo usuario' : 'Editar usuario'),
-      content: StatefulBuilder(builder: (context, update) => SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo')),
-        if (isNew) TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo')),
-        if (isNew) TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña inicial (6 caracteres mínimo)')),
+      content: StatefulBuilder(builder: (context, update) => Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo'),
+          validator: (value) => value == null || value.trim().length < 2 ? 'Ingresa el nombre' : null),
+        if (isNew) TextFormField(controller: email, keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(labelText: 'Correo'),
+          validator: (value) => value == null || !value.contains('@') ? 'Ingresa un correo válido' : null),
+        TextFormField(controller: password, obscureText: true,
+          decoration: InputDecoration(labelText: isNew ? 'Contraseña inicial' : 'Nueva contraseña (opcional)',
+            helperText: isNew ? 'Mínimo 6 caracteres' : 'Déjala vacía para conservar la actual'),
+          validator: (value) => (isNew || (value?.isNotEmpty ?? false)) && (value?.length ?? 0) < 6
+            ? 'Usa al menos 6 caracteres' : null),
+        if (!isNew) TextFormField(controller: confirmPassword, obscureText: true,
+          decoration: const InputDecoration(labelText: 'Confirmar nueva contraseña'),
+          validator: (value) => password.text.isNotEmpty && value != password.text
+            ? 'Las contraseñas no coinciden' : null),
         DropdownButtonFormField<String>(initialValue: role, decoration: const InputDecoration(labelText: 'Rol'), items: const [DropdownMenuItem(value: 'admin', child: Text('Administración')), DropdownMenuItem(value: 'mechanic', child: Text('Mecánico'))], onChanged: (value) { if (value != null) update(() => role = value); }),
         if (!isNew) SwitchListTile(contentPadding: EdgeInsets.zero, value: active, onChanged: (value) => update(() => active = value), title: const Text('Cuenta activa')),
-      ]))),
+      ])))),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), 
         FilledButton(onPressed: () async {
+          if (!form.currentState!.validate()) return;
           try {
             if (isNew) {
               await widget.api.postJson('/api/v1/users', {'full_name': name.text.trim(), 'email': email.text.trim(), 'password': password.text, 'role': role});
             } else {
-              await widget.api.patchJson('/api/v1/users/${user['id']}', {'full_name': name.text.trim(), 'role': role, 'active': active});
+              await widget.api.patchJson('/api/v1/users/${user['id']}', {
+                'full_name': name.text.trim(), 'role': role, 'active': active,
+                if (password.text.isNotEmpty) 'new_password': password.text,
+              });
             }
             if (context.mounted) Navigator.pop(context, true);
           } catch (error) { 
@@ -60,6 +77,7 @@ class _UsersScreenState extends State<UsersScreen> {
     name.dispose(); 
     email.dispose(); 
     password.dispose();
+    confirmPassword.dispose();
     if (saved == true && mounted) setState(() => _users = _load());
   }
   

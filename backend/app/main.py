@@ -27,7 +27,7 @@ from app.models import (
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead,
-    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, MaintenancePlanUpdate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
+    PasswordChange, ProductUpdate, SaleCreate, SaleItemRead, SaleRead, ScannerReportRead, StaffPasswordReset, StockAdjustment, UserCreate, UserRead, UserUpdate, VehicleCreate, VehicleUpdate, MaintenancePlanCreate, MaintenancePlanUpdate, LoyaltyRewardCreate, MarketingCampaignCreate, WorkOrderAssignmentUpdate, WorkOrderCreate, WorkOrderUpdate, CustomerUpdate, CustomerPortalPasswordSet,
 )
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
@@ -226,20 +226,46 @@ def list_users(session: Session = Depends(get_session)):
 @app.patch("/api/v1/users/{user_id}", response_model=UserRead, dependencies=[Depends(require_admin)])
 def update_user(user_id: int, data: UserUpdate, request: Request, session: Session = Depends(get_session)):
     user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(404, "Usuario no encontrado")
+    if not user or user.role not in {UserRole.admin, UserRole.mechanic}:
+        raise HTTPException(404, "Usuario del sistema no encontrado")
     changes = data.model_dump(exclude_unset=True)
+    if changes.get("role") == UserRole.customer or changes.get("customer_id") is not None:
+        raise HTTPException(422, "Los clientes se administran desde Clientes")
+    new_password = changes.pop("new_password", None)
+    if new_password is not None:
+        if user.role not in {UserRole.admin, UserRole.mechanic}:
+            raise HTTPException(404, "Usuario del sistema no encontrado")
+        error = validate_password(new_password)
+        if error:
+            raise HTTPException(422, error)
     if user.email == request.state.user_email and changes.get("active") is False:
         raise HTTPException(409, "No puedes desactivar tu propia cuenta")
     if "customer_id" in changes and changes["customer_id"] and not session.get(Customer, changes["customer_id"]):
         raise HTTPException(422, "Cliente no encontrado")
     for key, value in changes.items():
         setattr(user, key, value)
+    if new_password is not None:
+        user.password_hash = hash_password(new_password)
     if user.role != UserRole.customer:
         user.customer_id = None
     user.token_version += 1
     session.add(user); session.commit(); session.refresh(user)
     return user
+
+
+@app.post("/api/v1/users/{user_id}/password", dependencies=[Depends(require_admin)])
+def reset_staff_password(user_id: int, data: StaffPasswordReset, session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user or user.role not in {UserRole.admin, UserRole.mechanic}:
+        raise HTTPException(404, "Usuario del sistema no encontrado")
+    error = validate_password(data.new_password)
+    if error:
+        raise HTTPException(422, error)
+    user.password_hash = hash_password(data.new_password)
+    user.token_version += 1  # End existing sessions after an administrator reset.
+    session.add(user)
+    session.commit()
+    return {"updated": True}
 
 
 @app.delete("/api/v1/users/{user_id}", dependencies=[Depends(require_admin)])
@@ -321,7 +347,12 @@ async def create_customer_with_portal_access(data: CustomerPortalAccessCreate, r
     session.add(user)
     session.commit()
     session.refresh(user)
-    delivery = "manual_password" if data.password else await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)
+    if data.password:
+        delivery = "manual_password"
+    elif data.send_invitation:
+        delivery = await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)
+    else:
+        delivery = "not_requested"
     return {"customer": customer, "user": {"id": user.id, "email": user.email, "active": user.active}, "invitation_delivery": delivery}
 
 
@@ -361,10 +392,23 @@ def set_customer_portal_password(customer_id: int, data: CustomerPortalPasswordS
 @app.post("/api/v1/customers/{customer_id}/portal-access/invitation", dependencies=[Depends(require_admin)])
 async def resend_customer_invitation(customer_id: int, request: Request, session: Session = Depends(get_session)):
     customer = session.get(Customer, customer_id)
+    if not customer:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not customer.email:
+        raise HTTPException(422, "Agrega un correo al cliente para enviar el acceso")
     user = session.exec(select(User).where(User.customer_id == customer_id, User.role == UserRole.customer)).first()
-    if not customer or not user:
-        raise HTTPException(404, "Cliente con acceso al portal no encontrado")
-    return {"invitation_delivery": await _send_customer_access_email(session, request, user, customer, "activation", request.state.user_email)}
+    if not user:
+        if session.exec(select(User).where(User.email == customer.email)).first():
+            raise HTTPException(409, "El correo ya pertenece a otro usuario")
+        user = User(email=customer.email, full_name=customer.full_name,
+                    password_hash=hash_password(secrets.token_urlsafe(32)),
+                    role=UserRole.customer, customer_id=customer.id, active=False)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    purpose = "reset" if user.active else "activation"
+    return {"invitation_delivery": await _send_customer_access_email(
+        session, request, user, customer, purpose, request.state.user_email)}
 
 
 @app.post("/auth/customer/activate", dependencies=[Depends(rate_limit("customer-token", 10, 15 * 60))])
@@ -1230,6 +1274,29 @@ def download_quote(quote_id: int, session: Session = Depends(get_session)):
                     headers={"Content-Disposition": f'attachment; filename="cotizacion-{quote.id}.pdf"'})
 
 
+@app.post("/api/v1/quotes/{quote_id}/email", dependencies=[Depends(require_admin)])
+async def email_quote(quote_id: int, session: Session = Depends(get_session)):
+    quote = session.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Cotización no encontrada")
+    if quote.status == "draft":
+        raise HTTPException(409, "Publica la cotización antes de enviarla por correo")
+    customer = session.get(Customer, quote.customer_id)
+    vehicle = session.get(Vehicle, quote.vehicle_id)
+    if not customer or not customer.email or not vehicle or vehicle.customer_id != customer.id:
+        raise HTTPException(422, "El cliente debe tener correo y corresponder al vehículo")
+    order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
+    items = session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()
+    pdf = quote_pdf(quote, order, customer, vehicle, items)
+    await google.send_customer_access_email(
+        session, customer.email, f"Cotización COT-{quote.id} · Gudex",
+        f"<p>Hola {escape(customer.full_name)},</p><p>Adjuntamos la cotización COT-{quote.id} "
+        "de tu vehículo. Puedes revisarla y responderla en el portal de clientes.</p>",
+        (f"cotizacion-{quote.id}.pdf", pdf),
+    )
+    return {"sent": True, "recipient": customer.email}
+
+
 @app.delete("/api/v1/quotes/{quote_id}", dependencies=[Depends(require_admin)])
 def delete_quote(quote_id: int, session: Session = Depends(get_session)):
     quote = session.get(Quote, quote_id)
@@ -1817,6 +1884,27 @@ def download_scanner_report(report_id: int, session: Session = Depends(get_sessi
     if not report or not Path(report.storage_path).is_file():
         raise HTTPException(404, "Informe no encontrado")
     return FileResponse(report.storage_path, media_type="application/pdf", filename=report.filename)
+
+
+@app.post("/api/v1/scanner-reports/{report_id}/email", dependencies=[Depends(require_admin)])
+async def email_scanner_report(report_id: int, session: Session = Depends(get_session)):
+    report = session.get(ScannerReport, report_id)
+    if not report or not Path(report.storage_path).is_file():
+        raise HTTPException(404, "Informe no encontrado")
+    vehicle = session.get(Vehicle, report.vehicle_id)
+    customer = session.get(Customer, vehicle.customer_id) if vehicle else None
+    if not customer or not customer.email:
+        raise HTTPException(422, "El cliente del vehículo debe tener correo")
+    path = Path(report.storage_path)
+    if path.stat().st_size > 15 * 1024 * 1024:
+        raise HTTPException(413, "El informe supera el límite de 15 MB para correo")
+    await google.send_customer_access_email(
+        session, customer.email, f"Informe de diagnóstico · {vehicle.plate} · Gudex",
+        f"<p>Hola {escape(customer.full_name)},</p><p>Adjuntamos el informe de diagnóstico "
+        f"de tu vehículo {escape(vehicle.plate)}.</p>",
+        (path.name, path.read_bytes()),
+    )
+    return {"sent": True, "recipient": customer.email}
 
 
 @app.delete("/api/v1/scanner-reports/{report_id}", dependencies=[Depends(require_admin)])

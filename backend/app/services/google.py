@@ -6,6 +6,8 @@ import base64
 import hashlib
 import secrets
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 
 import httpx
 from fastapi import HTTPException
@@ -165,12 +167,20 @@ async def gmail_candidates(session: Session) -> list[dict]:
     return result
 
 
-async def send_customer_access_email(session: Session, recipient: str, subject: str, html: str) -> None:
-    """Envía una invitación o recuperación desde la cuenta Gmail autorizada del taller."""
+async def send_customer_access_email(session: Session, recipient: str, subject: str, html: str,
+                                     attachment: tuple[str, bytes] | None = None) -> None:
+    """Envía correo desde Gmail autorizado, con un PDF opcional."""
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
     if not credential or "https://www.googleapis.com/auth/gmail.send" not in credential.granted_scopes.split():
         raise HTTPException(503, "Conecta nuevamente Google y autoriza el permiso para enviar correos")
-    message = MIMEText(html, "html", "utf-8")
+    if attachment:
+        message = MIMEMultipart()
+        message.attach(MIMEText(html, "html", "utf-8"))
+        pdf = MIMEApplication(attachment[1], _subtype="pdf")
+        pdf.add_header("Content-Disposition", "attachment", filename=attachment[0])
+        message.attach(pdf)
+    else:
+        message = MIMEText(html, "html", "utf-8")
     message["To"] = recipient
     message["Subject"] = subject
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()

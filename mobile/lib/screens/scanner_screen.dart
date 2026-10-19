@@ -74,6 +74,24 @@ class _ScannerScreenState extends State<ScannerScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); 
     }
   }
+
+  Future<void> _emailReport(Map<String, dynamic> report) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Enviar informe por Gmail'),
+      content: Text('Se enviará ${report['filename']} al correo registrado del dueño del vehículo. ¿Continuar?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar')),
+      ],
+    ));
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.api.post('/api/v1/scanner-reports/${report['id']}/email');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Informe enviado por Gmail.')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
   
   @override
   Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(
@@ -117,14 +135,17 @@ class _ScannerScreenState extends State<ScannerScreen> {
               leading: const Icon(Icons.picture_as_pdf_outlined), 
               title: Text(report['filename'].toString()), 
               subtitle: Text(report['scanned_at'].toString().replaceFirst('T', ' ').substring(0, 16)), 
-              trailing: IconButton(
+              trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+              if (widget.role == 'admin') IconButton(
+                tooltip: 'Enviar por Gmail', onPressed: () => _emailReport(report), icon: const Icon(Icons.email_outlined)),
+              IconButton(
                 onPressed: () async { 
                   try { 
                     await openGudexPdf(widget.api, '/api/v1/scanner-reports/${report['id']}/file', report['filename'].toString()); 
                   } catch (_) {} 
                 }, 
                 icon: const Icon(Icons.open_in_new)
-              )
+              )])
             ))).toList());
           }),
         ]);

@@ -102,6 +102,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     final confirmPassword = TextEditingController();
     bool createPortalAccess = false;
     bool setManualPassword = false;
+    bool sendInvitation = true;
     try {
       final data = await showDialog<Map<String, dynamic>>(
         context: context,
@@ -193,6 +194,14 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                             ? 'Las contraseñas no coinciden'
                                             : null),
                                   ],
+                                  if (!setManualPassword)
+                                    CheckboxListTile.adaptive(
+                                      contentPadding: EdgeInsets.zero,
+                                      value: sendInvitation,
+                                      onChanged: (value) => update(() => sendInvitation = value == true),
+                                      title: const Text('Enviar invitación por Gmail'),
+                                      subtitle: const Text('El cliente recibirá un enlace de un solo uso para crear su contraseña. No se envían contraseñas por correo.'),
+                                    ),
                                 ],
                               ])))),
                   actions: [
@@ -211,6 +220,7 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                             if (email.text.trim().isNotEmpty)
                               'email': email.text.trim(),
                             'create_portal_access': createPortalAccess,
+                            if (createPortalAccess) 'send_invitation': sendInvitation && !setManualPassword,
                             if (setManualPassword) 'password': password.text,
                           });
                         },
@@ -218,17 +228,24 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                   ],
                 )),
       );
-      if (data != null)
-        await _save(
-            data['create_portal_access'] == true
-                ? '/api/v1/customers/with-portal-access'
-                : '/api/v1/customers',
-            data,
-            data['password'] != null
-                ? 'Cliente registrado y acceso configurado. Entrega la contraseña al cliente de forma segura.'
-                : data['create_portal_access'] == true
-                    ? 'Cliente registrado; invitación preparada para envío.'
-                    : 'Cliente registrado');
+      if (data != null) {
+        try {
+          final portal = data['create_portal_access'] == true;
+          final result = await widget.api.postJson(portal
+            ? '/api/v1/customers/with-portal-access' : '/api/v1/customers', data);
+          await _refresh();
+          final delivery = result is Map ? result['invitation_delivery'] : null;
+          final message = !portal ? 'Cliente registrado.'
+            : delivery == 'sent' ? 'Cliente registrado. Invitación enviada por Gmail.'
+            : delivery == 'pending' ? 'Cliente registrado, pero el correo no pudo enviarse. Reintenta desde el menú del cliente.'
+            : delivery == 'manual_password' ? 'Cliente registrado. Entrega la contraseña de forma segura.'
+            : 'Cliente registrado. Puedes enviar la invitación después desde su ficha.';
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        } catch (error) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', ''))));
+        }
+      }
     } finally {
       name.dispose();
       email.dispose();
@@ -542,6 +559,35 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     } finally {
       password.dispose();
       confirm.dispose();
+    }
+  }
+
+  Future<void> _inviteCustomer(Map<String, dynamic> customer) async {
+    final email = '${customer['email'] ?? ''}'.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Agrega un correo al cliente antes de enviar la invitación.')));
+      return;
+    }
+    final confirmed = await showDialog<bool>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Enviar acceso al portal'),
+        content: Text('Se enviará un enlace de acceso o recuperación a $email. No se enviará una contraseña.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Enviar correo')),
+        ],
+      ));
+    if (confirmed != true) return;
+    try {
+      final result = await widget.api.post('/api/v1/customers/${customer['id']}/portal-access/invitation');
+      final sent = result is Map && result['invitation_delivery'] == 'sent';
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sent
+        ? 'Correo de acceso enviado a $email.'
+        : 'No se pudo enviar el correo. Revisa la conexión de Gmail e inténtalo nuevamente.')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error.toString().replaceFirst('Exception: ', ''))));
     }
   }
 
@@ -1257,6 +1303,8 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                   _editCustomer(item);
                 else if (value == 'password')
                   _setCustomerPassword(item);
+                else if (value == 'invite')
+                  _inviteCustomer(item);
                 else
                   _deleteRecord(item, vehicle: false);
               },
@@ -1271,6 +1319,11 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                     child: ListTile(
                         leading: Icon(Icons.lock_reset_outlined),
                         title: Text('Definir contraseña del portal'))),
+                PopupMenuItem(
+                    value: 'invite',
+                    child: ListTile(
+                        leading: Icon(Icons.mark_email_read_outlined),
+                        title: Text('Enviar acceso por Gmail'))),
                 PopupMenuItem(
                     value: 'delete',
                     child: ListTile(

@@ -109,6 +109,33 @@ def test_standalone_quote_accepts_catalog_and_manual_lines(quote_context):
     assert quote_id in [q['id'] for q in client.get('/api/v1/portal/quotes', headers=headers['customer']).json()]
 
 
+def test_quote_email_requires_publication_and_uses_customer_address(quote_context, monkeypatch):
+    client, order_id, customer_id, headers = quote_context
+    with Session(engine) as session:
+        customer = session.get(Customer, customer_id)
+        customer.email = f"quote-{uuid4().hex[:8]}@example.com"
+        session.add(customer)
+        session.commit()
+        recipient = customer.email
+    quote_id = client.post(f'/api/v1/work-orders/{order_id}/quotes',
+                           json={'description': 'Diagnóstico', 'labor_clp': 10000},
+                           headers=headers['admin']).json()['id']
+    path = f'/api/v1/quotes/{quote_id}/email'
+    assert client.post(path, headers=headers['admin']).status_code == 409
+    assert client.post(path, headers=headers['mechanic']).status_code == 403
+    sent = []
+
+    async def fake_send(session, address, subject, html, attachment):
+        sent.append((address, attachment))
+
+    monkeypatch.setattr('app.main.google.send_customer_access_email', fake_send)
+    assert client.post(f'/api/v1/quotes/{quote_id}/publish', headers=headers['admin']).status_code == 200
+    result = client.post(path, headers=headers['admin'])
+    assert result.status_code == 200, result.text
+    assert sent[0][0] == recipient
+    assert sent[0][1][1].startswith(b'%PDF-')
+
+
 @pytest.mark.parametrize('payload', [
     {'description': '', 'labor_clp': 0}, {'description': '  ', 'labor_clp': 0},
     {'description': 'A' * 251}, {'description': 'Servicio', 'labor_clp': -1},

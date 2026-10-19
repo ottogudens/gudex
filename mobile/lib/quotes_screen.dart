@@ -284,6 +284,19 @@ class _QuotesScreenState extends State<_QuotesScreen> {
     }
   }
 
+  Future<void> _email(Map<String, dynamic> quote) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Enviar cotización por Gmail'),
+      content: Text('Se enviará la cotización COT-${quote['id']} al correo registrado de ${quote['customer_name']}. ¿Continuar?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar')),
+      ],
+    ));
+    if (confirmed != true || !mounted) return;
+    await _run(() async { await widget.api.post('/api/v1/quotes/${quote['id']}/email'); }, 'Cotización enviada por Gmail');
+  }
+
   @override
   Widget build(BuildContext context) {
     final records = _quotes.where((q) => (_status == 'all' || q['status'] == _status) &&
@@ -332,6 +345,8 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                   if (draft) TextButton.icon(onPressed: _busy ? null : () => _publish(q), icon: const Icon(Icons.send_outlined), label: const Text('Enviar al portal')),
                   if (!draft) TextButton.icon(onPressed: _busy ? null : () => _pdf(q, share: true), icon: const Icon(Icons.share_outlined),
                     label: Text(kIsWeb ? 'Descargar PDF para enviar' : 'Compartir PDF')),
+                  if (!draft) TextButton.icon(onPressed: _busy ? null : () => _email(q), icon: const Icon(Icons.email_outlined),
+                    label: const Text('Enviar por Gmail')),
                 ]),
               ],
             )));
