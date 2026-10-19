@@ -6,6 +6,9 @@ void clearCustomerAccessUrl() {
   final query = Map<String, String>.from(current.queryParameters)
     ..remove('invite')
     ..remove('reset');
-  final clean = current.replace(queryParameters: query.isEmpty ? null : query);
+  final clean = current.replace(
+    query: query.isEmpty ? '' : null,
+    queryParameters: query.isEmpty ? null : query,
+  );
   html.window.history.replaceState(null, '', clean.toString());
 }
