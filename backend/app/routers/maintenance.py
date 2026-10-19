@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import MaintenanceExecution, MaintenancePlan, Vehicle, WorkOrder, WorkStatus
+from app.models import MaintenanceExecution, MaintenancePlan, OilServiceCard, Vehicle, WorkOrder, WorkStatus
 from app.security import require_admin
 
 router = APIRouter(prefix="/api/v1/maintenance-plans", tags=["mantenciones"])
@@ -67,6 +67,27 @@ def record_completion(session: Session, plan_id: int, data: Completion, actor: s
     plan.last_service_at = execution.performed_at
     vehicle.current_mileage_km = data.mileage_km
     session.add_all([execution, plan, vehicle])
+    session.flush()
+    if plan.category == "oil":
+        card = session.exec(select(OilServiceCard).where(OilServiceCard.vehicle_id == vehicle.id)).first()
+        if card is None:
+            card = OilServiceCard(vehicle_id=vehicle.id, mileage_km=data.mileage_km, updated_by=actor)
+        card.source_execution_id = execution.id
+        card.service_name = plan.name
+        card.performed_at = execution.performed_at
+        card.mileage_km = execution.mileage_km
+        card.next_due_km = next_due_km
+        card.next_due_at = next_due_at
+        card.oil_used = data.oil_used
+        card.filters_used = data.filters_used
+        card.customer_note = ""
+        card.oil_image_path = None
+        card.oil_image_content_type = None
+        card.filter_image_path = None
+        card.filter_image_content_type = None
+        card.updated_by = actor
+        card.updated_at = now
+        session.add(card)
     session.commit()
     session.refresh(execution)
     return execution

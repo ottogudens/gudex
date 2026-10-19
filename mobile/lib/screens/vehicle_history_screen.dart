@@ -1,4 +1,6 @@
 import 'dart:math';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -22,6 +24,7 @@ class VehicleHistoryScreen extends ConsumerStatefulWidget {
 
 class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
   late Future<Map<String, dynamic>> _history;
+  final Map<String, Future<Uint8List>> _cardPhotoFutures = {};
   bool _busy = false;
   bool get _canEdit => !widget.portal && ref.read(authProvider).role == 'admin';
   @override
@@ -38,7 +41,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
 
   Future<void> _refresh() async {
     final future = _load();
-    setState(() => _history = future);
+    setState(() { _cardPhotoFutures.clear(); _history = future; });
     await future;
   }
 
@@ -694,14 +697,124 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
     }
   }
 
+  Future<void> _editOilCard(Map<String, dynamic> current) async {
+    final service = TextEditingController(text: '${current['service_name'] ?? 'Cambio de aceite'}');
+    final km = TextEditingController(text: '${current['mileage_km'] ?? ''}');
+    final nextKm = TextEditingController(text: '${current['next_due_km'] ?? ''}');
+    final oil = TextEditingController(text: '${current['oil_used'] ?? ''}');
+    final filters = TextEditingController(text: '${current['filters_used'] ?? ''}');
+    final note = TextEditingController(text: '${current['customer_note'] ?? ''}');
+    DateTime performed = DateTime.tryParse('${current['performed_at']}')?.toLocal() ?? DateTime.now();
+    DateTime? nextDate = DateTime.tryParse('${current['next_due_at']}')?.toLocal();
+    bool saving = false, saved = false;
+    String? error;
+    await showDialog<void>(context: context, barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(builder: (context, update) => PopScope(
+        canPop: !saving,
+        child: AlertDialog(
+          title: Text(current['id'] == null ? 'Crear tarjeta de aceite' : 'Editar tarjeta de aceite'),
+          content: SizedBox(width: 520, child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text('Esta tarjeta informa al cliente. Las correcciones no modifican la mantención original.'),
+              TextField(controller: service, enabled: !saving, decoration: const InputDecoration(labelText: 'Servicio realizado *')),
+              TextButton.icon(onPressed: saving ? null : () async {
+                final selected = await showDatePicker(context: dialogContext, initialDate: performed,
+                  firstDate: DateTime(1980), lastDate: DateTime.now().add(const Duration(days: 1)));
+                if (selected != null) update(() => performed = selected);
+              }, icon: const Icon(Icons.event), label: Text('Fecha del servicio: ${performed.day}/${performed.month}/${performed.year}')),
+              TextField(controller: km, enabled: !saving, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Kilometraje del servicio *')),
+              TextField(controller: nextKm, enabled: !saving, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Próximo cambio a los km')),
+              TextButton.icon(onPressed: saving ? null : () async {
+                final selected = await showDatePicker(context: dialogContext,
+                  initialDate: nextDate ?? DateTime.now().add(const Duration(days: 1)),
+                  firstDate: DateTime(1980), lastDate: DateTime.now().add(const Duration(days: 3650)));
+                if (selected != null) update(() => nextDate = selected);
+              }, icon: const Icon(Icons.event_repeat),
+                label: Text(nextDate == null ? 'Agregar fecha del próximo cambio' :
+                  'Próximo cambio: ${nextDate!.day}/${nextDate!.month}/${nextDate!.year}')),
+              if (nextDate != null)
+                TextButton(onPressed: saving ? null : () => update(() => nextDate = null),
+                  child: const Text('Quitar próxima fecha')),
+              TextField(controller: oil, enabled: !saving, maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Aceite utilizado',
+                  helperText: 'Marca, producto, viscosidad, norma y cantidad')),
+              TextField(controller: filters, enabled: !saving, maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Filtros instalados',
+                  helperText: 'Tipo, marca y número de parte de cada filtro')),
+              TextField(controller: note, enabled: !saving, maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Nota visible para el cliente')),
+              if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ]))),
+          actions: [
+            TextButton(onPressed: saving ? null : () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+            FilledButton(onPressed: saving ? null : () async {
+              final mileage = int.tryParse(km.text.trim());
+              final nextMileage = nextKm.text.trim().isEmpty ? null : int.tryParse(nextKm.text.trim());
+              if (service.text.trim().length < 2 || mileage == null || mileage < 0 ||
+                  (nextKm.text.trim().isNotEmpty && (nextMileage == null || nextMileage <= mileage))) {
+                update(() => error = 'Revisa el servicio y los kilometrajes.');
+                return;
+              }
+              update(() { saving = true; error = null; });
+              try {
+                await widget.api.putJson('/api/v1/vehicles/${widget.vehicleId}/oil-card', {
+                  'service_name': service.text.trim(), 'performed_at': performed.toUtc().toIso8601String(),
+                  'mileage_km': mileage, 'next_due_km': nextMileage,
+                  'next_due_at': nextDate?.toUtc().toIso8601String(),
+                  'oil_used': oil.text.trim(), 'filters_used': filters.text.trim(),
+                  'customer_note': note.text.trim(),
+                });
+                saved = true;
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              } catch (e) {
+                if (dialogContext.mounted) update(() { saving = false; error = '$e'; });
+              }
+            }, child: Text(saving ? 'Guardando…' : 'Guardar tarjeta')),
+          ],
+        ))));
+    for (final controller in [service, km, nextKm, oil, filters, note]) { controller.dispose(); }
+    if (saved && mounted) await _refresh();
+  }
+
+  Future<void> _uploadOilCardImage(String kind) async {
+    try {
+      final picked = await FilePicker.pickFiles(type: FileType.image, withData: true);
+      if (picked == null || picked.files.isEmpty || !mounted) return;
+      final file = picked.files.single;
+      if (file.bytes == null) throw Exception('No se pudo leer la imagen.');
+      await widget.api.uploadBytes('/api/v1/vehicles/${widget.vehicleId}/oil-card/images/$kind',
+        file.bytes!, file.name);
+      if (mounted) await _refresh();
+    } catch (error) { _error(error); }
+  }
+
+  Future<void> _showOilCardImage(String url) async {
+    try {
+      final bytes = await widget.api.getBytes(url);
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => Dialog(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+          child: Image.memory(bytes, fit: BoxFit.contain))));
+    } catch (error) { _error(error); }
+  }
+
+  Future<void> _removeOilCardImage(String kind) async {
+    try {
+      await widget.api.delete('/api/v1/vehicles/${widget.vehicleId}/oil-card/images/$kind');
+      if (mounted) await _refresh();
+    } catch (error) { _error(error); }
+  }
+
   Widget _oilCard(Map<String, dynamic> data) {
     final vehicle = _map(data['vehicle']);
-    final plans = _maps(data['maintenance_plans']);
-    final oilPlans = plans.where((p) => p['category'] == 'oil').toList();
-    final executions = _maps(data['maintenance_executions'])
-        .where((e) => oilPlans.any((p) => p['id'] == e['plan_id'])).toList();
-    if (executions.isEmpty) return const SizedBox.shrink();
-    final latest = executions.first;
+    final latest = _map(data['oil_card']);
+    if (latest.isEmpty) {
+      return _canEdit ? Align(alignment: Alignment.centerLeft, child: OutlinedButton.icon(
+        onPressed: () => _editOilCard(const {}), icon: const Icon(Icons.oil_barrel_outlined),
+        label: const Text('Crear tarjeta de aceite del último servicio'))) : const SizedBox.shrink();
+    }
     final oilDescription = '${latest['oil_used'] ?? ''}'.trim();
     final filterDescription = '${latest['filters_used'] ?? ''}'.trim();
     final plate = vehicle['plate']?.toString() ?? '';
@@ -746,8 +859,57 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
         const SizedBox(height: 6),
         Text('Filtros: ${filterDescription.isEmpty ? 'No registrados en este servicio' : filterDescription}',
           style: TextStyle(color: color.onPrimary)),
+        if ('${latest['customer_note'] ?? ''}'.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Nota del taller: ${latest['customer_note']}', style: TextStyle(color: color.onPrimary)),
+        ],
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final kind in ['oil', 'filter'])
+            if (latest['${kind}_image_url'] != null)
+              SizedBox(width: 160, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(kind == 'oil' ? 'Foto del aceite' : 'Foto del filtro',
+                  style: TextStyle(color: color.onPrimary.withValues(alpha: .8), fontSize: 12)),
+                const SizedBox(height: 4),
+                ClipRRect(borderRadius: BorderRadius.circular(12), child: SizedBox(
+                  width: 160, height: 120,
+                  child: FutureBuilder<Uint8List>(
+                    future: _cardPhotoFutures.putIfAbsent('${latest['${kind}_image_url']}',
+                      () => widget.api.getBytes('${latest['${kind}_image_url']}')),
+                    builder: (context, snapshot) => snapshot.hasData
+                      ? Image.memory(snapshot.data!, fit: BoxFit.cover)
+                      : Center(child: Icon(snapshot.hasError ? Icons.broken_image_outlined : Icons.image_outlined,
+                          color: color.onPrimary)),
+                  ),
+                )),
+              ])),
+        ]),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          for (final kind in ['oil', 'filter']) ...[
+            if (latest['${kind}_image_url'] != null)
+              TextButton.icon(onPressed: () => _showOilCardImage('${latest['${kind}_image_url']}'),
+                icon: Icon(Icons.image_outlined, color: color.onPrimary),
+                label: Text(kind == 'oil' ? 'Ver foto aceite' : 'Ver foto filtro',
+                  style: TextStyle(color: color.onPrimary))),
+            if (_canEdit && latest['id'] != null) ...[
+              TextButton.icon(onPressed: () => _uploadOilCardImage(kind),
+                icon: Icon(Icons.add_photo_alternate_outlined, color: color.onPrimary),
+                label: Text(latest['${kind}_image_url'] == null
+                  ? (kind == 'oil' ? 'Agregar foto aceite' : 'Agregar foto filtro')
+                  : (kind == 'oil' ? 'Cambiar foto aceite' : 'Cambiar foto filtro'),
+                  style: TextStyle(color: color.onPrimary))),
+              if (latest['${kind}_image_url'] != null)
+                IconButton(onPressed: () => _removeOilCardImage(kind),
+                  tooltip: kind == 'oil' ? 'Quitar foto aceite' : 'Quitar foto filtro',
+                  icon: Icon(Icons.delete_outline, color: color.onPrimary)),
+            ],
+          ],
+        ]),
         const SizedBox(height: 12),
         Text('Vence por fecha o kilometraje, lo que ocurra primero.', style: TextStyle(color: color.onPrimary.withValues(alpha: .8))),
+        if (_canEdit) TextButton.icon(onPressed: () => _editOilCard(latest),
+          icon: Icon(Icons.edit_outlined, color: color.onPrimary),
+          label: Text(latest['id'] == null ? 'Crear tarjeta editable' : 'Editar tarjeta',
+            style: TextStyle(color: color.onPrimary))),
         if (vehicle['public_service_card_enabled'] == true) TextButton.icon(
           onPressed: () => launchUrl(Uri.parse('https://bknd.gudex.cl/tarjeta-aceite?patente=${Uri.encodeQueryComponent(plate)}'),
               mode: LaunchMode.externalApplication),

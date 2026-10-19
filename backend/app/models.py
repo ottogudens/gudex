@@ -146,6 +146,27 @@ class MaintenanceExecution(SQLModel, table=True):
     performed_at: datetime = Field(default_factory=now_utc)
 
 
+class OilServiceCard(SQLModel, table=True):
+    """Editable customer-facing snapshot; the maintenance execution remains immutable."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True, unique=True)
+    source_execution_id: Optional[int] = Field(default=None, foreign_key="maintenanceexecution.id")
+    service_name: str = Field(default="Cambio de aceite", max_length=120)
+    performed_at: datetime = Field(default_factory=now_utc)
+    mileage_km: int = Field(ge=0)
+    next_due_km: Optional[int] = None
+    next_due_at: Optional[datetime] = None
+    oil_used: str = Field(default="", max_length=1000)
+    filters_used: str = Field(default="", max_length=2000)
+    customer_note: str = Field(default="", max_length=2000)
+    oil_image_path: Optional[str] = Field(default=None, max_length=500)
+    oil_image_content_type: Optional[str] = Field(default=None, max_length=32)
+    filter_image_path: Optional[str] = Field(default=None, max_length=500)
+    filter_image_content_type: Optional[str] = Field(default=None, max_length=32)
+    updated_by: str = Field(max_length=254)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
 class WorkOrder(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     code: str = Field(index=True, unique=True, max_length=24)

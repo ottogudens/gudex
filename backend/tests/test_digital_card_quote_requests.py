@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
 from app.main import app
@@ -52,6 +52,61 @@ def test_public_oil_card_demo_uses_only_fictitious_data():
     assert "60,000 km" in response.text
     assert "Aceite de ejemplo" in response.text
     assert "Filtro de aceite de ejemplo" in response.text
+
+
+def test_admin_can_create_edit_and_replace_card_photos_without_changing_service_history():
+    create_db_and_tables()
+    suffix = uuid4().hex[:6].upper()
+    with Session(engine) as session:
+        customer = Customer(full_name="Cliente reservado", email=f"card-{suffix}@example.com")
+        session.add(customer); session.flush()
+        vehicle = Vehicle(customer_id=customer.id, plate=f"CD{suffix}", make="Kia", model="Rio")
+        admin = User(email=f"card-admin-{suffix}@example.com", full_name="Admin", password_hash="unused", role=UserRole.admin)
+        portal_user = User(email=f"card-user-{suffix}@example.com", full_name="Cliente", password_hash="unused",
+                           role=UserRole.customer, customer_id=customer.id)
+        session.add_all([vehicle, admin, portal_user]); session.commit()
+        vehicle_id, plate = vehicle.id, vehicle.plate
+        admin_headers = {"Authorization": f"Bearer {create_access_token(admin)}"}
+        portal_headers = {"Authorization": f"Bearer {create_access_token(portal_user)}"}
+    client = TestClient(app)
+    payload = {"service_name": "Cambio de aceite", "performed_at": datetime.now(timezone.utc).isoformat(),
+               "mileage_km": 45000, "next_due_km": 55000, "oil_used": "Aceite 5W-30",
+               "filters_used": "Filtro REF-1", "customer_note": "Revisar nivel en 30 días"}
+    path = f"/api/v1/vehicles/{vehicle_id}/oil-card"
+    assert client.put(path, json=payload, headers=portal_headers).status_code == 403
+    created = client.put(path, json=payload, headers=admin_headers)
+    assert created.status_code == 200, created.text
+    assert created.json()["source_execution_id"] is None
+    assert "oil_image_path" not in created.text
+    assert "No hay una tarjeta pública disponible" in client.get(f"/tarjeta-aceite?patente={plate}").text
+    changed = client.put(path, json={**payload, "oil_used": "Aceite 0W-20", "filters_used": "Filtro REF-2"},
+                         headers=admin_headers)
+    assert changed.status_code == 200
+    assert changed.json()["id"] == created.json()["id"]
+    upload = client.post(f"{path}/images/oil", headers=admin_headers,
+                         files={"file": ("aceite.png", b"\x89PNG\r\n\x1a\nfoto", "application/octet-stream")})
+    assert upload.status_code == 200, upload.text
+    assert upload.json()["oil_image_url"]
+    assert "oil_image_path" not in upload.text
+    assert client.get(f"/tarjeta-aceite/imagen/{vehicle_id}/oil").status_code == 404
+    assert client.get(upload.json()["oil_image_url"], headers=portal_headers).status_code == 403
+    portal = client.get(f"/api/v1/portal/vehicles/{vehicle_id}/history", headers=portal_headers)
+    assert portal.status_code == 200
+    assert portal.json()["oil_card"]["oil_used"] == "Aceite 0W-20"
+    assert client.get(portal.json()["oil_card"]["oil_image_url"], headers=portal_headers).status_code == 200
+    with Session(engine) as session:
+        vehicle = session.get(Vehicle, vehicle_id)
+        vehicle.public_service_card_enabled = True
+        session.add(vehicle); session.commit()
+    public = client.get(f"/tarjeta-aceite?patente={plate}")
+    assert "Aceite 0W-20" in public.text and "Filtro REF-2" in public.text
+    assert "Cliente reservado" not in public.text
+    assert f"/tarjeta-aceite/imagen/{vehicle_id}/oil" in public.text
+    assert client.get(f"/tarjeta-aceite/imagen/{vehicle_id}/oil").status_code == 200
+    assert client.delete(f"{path}/images/oil", headers=admin_headers).status_code == 200
+    assert client.get(f"/tarjeta-aceite/imagen/{vehicle_id}/oil").status_code == 404
+    with Session(engine) as session:
+        assert session.exec(select(MaintenanceExecution).where(MaintenanceExecution.vehicle_id == vehicle_id)).first() is None
 
 
 def test_customer_can_request_quote_only_for_own_vehicle():

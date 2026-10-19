@@ -44,7 +44,7 @@ from app.services import google
 from app.services.work_orders import editable_order, transition_order
 from app.routers.maintenance import router as maintenance_router, Completion, record_completion
 from app.routers.work_order_services import router as work_order_services_router, vehicle_parts, _can_edit, _service, _assignee, KINDS
-from app.routers.public_card import router as public_card_router
+from app.routers.public_card import card_payload, router as public_card_router
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -674,6 +674,7 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
         "maintenance_plans": session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id == vehicle.id)).all(),
         "maintenance_executions": session.exec(select(MaintenanceExecution).where(
             MaintenanceExecution.vehicle_id == vehicle.id).order_by(MaintenanceExecution.performed_at.desc())).all(),
+        "oil_card": card_payload(session, vehicle),
         **vehicle_parts(session, vehicle.id),
         "customer": session.get(Customer, vehicle.customer_id),
         "work_orders": orders,
@@ -828,6 +829,7 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
     data["technical"] = technical_payload(session, vehicle_id, portal=True)
     data["maintenance_executions"] = [row.model_dump(exclude={"recorded_by", "request_key"})
                                       for row in data["maintenance_executions"]]
+    data["oil_card"] = card_payload(session, vehicle, portal=True)
     for key in ("installed_parts", "verified_part_references"):
         data[key] = [{**{field: value for field, value in part.items()
                         if field not in {"recorded_by_email", "verification_source", "notes"}},

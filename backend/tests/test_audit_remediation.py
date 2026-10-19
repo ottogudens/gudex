@@ -114,10 +114,10 @@ def test_rejecting_approved_reward_refunds_exactly_once(records):
 
 
 def test_maintenance_history_is_idempotent_and_preserves_snapshot(records):
-    from app.models import MaintenancePlan, MaintenanceExecution
+    from app.models import MaintenancePlan, MaintenanceExecution, OilServiceCard
     from app.routers.maintenance import Completion, record_completion
     session, _, _, vehicle, order, request = records
-    plan = MaintenancePlan(vehicle_id=vehicle.id, name="Aceite motor", interval_km=10000)
+    plan = MaintenancePlan(vehicle_id=vehicle.id, name="Aceite motor", category="oil", interval_km=10000)
     order.status = WorkStatus.in_progress
     session.add_all([plan, order]); session.commit()
     data = Completion(request_key=uuid4().hex, mileage_km=30000,
@@ -133,6 +133,9 @@ def test_maintenance_history_is_idempotent_and_preserves_snapshot(records):
     assert session.get(MaintenanceExecution, result.id).interval_km == 10000
     assert session.get(MaintenanceExecution, result.id).oil_used == data.oil_used
     assert session.get(MaintenanceExecution, result.id).filters_used == data.filters_used
+    card = session.exec(select(OilServiceCard).where(OilServiceCard.vehicle_id == vehicle.id)).one()
+    assert card.source_execution_id == result.id
+    assert card.oil_used == data.oil_used
     portal = customer_vehicle_history(vehicle.id, request, session)
     assert len(portal["maintenance_executions"]) == 1
     assert "recorded_by" not in portal["maintenance_executions"][0]
