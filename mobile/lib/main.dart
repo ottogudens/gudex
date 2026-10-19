@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -165,6 +166,42 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   int _selected = 0;
+  Timer? _appointmentAlertTimer;
+  int _pendingAppointmentCount = 0;
+  bool _checkingAppointments = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.role == 'admin') {
+      _checkNewAppointments();
+      _appointmentAlertTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkNewAppointments());
+    }
+  }
+
+  @override
+  void dispose() {
+    _appointmentAlertTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkNewAppointments() async {
+    if (_checkingAppointments) return;
+    _checkingAppointments = true;
+    try {
+      final data = await ApiClient(widget.baseUrl, token: widget.token).get('/api/v1/dashboard');
+      final metrics = data is Map ? data['metrics'] : null;
+      final raw = metrics is Map ? metrics['requested_appointments'] : null;
+      final count = raw is num ? raw.toInt() : int.tryParse('$raw') ?? 0;
+      if (mounted && count != _pendingAppointmentCount) {
+        setState(() => _pendingAppointmentCount = count);
+      }
+    } catch (_) {
+      // Keep the last visible alert during a temporary connection failure.
+    } finally {
+      _checkingAppointments = false;
+    }
+  }
   bool _navExpanded = true;
   final Set<String> _expandedGroups = {'General', 'Operación', 'Gestión'};
 
@@ -342,6 +379,46 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 if (constraints.maxWidth >= 600)
                                   _RoleChip(role: widget.role),
                               ])),
+                          if (widget.role == 'admin' && _pendingAppointmentCount > 0)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                              child: Material(
+                                color: const Color(0xFFFFE8A3),
+                                borderRadius: BorderRadius.circular(20),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () => setState(() => _selected = 4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(18),
+                                    child: Row(children: [
+                                      const CircleAvatar(
+                                        radius: 27,
+                                        backgroundColor: Color(0xFFB54300),
+                                        child: Icon(Icons.notifications_active_rounded,
+                                            color: Colors.white, size: 30),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(_pendingAppointmentCount == 1
+                                              ? '¡Nueva cita por revisar!'
+                                              : '¡$_pendingAppointmentCount citas por revisar!',
+                                            style: const TextStyle(fontSize: 20,
+                                                fontWeight: FontWeight.w800,
+                                                color: Color(0xFF512A0B))),
+                                          const SizedBox(height: 3),
+                                          const Text('Abre la agenda para confirmar o cancelar las solicitudes.',
+                                            style: TextStyle(color: Color(0xFF512A0B))),
+                                        ],
+                                      )),
+                                      const Icon(Icons.arrow_forward_rounded,
+                                          color: Color(0xFF512A0B)),
+                                    ]),
+                                  ),
+                                ),
+                              ),
+                            ),
                           Expanded(
                             child: Center(
                                 child: ConstrainedBox(

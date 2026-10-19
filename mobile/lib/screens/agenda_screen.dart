@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/constants.dart';
@@ -17,11 +18,28 @@ class AgendaScreen extends StatefulWidget {
 class _AgendaScreenState extends State<AgendaScreen> {
   DateTime _week = DateTime.now();
   late Future<List<Map<String, dynamic>>> _appointments;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _appointments = _load();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _poll());
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _poll() async {
+    try {
+      final rows = await _load();
+      if (mounted) setState(() => _appointments = Future.value(rows));
+    } catch (_) {
+      // A temporary network error must not hide the existing agenda.
+    }
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
@@ -209,7 +227,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
               .subtract(Duration(days: _week.weekday - 1));
           final requested = rows
               .where((row) => row['status']?.toString() == 'requested')
-              .length;
+              .toList();
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
@@ -219,7 +237,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
                 _AgendaHeader(
                   start: start,
                   total: rows.length,
-                  requested: requested,
+                  requested: requested.length,
                   onPrevious: () => setState(
                       () => _week = _week.subtract(const Duration(days: 7))),
                   onNext: () => setState(
@@ -228,6 +246,37 @@ class _AgendaScreenState extends State<AgendaScreen> {
                   onCreate: widget.role == 'admin' ? _createAppointment : null,
                 ),
                 const SizedBox(height: 18),
+                if (requested.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFE8A3),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        const Icon(Icons.notifications_active_rounded,
+                            color: Color(0xFF8C3700), size: 32),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(
+                          requested.length == 1
+                              ? '1 nueva cita pendiente de confirmar'
+                              : '${requested.length} nuevas citas pendientes de confirmar',
+                          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800,
+                              color: Color(0xFF512A0B)),
+                        )),
+                      ]),
+                      const SizedBox(height: 8),
+                      for (final row in requested.take(3))
+                        TextButton.icon(
+                          onPressed: () => setState(() => _week = _at(row['starts_at'])),
+                          icon: const Icon(Icons.event_outlined),
+                          label: Text('${row['service_type']} · ${_at(row['starts_at']).day}/${_at(row['starts_at']).month} ${_time(_at(row['starts_at']))} — Ver semana'),
+                        ),
+                    ]),
+                  ),
+                  const SizedBox(height: 18),
+                ],
                 for (var index = 0; index < 7; index++)
                   _DayScheduleCard(
                     day: start.add(Duration(days: index)),
