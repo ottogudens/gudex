@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 import base64
 import hashlib
 import secrets
@@ -23,6 +23,7 @@ GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
 )
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
@@ -153,6 +154,46 @@ async def google_request(session: Session, method: str, url: str, **kwargs) -> h
     return response
 
 
+async def available_calendars(session: Session) -> list[dict]:
+    """Calendars visible to the connected Google account."""
+    items = []
+    page_token = None
+    while True:
+        params = {"maxResults": 250, "minAccessRole": "reader"}
+        if page_token:
+            params["pageToken"] = page_token
+        response = await google_request(session, "GET",
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList", params=params)
+        payload = response.json()
+        items.extend({"id": row["id"], "name": row.get("summaryOverride") or row.get("summary") or row["id"],
+                      "primary": bool(row.get("primary")), "access_role": row.get("accessRole")}
+                     for row in payload.get("items", []) if row.get("id"))
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            return items
+
+
+async def selected_calendar_events(session: Session, calendar_id: str) -> list[dict]:
+    """Read timed and recurring instances in the operational agenda window."""
+    now = datetime.now(timezone.utc)
+    base = f"https://www.googleapis.com/calendar/v3/calendars/{quote(calendar_id, safe='')}/events"
+    items = []
+    page_token = None
+    for _ in range(40):
+        params = {"singleEvents": "true", "showDeleted": "true", "maxResults": 250,
+                  "timeMin": (now - timedelta(days=90)).isoformat(),
+                  "timeMax": (now + timedelta(days=730)).isoformat()}
+        if page_token:
+            params["pageToken"] = page_token
+        response = await google_request(session, "GET", base, params=params)
+        payload = response.json()
+        items.extend(payload.get("items", []))
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            return items
+    raise HTTPException(409, "El calendario supera 10.000 eventos en el rango; reduce el calendario seleccionado")
+
+
 async def gmail_candidates(session: Session) -> list[dict]:
     query = urlencode({"q": google_config(session)["gmail_query"], "maxResults": 30})
     listing = await google_request(session, "GET", f"https://gmail.googleapis.com/gmail/v1/users/me/messages?{query}")
@@ -238,6 +279,7 @@ def calendar_event(appointment: Appointment, customer: Customer, vehicle: Vehicl
         description.append(f"Notas: {appointment.notes}")
     return {"summary": f"Gudex · {appointment.service_type} · {customer.full_name}",
             "description": "\n".join(description),
+            "extendedProperties": {"private": {"gudexAppointmentId": str(appointment.id)}},
             "start": {"dateTime": start.isoformat(), "timeZone": "America/Santiago"},
             "end": {"dateTime": end.isoformat(), "timeZone": "America/Santiago"}}
 

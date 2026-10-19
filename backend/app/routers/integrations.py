@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import logging
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from uuid import uuid4
 import hashlib
@@ -8,6 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import engine, get_session
-from app.models import AIConfiguration, Appointment, Customer, ExternalImport, GoogleIntegrationConfig, IntegrationCredential, MetaIntegrationConfig, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
+from app.models import AIConfiguration, Appointment, CalendarImportSettings, Customer, ExternalCalendarEvent, ExternalImport, GoogleIntegrationConfig, IntegrationCredential, MetaIntegrationConfig, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
 from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, GoogleIntegrationConfigUpdate, MetaIntegrationConfigUpdate, MetaPageSelection, WhatsAppBusinessConfigUpdate
 from app.security import require_admin
 from app.services import google, meta
@@ -23,6 +25,10 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 
 router = APIRouter()
 logger = logging.getLogger("gudex.calendar")
+
+
+class CalendarSelection(BaseModel):
+    calendar_id: str = Field(min_length=1, max_length=250)
 
 
 def _whatsapp_business_status(config: WhatsAppBusinessConfig | None) -> dict:
@@ -131,6 +137,7 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
     response.headers["Pragma"] = "no-cache"
     credential = session.exec(select(IntegrationCredential).where(IntegrationCredential.provider == "google")).first()
     google_settings = session.get(GoogleIntegrationConfig, 1)
+    calendar_import = session.get(CalendarImportSettings, 1)
     meta_settings = session.get(MetaIntegrationConfig, 1)
     whatsapp_config = session.get(WhatsAppBusinessConfig, 1)
     mp_token = settings.mercadopago_access_token
@@ -142,6 +149,8 @@ def integration_status(response: Response, session: Session = Depends(get_sessio
         "google": {"credentials_present": bool(google_settings or (settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri)),
                    "connected": bool(credential), "account_email": credential.account_email if credential else None,
                    "granted_scopes": credential.granted_scopes.split() if credential else [],
+                   "selected_calendar_id": calendar_import.calendar_id if calendar_import and calendar_import.enabled else None,
+                   "calendar_last_synced_at": calendar_import.last_synced_at if calendar_import else None,
                    "drive_folder_configured": bool(google_settings.drive_folder_id if google_settings else settings.google_drive_folder_id)},
         "ai": {"credentials_present": bool(settings.ai_provider and settings.ai_api_key), "provider": settings.ai_provider,
                "model": selected_ai_model(session), "available": bool(settings.ai_provider and settings.ai_api_key)},
@@ -410,6 +419,36 @@ def get_google_settings(session: Session = Depends(get_session)):
     return _google_settings_status(session.get(GoogleIntegrationConfig, 1))
 
 
+@router.get("/api/v1/integrations/google/calendars", dependencies=[Depends(require_admin)])
+async def list_google_calendars(session: Session = Depends(get_session)):
+    selected = session.get(CalendarImportSettings, 1)
+    return {"selected_calendar_id": selected.calendar_id if selected and selected.enabled else None,
+            "calendars": await google.available_calendars(session)}
+
+
+@router.put("/api/v1/integrations/google/calendar-selection", dependencies=[Depends(require_admin)])
+async def select_google_calendar(data: CalendarSelection, request: Request,
+                                 session: Session = Depends(get_session)):
+    config = session.get(GoogleIntegrationConfig, 1)
+    if not config:
+        raise HTTPException(409, "Configura Google en la aplicación antes de elegir el calendario")
+    calendars = await google.available_calendars(session)
+    selected = next((row for row in calendars if row["id"] == data.calendar_id), None)
+    if not selected:
+        raise HTTPException(422, "El calendario no está disponible en la cuenta Google conectada")
+    config.calendar_id = selected["id"]
+    config.updated_by_email = request.state.user_email
+    config.updated_at = datetime.now(timezone.utc)
+    session.add(config)
+    import_settings = session.get(CalendarImportSettings, 1) or CalendarImportSettings(calendar_id=selected["id"])
+    import_settings.calendar_id = selected["id"]
+    import_settings.enabled = True
+    import_settings.last_synced_at = None
+    session.add(import_settings)
+    session.commit()
+    return {"calendar_id": selected["id"], "name": selected["name"]}
+
+
 @router.put("/api/v1/integrations/google/config", dependencies=[Depends(require_admin)])
 def save_google_settings(data: GoogleIntegrationConfigUpdate, request: Request,
                          session: Session = Depends(get_session)):
@@ -587,3 +626,73 @@ async def sync_calendar_appointment_by_id(appointment_id: int) -> None:
             logger.exception("No se pudo sincronizar la cita %s con Google Calendar", appointment_id)
         session.add(appointment)
         session.commit()
+
+
+def _event_datetime(value: dict, fallback_timezone: str = "America/Santiago") -> datetime | None:
+    if value.get("dateTime"):
+        parsed = datetime.fromisoformat(value["dateTime"].replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=ZoneInfo(value.get("timeZone") or fallback_timezone))
+    if value.get("date"):
+        return datetime.fromisoformat(value["date"]).replace(tzinfo=ZoneInfo(fallback_timezone))
+    return None
+
+
+async def import_selected_calendar(session: Session) -> dict:
+    import_settings = session.get(CalendarImportSettings, 1)
+    if not import_settings or not import_settings.enabled:
+        raise HTTPException(409, "Selecciona un calendario en Integraciones")
+    calendar_id = import_settings.calendar_id
+    events = await google.selected_calendar_events(session, calendar_id)
+    counts = {"created": 0, "updated": 0, "cancelled": 0, "skipped": 0}
+    for event in events:
+        event_id = event.get("id")
+        if not event_id:
+            counts["skipped"] += 1
+            continue
+        # Appointments created by Gudex already have their own record.
+        if (event.get("extendedProperties") or {}).get("private", {}).get("gudexAppointmentId"):
+            counts["skipped"] += 1
+            continue
+        if session.exec(select(Appointment.id).where(Appointment.google_event_id == event_id)).first():
+            counts["skipped"] += 1
+            continue
+        row = session.exec(select(ExternalCalendarEvent).where(
+            ExternalCalendarEvent.calendar_id == calendar_id,
+            ExternalCalendarEvent.event_id == event_id)).first()
+        if event.get("status") == "cancelled":
+            if row and row.status != "cancelled":
+                row.status = "cancelled"
+                row.imported_at = datetime.now(timezone.utc)
+                session.add(row)
+                counts["cancelled"] += 1
+            continue
+        start_data, end_data = event.get("start") or {}, event.get("end") or {}
+        start = _event_datetime(start_data)
+        end = _event_datetime(end_data, start_data.get("timeZone") or "America/Santiago")
+        if not start or not end or end <= start:
+            counts["skipped"] += 1
+            continue
+        if row is None:
+            row = ExternalCalendarEvent(calendar_id=calendar_id, event_id=event_id,
+                                        title="", starts_at=start, ends_at=end)
+            counts["created"] += 1
+        else:
+            counts["updated"] += 1
+        row.title = (event.get("summary") or "Evento sin título")[:500]
+        row.description = event.get("description")
+        row.starts_at = start
+        row.ends_at = end
+        row.all_day = "date" in start_data
+        row.status = "confirmed"
+        row.google_updated_at = _event_datetime({"dateTime": event["updated"]}) if event.get("updated") else None
+        row.imported_at = datetime.now(timezone.utc)
+        session.add(row)
+    import_settings.last_synced_at = datetime.now(timezone.utc)
+    session.add(import_settings)
+    session.commit()
+    return {"calendar_id": calendar_id, "fetched": len(events), **counts}
+
+
+@router.post("/api/v1/integrations/google/calendar/import", dependencies=[Depends(require_admin)])
+async def import_google_calendar(session: Session = Depends(get_session)):
+    return await import_selected_calendar(session)

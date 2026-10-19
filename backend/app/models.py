@@ -68,6 +68,29 @@ class Appointment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class ExternalCalendarEvent(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("calendar_id", "event_id", name="uq_external_calendar_event"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    calendar_id: str = Field(index=True, max_length=250)
+    event_id: str = Field(index=True, max_length=250)
+    title: str = Field(max_length=500)
+    description: Optional[str] = None
+    starts_at: datetime = Field(index=True)
+    ends_at: datetime
+    all_day: bool = False
+    status: str = Field(default="confirmed", max_length=24)
+    google_updated_at: Optional[datetime] = None
+    imported_at: datetime = Field(default_factory=now_utc)
+
+
+class CalendarImportSettings(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    calendar_id: str = Field(max_length=250)
+    enabled: bool = True
+    last_synced_at: Optional[datetime] = None
+
+
 class Customer(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     full_name: str = Field(index=True, min_length=2, max_length=120)

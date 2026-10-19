@@ -43,10 +43,19 @@ class _AgendaScreenState extends State<AgendaScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
-    final raw = await widget.api.get('/api/v1/appointments');
-    return raw is List
-        ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
-        : [];
+    final now = DateTime.now();
+    final from = Uri.encodeQueryComponent(now.subtract(const Duration(days: 90)).toUtc().toIso8601String());
+    final to = Uri.encodeQueryComponent(now.add(const Duration(days: 730)).toUtc().toIso8601String());
+    final rows = <Map<String, dynamic>>[];
+    for (var offset = 0; offset < 2000; offset += 200) {
+      final raw = await widget.api.get('/api/v1/appointments?from_date=$from&to_date=$to&limit=200&offset=$offset');
+      final page = raw is List
+          ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          : <Map<String, dynamic>>[];
+      rows.addAll(page);
+      if (page.length < 200) break;
+    }
+    return rows;
   }
 
   Future<void> _refresh() async {
@@ -562,6 +571,23 @@ class _AppointmentRow extends StatelessWidget {
     final status = item['status']?.toString() ?? 'requested';
     final color = _statusColor(status);
     return ListTile(
+      onTap: item['source'] == 'google' ? () => showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(item['service_type']?.toString() ?? 'Evento de Google'),
+          content: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(item['all_day'] == true ? 'Todo el día' :
+                'Inicio: ${startsAt.day}/${startsAt.month}/${startsAt.year} ${timeOf(startsAt)}'),
+              if ('${item['notes'] ?? ''}'.trim().isNotEmpty) ...[
+                const SizedBox(height: 12), Text('${item['notes']}'),
+              ],
+              const SizedBox(height: 12),
+              const Text('Importado desde el calendario de Google seleccionado.'),
+            ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cerrar'))],
+        )) : null,
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
       leading: Container(
         width: 50,
@@ -570,13 +596,15 @@ class _AppointmentRow extends StatelessWidget {
           color: color.withValues(alpha: .10),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(timeOf(startsAt),
+        child: Text(item['all_day'] == true ? 'Día' : timeOf(startsAt),
             style: TextStyle(color: color, fontWeight: FontWeight.w800)),
       ),
       title: Text(item['service_type']?.toString() ?? 'Servicio',
           style: const TextStyle(fontWeight: FontWeight.w700)),
-      subtitle: Text('Cliente #${item['customer_id']}'),
-      trailing: canConfirm && status == 'requested'
+      subtitle: Text(item['source'] == 'google'
+          ? 'Google Calendar${item['all_day'] == true ? ' · Todo el día' : ''}'
+          : 'Cliente #${item['customer_id']}'),
+      trailing: canConfirm && status == 'requested' && item['source'] != 'google'
           ? FilledButton.tonal(
               onPressed: () => onConfirm(item['id'] as int, 'confirmed'),
               child: const Text('Confirmar'),

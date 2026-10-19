@@ -276,6 +276,68 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
     } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString()))); }
   }
 
+  Future<void> _selectGoogleCalendar() async {
+    setState(() => _busy = true);
+    try {
+      final result = Map<String, dynamic>.from(
+        await widget.api.get('/api/v1/integrations/google/calendars') as Map);
+      final calendars = (result['calendars'] as List? ?? [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+      if (!mounted) return;
+      if (calendars.isEmpty) throw Exception('La cuenta Google no muestra calendarios disponibles.');
+      String selected = '${result['selected_calendar_id'] ?? calendars.first['id']}';
+      if (!calendars.any((row) => row['id'] == selected)) selected = '${calendars.first['id']}';
+      final picked = await showDialog<String>(context: context,
+        builder: (dialogContext) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: const Text('Elegir calendario de la agenda'),
+          content: SizedBox(width: 520, child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Todos los eventos del calendario seleccionado se mostrarán en la agenda de Gudex. Elige un calendario destinado al taller.'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: selected, isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Calendario a sincronizar'),
+                items: calendars.map((row) => DropdownMenuItem<String>(
+                  value: '${row['id']}',
+                  child: Text('${row['name']}${row['primary'] == true ? ' · Principal' : ''}',
+                    overflow: TextOverflow.ellipsis),
+                )).toList(),
+                onChanged: (value) { if (value != null) update(() => selected = value); },
+              ),
+              const SizedBox(height: 8),
+              const Text('Se importan eventos desde 90 días atrás hasta 2 años adelante. Los eventos sin cliente permanecen identificados como eventos de Google.'),
+            ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, selected),
+              child: const Text('Seleccionar e importar')),
+          ],
+        )));
+      if (picked == null) return;
+      await widget.api.putJson('/api/v1/integrations/google/calendar-selection', {'calendar_id': picked});
+      final imported = Map<String, dynamic>.from(
+        await widget.api.post('/api/v1/integrations/google/calendar/import') as Map);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Calendario seleccionado. ${imported['created']} eventos nuevos importados.')));
+      await _refresh();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('No se pudo elegir el calendario: $error. Si faltan permisos, vuelve a conectar Google.')));
+    } finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _importGoogleCalendar() async {
+    setState(() => _busy = true);
+    try {
+      final result = Map<String, dynamic>.from(
+        await widget.api.post('/api/v1/integrations/google/calendar/import') as Map);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Agenda importada: ${result['created']} nuevos, ${result['updated']} actualizados.')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+    } finally { if (mounted) setState(() => _busy = false); }
+  }
+
   Future<void> _disconnectGoogle() async {
     final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: const Text('Desconectar Google'),
@@ -437,6 +499,10 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Google Workspace', style: Theme.of(context).textTheme.titleLarge),
           Text(google['connected'] == true ? 'Conectado: ${google['account_email'] ?? 'cuenta Google'}' : 'Sin conectar'),
+          if (google['connected'] == true)
+            Text(google['selected_calendar_id'] == null
+                ? 'Importación de agenda desactivada: selecciona un calendario.'
+                : 'Calendario sincronizado: ${google['selected_calendar_id']}'),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
             OutlinedButton.icon(onPressed: _busy ? null : _configureGoogle,
@@ -451,6 +517,10 @@ class _IntegrationSettingsScreenState extends State<IntegrationSettingsScreen> {
               OutlinedButton(onPressed: _busy ? null : () => _loadCandidates('gmail'), child: const Text('Buscar PDFs en Gmail')),
               OutlinedButton(onPressed: _busy || google['drive_folder_configured'] != true ? null : () => _loadCandidates('drive'), child: const Text('Buscar PDFs en Drive')),
               OutlinedButton(onPressed: _busy ? null : _syncCalendar, child: const Text('Sincronizar citas pendientes')),
+              FilledButton.icon(onPressed: _busy ? null : _selectGoogleCalendar,
+                icon: const Icon(Icons.calendar_month_outlined), label: const Text('Elegir calendario')),
+              OutlinedButton.icon(onPressed: _busy || google['selected_calendar_id'] == null ? null : _importGoogleCalendar,
+                icon: const Icon(Icons.download_outlined), label: const Text('Importar eventos ahora')),
               TextButton(onPressed: _busy ? null : _disconnectGoogle, child: const Text('Desconectar Google')),
             ]),
             for (final raw in _candidates) Card(color: Theme.of(context).colorScheme.surfaceContainerLow,

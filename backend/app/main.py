@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -21,7 +22,7 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, Customer, CustomerAccessToken, Inspection, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
+    Appointment, CalendarImportSettings, Customer, CustomerAccessToken, ExternalCalendarEvent, Inspection, IntegrationCredential, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
     WorkOrderReception, WorkOrderEvidence, InstalledPart,
 )
@@ -32,7 +33,7 @@ from app.schemas import (
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
-from app.routers.integrations import router as integrations_router, sync_calendar_appointment_by_id
+from app.routers.integrations import import_selected_calendar, router as integrations_router, sync_calendar_appointment_by_id
 from app.routers.assistant import router as assistant_router
 from app.routers.social import router as social_router
 from app.routers.catalog import router as catalog_router
@@ -157,7 +158,28 @@ def on_startup() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     on_startup()
-    yield
+    async def import_calendar_periodically():
+        while True:
+            await asyncio.sleep(15 if _is_production else 180)
+            try:
+                with Session(engine) as session:
+                    selected = session.get(CalendarImportSettings, 1)
+                    authorized = session.exec(select(IntegrationCredential).where(
+                        IntegrationCredential.provider == "google")).first()
+                    if selected and selected.enabled and authorized:
+                        await import_selected_calendar(session)
+            except Exception:
+                logger.exception("No se pudo importar el calendario seleccionado")
+            await asyncio.sleep(165)
+
+    calendar_task = asyncio.create_task(import_calendar_periodically()) if _is_production else None
+    try:
+        yield
+    finally:
+        if calendar_task:
+            calendar_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await calendar_task
 
 
 app.router.lifespan_context = lifespan
@@ -1595,17 +1617,31 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
     return appointment
 
 
-@app.get("/api/v1/appointments", response_model=list[Appointment])
+@app.get("/api/v1/appointments")
 def list_appointments(from_date: datetime | None = None, to_date: datetime | None = None,
                       limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0,
                       session: Session = Depends(get_session)):
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
-    statement = select(Appointment).order_by(Appointment.starts_at)
+    statement = select(Appointment)
+    external_statement = select(ExternalCalendarEvent).where(ExternalCalendarEvent.status != "cancelled")
+    selected = session.get(CalendarImportSettings, 1)
     if from_date:
         statement = statement.where(Appointment.starts_at >= from_date)
+        external_statement = external_statement.where(ExternalCalendarEvent.starts_at >= from_date)
     if to_date:
         statement = statement.where(Appointment.starts_at < to_date)
-    return session.exec(statement.offset(offset).limit(limit)).all()
+        external_statement = external_statement.where(ExternalCalendarEvent.starts_at < to_date)
+    local = [{**row.model_dump(), "source": "gudex"} for row in session.exec(statement).all()]
+    external = []
+    if selected and selected.enabled:
+        external_statement = external_statement.where(ExternalCalendarEvent.calendar_id == selected.calendar_id)
+        external = [{"id": f"google:{row.id}", "customer_id": None, "vehicle_id": None,
+                     "starts_at": row.starts_at, "ends_at": row.ends_at,
+                     "service_type": row.title, "notes": row.description,
+                     "status": "confirmed", "source": "google", "all_day": row.all_day,
+                     "google_event_id": row.event_id}
+                    for row in session.exec(external_statement).all()]
+    return sorted(local + external, key=lambda row: row["starts_at"])[offset:offset + limit]
 
 
 @app.patch("/api/v1/appointments/{appointment_id}/status", response_model=Appointment, dependencies=[Depends(require_admin)])
