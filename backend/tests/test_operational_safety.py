@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
@@ -14,8 +14,37 @@ from app.main import (
     update_customer,
 )
 from app.models import Appointment, Customer, CustomerAccessToken, User, UserRole
+from app.routers.integrations import sync_calendar_appointment_by_id
 from app.schemas import AppointmentUpdate, CustomerUpdate
 from app.security import hash_password
+
+
+@pytest.mark.anyio
+async def test_pending_appointment_syncs_and_keeps_google_event_id(monkeypatch):
+    create_db_and_tables()
+    with Session(engine) as session:
+        customer = Customer(full_name=f"Cliente Google {uuid4().hex[:8]}")
+        session.add(customer)
+        session.commit()
+        session.refresh(customer)
+        start = datetime.now(timezone.utc) + timedelta(days=9)
+        appointment = Appointment(customer_id=customer.id, starts_at=start,
+                                  ends_at=start + timedelta(hours=1), service_type="Cambio de aceite")
+        session.add(appointment)
+        session.commit()
+        session.refresh(appointment)
+        appointment_id = appointment.id
+
+    async def fake_sync(session, appointment, customer, vehicle):
+        assert customer.id is not None
+        return "google-event-test"
+
+    monkeypatch.setattr("app.routers.integrations.google.sync_calendar_appointment", fake_sync)
+    await sync_calendar_appointment_by_id(appointment_id)
+    with Session(engine) as session:
+        saved = session.get(Appointment, appointment_id)
+        assert saved.sync_status == "synced"
+        assert saved.google_event_id == "google-event-test"
 
 
 def test_rescheduling_an_appointment_does_not_conflict_with_itself():
@@ -39,11 +68,14 @@ def test_rescheduling_an_appointment_does_not_conflict_with_itself():
         session.commit()
         session.refresh(appointment)
 
+        tasks = BackgroundTasks()
         updated = update_appointment(
             appointment.id,
             AppointmentUpdate(starts_at=starts_at - timedelta(minutes=30)),
             session,
+            tasks,
         )
+        assert len(tasks.tasks) == 1
 
         assert updated.id == appointment.id
         assert updated.starts_at == starts_at - timedelta(minutes=30)

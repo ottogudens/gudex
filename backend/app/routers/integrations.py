@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 from pathlib import Path
 from uuid import uuid4
 import hashlib
@@ -13,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import settings
-from app.database import get_session
+from app.database import engine, get_session
 from app.models import AIConfiguration, Appointment, Customer, ExternalImport, GoogleIntegrationConfig, IntegrationCredential, MetaIntegrationConfig, OAuthState, ScannerReport, Vehicle, WhatsAppBusinessConfig, WorkOrder
 from app.schemas import AIModelUpdate, BaileysTestMessage, GoogleImportRequest, GoogleIntegrationConfigUpdate, MetaIntegrationConfigUpdate, MetaPageSelection, WhatsAppBusinessConfigUpdate
 from app.security import require_admin
@@ -21,6 +22,7 @@ from app.services import google, meta
 from app.services.crypto import decrypt_secret, encrypt_secret
 
 router = APIRouter()
+logger = logging.getLogger("gudex.calendar")
 
 
 def _whatsapp_business_status(config: WhatsAppBusinessConfig | None) -> dict:
@@ -566,3 +568,22 @@ async def sync_pending_calendar(request: Request, session: Session = Depends(get
         session.add(appointment)
     session.commit()
     return {"processed": len(results), "results": results, "requested_by": request.state.user_email}
+
+
+async def sync_calendar_appointment_by_id(appointment_id: int) -> None:
+    """Best-effort sync after an appointment write; pending/error remain retryable."""
+    with Session(engine) as session:
+        appointment = session.get(Appointment, appointment_id)
+        if not appointment or appointment.sync_status == "synced":
+            return
+        customer = session.get(Customer, appointment.customer_id)
+        vehicle = session.get(Vehicle, appointment.vehicle_id) if appointment.vehicle_id else None
+        try:
+            event_id = await google.sync_calendar_appointment(session, appointment, customer, vehicle)
+            appointment.google_event_id = None if appointment.status == "cancelled" else event_id
+            appointment.sync_status = "synced"
+        except Exception:
+            appointment.sync_status = "error"
+            logger.exception("No se pudo sincronizar la cita %s con Google Calendar", appointment_id)
+        session.add(appointment)
+        session.commit()

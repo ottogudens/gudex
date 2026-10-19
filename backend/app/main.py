@@ -32,7 +32,7 @@ from app.schemas import (
 from app.validators import validate_password
 from app.routers.inspections import portal_router as inspection_portal_router
 from app.routers.inspections import router as inspection_router
-from app.routers.integrations import router as integrations_router
+from app.routers.integrations import router as integrations_router, sync_calendar_appointment_by_id
 from app.routers.assistant import router as assistant_router
 from app.routers.social import router as social_router
 from app.routers.catalog import router as catalog_router
@@ -1575,7 +1575,8 @@ def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: date
 
 
 @app.post("/api/v1/appointments", response_model=Appointment, status_code=201, dependencies=[Depends(require_admin)])
-def create_appointment(data: AppointmentCreate, session: Session = Depends(get_session)):
+def create_appointment(data: AppointmentCreate, session: Session = Depends(get_session),
+                       background_tasks: BackgroundTasks = None):
     ensure_appointment_slot(session, data.starts_at, data.ends_at)
     customer_id = data.customer_id
     customer = session.get(Customer, customer_id) if customer_id else None
@@ -1589,6 +1590,8 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
     session.add(appointment)
     session.commit()
     session.refresh(appointment)
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return appointment
 
 
@@ -1606,7 +1609,8 @@ def list_appointments(from_date: datetime | None = None, to_date: datetime | Non
 
 
 @app.patch("/api/v1/appointments/{appointment_id}/status", response_model=Appointment, dependencies=[Depends(require_admin)])
-def update_appointment_status(appointment_id: int, status: str, session: Session = Depends(get_session)):
+def update_appointment_status(appointment_id: int, status: str, session: Session = Depends(get_session),
+                              background_tasks: BackgroundTasks = None):
     if status not in {"confirmed", "cancelled", "completed"}:
         raise HTTPException(422, "Estado de cita inválido")
     appointment = session.get(Appointment, appointment_id)
@@ -1619,11 +1623,14 @@ def update_appointment_status(appointment_id: int, status: str, session: Session
     session.add(appointment)
     session.commit()
     session.refresh(appointment)
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return appointment
 
 
 @app.patch("/api/v1/appointments/{appointment_id}", response_model=Appointment, dependencies=[Depends(require_admin)])
-def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Session = Depends(get_session)):
+def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Session = Depends(get_session),
+                       background_tasks: BackgroundTasks = None):
     appointment = session.get(Appointment, appointment_id)
     if not appointment:
         raise HTTPException(404, "Cita no encontrada")
@@ -1639,21 +1646,27 @@ def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Se
         setattr(appointment, key, value)
     appointment.sync_status = "pending"
     session.add(appointment); session.commit(); session.refresh(appointment)
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return appointment
 
 
 @app.delete("/api/v1/appointments/{appointment_id}", dependencies=[Depends(require_admin)])
-def cancel_appointment(appointment_id: int, session: Session = Depends(get_session)):
+def cancel_appointment(appointment_id: int, session: Session = Depends(get_session),
+                       background_tasks: BackgroundTasks = None):
     appointment = session.get(Appointment, appointment_id)
     if not appointment:
         raise HTTPException(404, "Cita no encontrada")
     appointment.status = "cancelled"; appointment.sync_status = "pending"
     session.add(appointment); session.commit()
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return {"deleted": False, "cancelled": True}
 
 
 @app.post("/api/v1/portal/appointments", response_model=Appointment, status_code=201)
-def request_appointment(data: AppointmentCreate, request: Request, session: Session = Depends(get_session)):
+def request_appointment(data: AppointmentCreate, request: Request, session: Session = Depends(get_session),
+                        background_tasks: BackgroundTasks = None):
     customer_id = request.state.customer_id
     if data.vehicle_id:
         vehicle = session.get(Vehicle, data.vehicle_id)
@@ -1664,6 +1677,8 @@ def request_appointment(data: AppointmentCreate, request: Request, session: Sess
     session.add(appointment)
     session.commit()
     session.refresh(appointment)
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return appointment
 
 
@@ -1683,7 +1698,8 @@ def customer_maintenance_plans(request: Request, session: Session = Depends(get_
 
 @app.patch("/api/v1/portal/appointments/{appointment_id}", response_model=Appointment)
 def update_customer_appointment(appointment_id: int, data: AppointmentUpdate, request: Request,
-                                session: Session = Depends(get_session)):
+                                session: Session = Depends(get_session),
+                                background_tasks: BackgroundTasks = None):
     appointment = session.get(Appointment, appointment_id)
     if not appointment or appointment.customer_id != request.state.customer_id:
         raise HTTPException(404, "Cita no encontrada")
@@ -1705,11 +1721,14 @@ def update_customer_appointment(appointment_id: int, data: AppointmentUpdate, re
     appointment.status = "requested"
     appointment.sync_status = "pending"
     session.add(appointment); session.commit(); session.refresh(appointment)
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return appointment
 
 
 @app.delete("/api/v1/portal/appointments/{appointment_id}")
-def cancel_customer_appointment(appointment_id: int, request: Request, session: Session = Depends(get_session)):
+def cancel_customer_appointment(appointment_id: int, request: Request, session: Session = Depends(get_session),
+                                background_tasks: BackgroundTasks = None):
     appointment = session.get(Appointment, appointment_id)
     if not appointment or appointment.customer_id != request.state.customer_id:
         raise HTTPException(404, "Cita no encontrada")
@@ -1718,6 +1737,8 @@ def cancel_customer_appointment(appointment_id: int, request: Request, session: 
     appointment.status = "cancelled"
     appointment.sync_status = "pending"
     session.add(appointment); session.commit()
+    if background_tasks is not None:
+        background_tasks.add_task(sync_calendar_appointment_by_id, appointment.id)
     return {"cancelled": True}
 
 
