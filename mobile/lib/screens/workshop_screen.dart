@@ -1350,34 +1350,55 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         : '${customer.first['full_name']}';
     final status = '${item['status'] ?? 'received'}';
     final color = _statusColor(context, status);
-    return Card(
-        child: ListTile(
-      leading: CircleAvatar(
-          backgroundColor: color.withValues(alpha: .14),
-          foregroundColor: color,
-          child: const Icon(Icons.build_outlined)),
-      title: Text('${item['code'] ?? 'Orden'} · $vehicleLabel'),
-      subtitle: Text(
-          '$customerLabel${item['technician_name'] == null ? '' : ' · ${item['technician_name']}'}${item['reported_symptoms'] == null ? '' : '\n${item['reported_symptoms']}'}'),
-      isThreeLine: true,
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        _StatusPill(label: spanishStatus(status), color: color),
-        if (widget.role == 'admin')
-          PopupMenuButton<String>(
-            tooltip: 'Acciones de la orden',
-            onSelected: (action) async {
-              if (action == 'edit') await _editWorkOrder(item);
-              if (action == 'delete') await _deleteWorkOrder(item);
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Editar orden')),
-              PopupMenuItem(value: 'delete', child: Text('Eliminar orden')),
-            ],
-          )
-        else
-          const Icon(Icons.chevron_right),
-      ]),
+    return Card(child: InkWell(
+      borderRadius: BorderRadius.circular(12),
       onTap: () => _openOrder(item),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: color.withValues(alpha: .14),
+              foregroundColor: color,
+              child: const Icon(Icons.build_outlined, size: 20)),
+            const SizedBox(width: 10),
+            Expanded(child: Text('${item['code'] ?? 'Orden'}',
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700))),
+            if (widget.role == 'admin')
+              PopupMenuButton<String>(
+                tooltip: 'Acciones de la orden',
+                onSelected: (action) async {
+                  if (action == 'edit') await _editWorkOrder(item);
+                  if (action == 'delete') await _deleteWorkOrder(item);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'edit', child: Text('Editar orden')),
+                  PopupMenuItem(value: 'delete', child: Text('Eliminar orden')),
+                ],
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Text(vehicleLabel, maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 4),
+          Text(customerLabel, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall),
+          if ('${item['technician_name'] ?? ''}'.trim().isNotEmpty)
+            Text('Mecánico: ${item['technician_name']}',
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall),
+          if ('${item['reported_symptoms'] ?? ''}'.trim().isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 4),
+              child: Text('${item['reported_symptoms']}', maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall)),
+          const SizedBox(height: 10),
+          Align(alignment: Alignment.centerLeft,
+            child: _StatusPill(label: spanishStatus(status), color: color)),
+        ]),
+      ),
     ));
   }
 
