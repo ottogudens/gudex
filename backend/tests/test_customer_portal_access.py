@@ -56,6 +56,29 @@ async def test_customer_portal_registration_creates_inactive_user_and_private_to
 
 
 @pytest.mark.anyio
+async def test_customer_access_email_includes_portal_and_public_oil_card(monkeypatch):
+    create_db_and_tables()
+    sent = {}
+
+    async def capture_email(session, recipient, subject, body):
+        sent.update(recipient=recipient, subject=subject, body=body)
+
+    monkeypatch.setattr("app.main.google.send_customer_access_email", capture_email)
+    with Session(engine) as session:
+        result = await create_customer_with_portal_access(CustomerPortalAccessCreate(
+            full_name="Cliente Tarjeta", email="cliente.tarjeta@example.com",
+            create_portal_access=True,
+        ), _admin_request(), session)
+
+    assert result["invitation_delivery"] == "sent"
+    assert sent["recipient"] == "cliente.tarjeta@example.com"
+    assert "https://admin.gudex.cl/" in sent["body"]
+    assert "https://bknd.gudex.cl/tarjeta-aceite" in sent["body"]
+    assert "ingresa la patente" in sent["body"]
+    assert "habilite su consulta pública" in sent["body"]
+
+
+@pytest.mark.anyio
 async def test_password_reset_response_does_not_reveal_unknown_email():
     create_db_and_tables()
     with Session(engine) as session:

@@ -320,6 +320,18 @@ async def _send_customer_access_email(session: Session, request: Request, user: 
     else:
         subject = "Restablece tu contraseña de Gudex"
         body = f"<p>Hola {greeting},</p><p>Solicitaste restablecer tu contraseña. Usa este enlace para crear una nueva:</p><p><a href=\"{escape(link, quote=True)}\">Restablecer contraseña</a></p><p>El enlace vence en {settings.customer_access_token_hours} horas y solo puede usarse una vez.</p>"
+    portal_url = link.split("?", 1)[0]
+    body += (
+        "<hr><p><strong>Acceso al portal del cliente</strong></p>"
+        f"<p>Después de crear tu contraseña, ingresa con tu correo en "
+        f"<a href=\"{escape(portal_url, quote=True)}\">{escape(portal_url)}</a>. "
+        "Allí podrás revisar la ficha de tu vehículo y sus servicios.</p>"
+        "<p><strong>Tu tarjeta digital de cambio de aceite</strong></p>"
+        "<p>Desde la página web de Gudex puedes consultar el último cambio de aceite y la próxima "
+        "mantención: abre <a href=\"https://bknd.gudex.cl/tarjeta-aceite\">la tarjeta de aceite</a> "
+        "e ingresa la patente de tu vehículo. Si la tarjeta aún no aparece, solicita al taller "
+        "que habilite su consulta pública. También puedes verla desde la ficha del vehículo en el portal.</p>"
+    )
     try:
         await google.send_customer_access_email(session, user.email, subject, body)
     except HTTPException:
