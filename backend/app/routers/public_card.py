@@ -25,8 +25,7 @@ def oil_card(session: Session, plate: str) -> dict | None:
         return None
     found = session.exec(select(MaintenanceExecution, MaintenancePlan).join(
         MaintenancePlan, MaintenanceExecution.plan_id == MaintenancePlan.id).where(
-        MaintenancePlan.vehicle_id == vehicle.id, MaintenancePlan.category == "oil",
-        MaintenancePlan.active == True).order_by(  # noqa: E712
+        MaintenancePlan.vehicle_id == vehicle.id, MaintenancePlan.category == "oil").order_by(
         MaintenanceExecution.performed_at.desc(), MaintenanceExecution.id.desc())).first()
     if not found:
         return None
@@ -39,7 +38,8 @@ def oil_card(session: Session, plate: str) -> dict | None:
         "plate": vehicle.plate, "vehicle": f"{vehicle.make} {vehicle.model}",
         "service": plan.name, "performed_at": execution.performed_at,
         "mileage_km": execution.mileage_km, "next_due_km": next_due_km,
-        "next_due_at": next_due_at,
+        "next_due_at": next_due_at, "oil_used": execution.oil_used,
+        "filters_used": execution.filters_used,
     }
 
 
@@ -57,6 +57,8 @@ def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool 
         "plate": "DEMO-00", "vehicle": "Vehículo de ejemplo", "service": "Cambio de aceite y filtro",
         "performed_at": datetime(2026, 10, 18, tzinfo=timezone.utc), "mileage_km": 50000,
         "next_due_km": 60000, "next_due_at": datetime(2027, 4, 18, tzinfo=timezone.utc),
+        "oil_used": "Aceite de ejemplo · 5W-30 · 4 L",
+        "filters_used": "Filtro de aceite de ejemplo · REF-DEMO-123",
     } if demo else oil_card(session, patente) if patente else None)
     searched = bool(patente)
     content = ""
@@ -69,6 +71,11 @@ def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool 
           <div><small>KILOMETRAJE REGISTRADO</small><strong>{card['mileage_km']:,} km</strong></div>
           <div><small>PRÓXIMO CAMBIO · KM</small><strong>{f"{card['next_due_km']:,} km" if card['next_due_km'] is not None else 'No definido'}</strong></div>
           <div><small>PRÓXIMO CAMBIO · FECHA</small><strong>{_date(card['next_due_at'])}</strong></div></div>
+          <section class="used" aria-label="Productos utilizados en el último servicio">
+            <h3>Productos del último servicio</h3>
+            <div class="used-grid"><div><small>ACEITE UTILIZADO</small><p>{escape(card['oil_used'] or 'No registrado en este servicio')}</p></div>
+            <div><small>FILTROS INSTALADOS</small><p>{escape(card['filters_used'] or 'No registrados en este servicio')}</p></div></div>
+          </section>
           <p class="foot">La próxima mantención vence por fecha o kilometraje, lo que ocurra primero. Confirma con el taller si cambian las condiciones de uso.</p>
         </article>"""
     elif searched:
@@ -87,8 +94,10 @@ def public_oil_card(patente: str = Query(default="", max_length=16), demo: bool 
       h2{{margin:0;font-size:23px}}.service{{color:#ffdc5b;margin:8px 0 25px}}.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
       .grid div{{background:#ffffff0c;border:1px solid #ffffff18;border-radius:15px;padding:18px;transition:transform .2s,border-color .2s}}.grid div:hover{{transform:translateY(-3px);border-color:#ffdc5b}}
       small{{display:block;color:#b6bac4;font-size:11px;letter-spacing:.09em;margin-bottom:8px}}strong{{font-size:clamp(18px,4vw,25px)}}.foot{{color:#b6bac4;font-size:13px;line-height:1.5;margin:24px 0 0}}
+      .used{{margin-top:26px;border-top:1px solid #ffffff26;padding-top:20px}}.used h3{{font-size:18px;margin:0 0 14px}}.used-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
+      .used-grid div{{border:1px solid #ffffff18;border-radius:15px;padding:16px;background:#11131899}}.used-grid p{{margin:0;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}}
       .empty{{padding:20px;border:1px solid #555;border-radius:15px;color:#d7d9df}}.demo{{color:#111318;background:#ffdc5b;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:900;letter-spacing:.08em;display:inline-block}}@keyframes arrive{{from{{opacity:0;transform:translateY(12px)}}to{{opacity:1;transform:translateY(0)}}}}
-      @media(max-width:500px){{form{{flex-direction:column}}.grid{{grid-template-columns:1fr}}.card-top{{flex-direction:column}}}}
+      @media(max-width:500px){{form{{flex-direction:column}}.grid,.used-grid{{grid-template-columns:1fr}}.card-top{{flex-direction:column}}}}
       </style></head><body><main><a href="https://gudex.cl">← Volver a Gudex</a><p class="brand">GUDEX / PUCÓN</p>
       <h1>Tu cambio de aceite, ahora digital.</h1><p class="intro">Consulta la próxima mantención por patente. Solo se muestran tarjetas autorizadas por el taller; la ficha completa está en el portal del cliente.</p>
       <form method="get"><label for="patente" class="sr">Patente del vehículo</label><input id="patente" name="patente" required maxlength="16" autocomplete="off" placeholder="Ingresa tu patente" value="{escape(patente, quote=True)}">

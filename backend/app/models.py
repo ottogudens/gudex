@@ -139,6 +139,8 @@ class MaintenanceExecution(SQLModel, table=True):
     next_due_km: Optional[int] = None
     next_due_at: Optional[datetime] = None
     materials: str = Field(default="", max_length=4000)
+    oil_used: str = Field(default="", max_length=1000)
+    filters_used: str = Field(default="", max_length=2000)
     notes: str = Field(default="", max_length=4000)
     recorded_by: str = Field(max_length=254)
     performed_at: datetime = Field(default_factory=now_utc)

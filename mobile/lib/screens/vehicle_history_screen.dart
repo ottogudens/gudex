@@ -477,6 +477,8 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
     final days = TextEditingController();
     final nextKm = TextEditingController();
     final materials = TextEditingController();
+    final oilUsed = TextEditingController();
+    final filtersUsed = TextEditingController();
     final notes = TextEditingController();
     final requestKey = List.generate(
             24,
@@ -544,6 +546,16 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                               decoration: const InputDecoration(
                                   labelText: 'Intervalo en días')),
                         if (completing) ...[
+                          if (plan['category'] == 'oil') ...[
+                            TextField(controller: oilUsed, enabled: !saving, maxLines: 2,
+                              decoration: const InputDecoration(
+                                labelText: 'Aceite realmente utilizado',
+                                helperText: 'Marca, producto, viscosidad, norma y cantidad (L)')),
+                            TextField(controller: filtersUsed, enabled: !saving, maxLines: 3,
+                              decoration: const InputDecoration(
+                                labelText: 'Filtros realmente instalados',
+                                helperText: 'Tipo, marca y número de parte de cada filtro')),
+                          ],
                           TextField(controller: nextKm, enabled: !saving,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(labelText: 'Próxima mantención a los km (opcional)',
@@ -643,6 +655,8 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                               'work_order_id': orderId,
                                               'materials':
                                                   materials.text.trim(),
+                                              'oil_used': oilUsed.text.trim(),
+                                              'filters_used': filtersUsed.text.trim(),
                                               'notes': notes.text.trim(),
                                               'next_due_km': nextMileage,
                                               'next_due_at': nextDate?.toIso8601String(),
@@ -668,7 +682,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                         child: Text(saving ? 'Guardando…' : 'Guardar')),
                   ],
                 ))));
-    for (final controller in [name, km, days, nextKm, materials, notes]) {
+    for (final controller in [name, km, days, nextKm, materials, oilUsed, filtersUsed, notes]) {
       controller.dispose();
     }
     if (saved && mounted) {
@@ -688,6 +702,8 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
         .where((e) => oilPlans.any((p) => p['id'] == e['plan_id'])).toList();
     if (executions.isEmpty) return const SizedBox.shrink();
     final latest = executions.first;
+    final oilDescription = '${latest['oil_used'] ?? ''}'.trim();
+    final filterDescription = '${latest['filters_used'] ?? ''}'.trim();
     final plate = vehicle['plate']?.toString() ?? '';
     final color = Theme.of(context).colorScheme;
     Widget metric(String label, String value, IconData icon) => Container(
@@ -722,6 +738,14 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
           SizedBox(width: constraints.maxWidth > 600 ? (constraints.maxWidth - 30) / 4 : (constraints.maxWidth - 10) / 2,
             child: metric('Próxima fecha', latest['next_due_at'] == null ? 'No definida' : _date(latest['next_due_at']).split(' ').first, Icons.event_outlined)),
         ])),
+        const SizedBox(height: 18),
+        Text('PRODUCTOS DEL ÚLTIMO SERVICIO', style: TextStyle(color: color.onPrimary.withValues(alpha: .8), fontWeight: FontWeight.w700, letterSpacing: 1.1)),
+        const SizedBox(height: 8),
+        Text('Aceite: ${oilDescription.isEmpty ? 'No registrado en este servicio' : oilDescription}',
+          style: TextStyle(color: color.onPrimary)),
+        const SizedBox(height: 6),
+        Text('Filtros: ${filterDescription.isEmpty ? 'No registrados en este servicio' : filterDescription}',
+          style: TextStyle(color: color.onPrimary)),
         const SizedBox(height: 12),
         Text('Vence por fecha o kilometraje, lo que ocurra primero.', style: TextStyle(color: color.onPrimary.withValues(alpha: .8))),
         if (vehicle['public_service_card_enabled'] == true) TextButton.icon(
@@ -827,13 +851,16 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
             title: Text('Sin ejecuciones registradas'),
             subtitle: Text(
                 'Los planes anteriores conservan su última fecha; no se inventa historial previo.')),
-      ..._maps(data['maintenance_executions']).map((e) => Card(
-              child: ListTile(
+      ..._maps(data['maintenance_executions']).map((e) {
+        final oil = '${e['oil_used'] ?? ''}'.trim();
+        final filters = '${e['filters_used'] ?? ''}'.trim();
+        return Card(child: ListTile(
             leading: const Icon(Icons.fact_check_outlined),
             title: Text('${e['plan_name']} · ${e['mileage_km']} km'),
             subtitle: Text(
-                '${_date(e['performed_at'])}\n${e['materials'] ?? ''}\n${e['notes'] ?? ''}'),
-          ))),
+                '${_date(e['performed_at'])}\n${oil.isEmpty ? '' : 'Aceite: $oil\n'}${filters.isEmpty ? '' : 'Filtros: $filters\n'}${e['materials'] ?? ''}\n${e['notes'] ?? ''}'),
+          ));
+      }),
       _heading('Mantenciones y trabajos registrados'),
       if (orders.isEmpty)
         const ListTile(title: Text('Sin trabajos registrados')),

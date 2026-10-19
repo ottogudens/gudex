@@ -16,6 +16,8 @@ class Completion(BaseModel):
     mileage_km: int = Field(ge=0)
     work_order_id: int | None = None
     materials: str = Field(default="", max_length=4000)
+    oil_used: str = Field(default="", max_length=1000)
+    filters_used: str = Field(default="", max_length=2000)
     notes: str = Field(default="", max_length=4000)
     next_due_km: int | None = Field(default=None, ge=0)
     next_due_at: datetime | None = None
@@ -30,7 +32,7 @@ def record_completion(session: Session, plan_id: int, data: Completion, actor: s
         MaintenanceExecution.plan_id == plan_id, MaintenanceExecution.request_key == data.request_key)).first()
     if existing:
         if any(getattr(existing, key) != getattr(data, key) for key in
-               ("mileage_km", "work_order_id", "materials", "notes")):
+               ("mileage_km", "work_order_id", "materials", "oil_used", "filters_used", "notes")):
             raise HTTPException(409, "La solicitud ya fue utilizada con otros datos")
         return existing
     if not plan.active:

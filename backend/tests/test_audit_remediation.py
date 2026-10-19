@@ -121,7 +121,9 @@ def test_maintenance_history_is_idempotent_and_preserves_snapshot(records):
     order.status = WorkStatus.in_progress
     session.add_all([plan, order]); session.commit()
     data = Completion(request_key=uuid4().hex, mileage_km=30000,
-                      work_order_id=order.id, materials="Filtro y aceite documentados")
+                      work_order_id=order.id, materials="Materiales complementarios",
+                      oil_used="Aceite sintético 5W-30 · 4 L",
+                      filters_used="Filtro de aceite · REF-123")
     result = record_completion(session, plan.id, data, request.state.user_email)
     repeated = record_completion(session, plan.id, data, request.state.user_email)
     assert result.id == repeated.id
@@ -129,10 +131,18 @@ def test_maintenance_history_is_idempotent_and_preserves_snapshot(records):
     plan.name = "Nombre editado"; plan.interval_km = 5000; session.add(plan); session.commit()
     assert session.get(MaintenanceExecution, result.id).plan_name == "Aceite motor"
     assert session.get(MaintenanceExecution, result.id).interval_km == 10000
+    assert session.get(MaintenanceExecution, result.id).oil_used == data.oil_used
+    assert session.get(MaintenanceExecution, result.id).filters_used == data.filters_used
     portal = customer_vehicle_history(vehicle.id, request, session)
     assert len(portal["maintenance_executions"]) == 1
     assert "recorded_by" not in portal["maintenance_executions"][0]
     assert "request_key" not in portal["maintenance_executions"][0]
+    assert portal["maintenance_executions"][0]["oil_used"] == data.oil_used
+    assert portal["maintenance_executions"][0]["filters_used"] == data.filters_used
+    with pytest.raises(HTTPException) as changed_consumables:
+        record_completion(session, plan.id, data.model_copy(update={"oil_used": "Otro aceite"}), request.state.user_email)
+    assert changed_consumables.value.status_code == 409
+    session.rollback()
     with pytest.raises(HTTPException) as invalid:
         record_completion(session, plan.id, data.model_copy(update={"mileage_km": 40000}), request.state.user_email)
     assert invalid.value.status_code == 409

@@ -23,6 +23,8 @@ def test_public_oil_card_is_opt_in_and_contains_no_customer_identity():
         session.add(MaintenanceExecution(plan_id=plan.id, vehicle_id=vehicle.id,
             request_key=uuid4().hex, plan_name=plan.name, mileage_km=50000,
             next_due_km=60000, next_due_at=datetime.now(timezone.utc) + timedelta(days=180),
+            oil_used="Aceite 5W-30 & marca de prueba · 4 L",
+            filters_used="Filtro de aceite REF-123 <confirmado>",
             recorded_by="taller@example.com"))
         session.commit()
         plate = vehicle.plate
@@ -34,6 +36,9 @@ def test_public_oil_card_is_opt_in_and_contains_no_customer_identity():
     response = TestClient(app).get(f"/tarjeta-aceite?patente={plate}")
     assert response.status_code == 200
     assert "60,000 km" in response.text
+    assert "Aceite 5W-30 &amp; marca de prueba · 4 L" in response.text
+    assert "Filtro de aceite REF-123 &lt;confirmado&gt;" in response.text
+    assert "<confirmado>" not in response.text
     assert "Nombre privado" not in response.text
     assert "private-" not in response.text
 
@@ -45,6 +50,8 @@ def test_public_oil_card_demo_uses_only_fictitious_data():
     assert "DEMO-00" in response.text
     assert "Vehículo de ejemplo" in response.text
     assert "60,000 km" in response.text
+    assert "Aceite de ejemplo" in response.text
+    assert "Filtro de aceite de ejemplo" in response.text
 
 
 def test_customer_can_request_quote_only_for_own_vehicle():
