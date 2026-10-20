@@ -22,9 +22,9 @@ from app.rate_limit import client_ip, limiter, rate_limit, too_many
 from app.database import create_db_and_tables, engine, get_session, upgrade_schema
 from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
-    Appointment, CalendarImportSettings, Customer, CustomerAccessToken, CustomerEngagementVisit, ExternalCalendarEvent, Inspection, IntegrationCredential, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
+    Appointment, CalendarImportSettings, Customer, CustomerAccessToken, CustomerEngagementVisit, DiagnosticFinding, ExternalCalendarEvent, Inspection, IntegrationCredential, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
-    WorkOrderReception, WorkOrderEvidence, InstalledPart,
+    WorkOrderReception, WorkOrderEvidence, WorkOrderQualityCheck, InstalledPart, WorkshopBay,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead, QuoteRequestCreate,
@@ -47,6 +47,7 @@ from app.services.work_orders import editable_order, transition_order
 from app.routers.maintenance import router as maintenance_router, Completion, record_completion
 from app.routers.work_order_services import router as work_order_services_router, vehicle_parts, _can_edit, _service, _assignee, KINDS
 from app.routers.public_card import card_payload, router as public_card_router
+from app.routers.workshop_operations import router as workshop_operations_router
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -94,6 +95,7 @@ app.include_router(vehicle_technical_router)
 app.include_router(maintenance_router)
 app.include_router(work_order_services_router)
 app.include_router(public_card_router)
+app.include_router(workshop_operations_router)
 
 
 def on_startup() -> None:
@@ -728,6 +730,8 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
     services = session.exec(select(WorkOrderService).where(
         WorkOrderService.work_order_id.in_([order.id for order in orders]))
         .order_by(WorkOrderService.created_at.desc())).all() if orders else []
+    diagnostics = session.exec(select(DiagnosticFinding).where(
+        DiagnosticFinding.vehicle_id == vehicle.id).order_by(DiagnosticFinding.created_at.desc())).all()
     return {
         "vehicle": vehicle,
         "technical": technical_payload(session, vehicle.id),
@@ -739,6 +743,7 @@ def vehicle_history_payload(session: Session, vehicle: Vehicle) -> dict:
         "customer": session.get(Customer, vehicle.customer_id),
         "work_orders": orders,
         "work_order_services": services,
+        "diagnostic_findings": diagnostics,
         "quotes": quotes,
         "appointments": appointments,
         "scanner_reports": [
@@ -886,6 +891,10 @@ def customer_vehicle_history(vehicle_id: int, request: Request, session: Session
     data["work_order_services"] = [service.model_dump(exclude={"assigned_user_id", "description"})
                                     for service in data["work_order_services"]
                                     if service.status == "completed"]
+    data["diagnostic_findings"] = [row.model_dump(exclude={"freeze_frame", "measurements", "test_performed",
+                                                             "recorded_by_email", "updated_at"})
+                                 for row in data["diagnostic_findings"]
+                                 if row.technician_confirmed_at]
     data["technical"] = technical_payload(session, vehicle_id, portal=True)
     data["maintenance_executions"] = [row.model_dump(exclude={"recorded_by", "request_key"})
                                       for row in data["maintenance_executions"]]
@@ -1050,6 +1059,11 @@ def update_work_order(order_id: int, data: WorkOrderUpdate, request: Request, se
                 WorkOrderService.status.not_in(["completed", "cancelled"]))).first()
             if unfinished:
                 raise HTTPException(409, "Completa o cancela los servicios pendientes antes de cerrar la orden")
+        if changes["status"] == WorkStatus.delivered:
+            quality = session.exec(select(WorkOrderQualityCheck).where(
+                WorkOrderQualityCheck.work_order_id == order_id)).first()
+            if not quality or quality.result != "passed":
+                raise HTTPException(409, "Aprueba el control de calidad antes de marcar la orden como entregada")
         transition_order(order, changes["status"], request.state.user_role)
     for key, value in changes.items():
         setattr(order, key, value)
@@ -1604,9 +1618,23 @@ def loyalty_balance(customer_id: int, session: Session = Depends(get_session)):
     return {"customer_id": customer_id, "points": sum(row.points for row in rows), "transactions": rows}
 
 
+def validate_appointment_resources(session: Session, bay_id: int | None,
+                                   technician_user_id: int | None) -> None:
+    if bay_id is not None:
+        bay = session.get(WorkshopBay, bay_id)
+        if not bay or not bay.active:
+            raise HTTPException(422, "Selecciona una bahía o puesto activo")
+    if technician_user_id is not None:
+        technician = session.get(User, technician_user_id)
+        if not technician or technician.role != UserRole.mechanic or not technician.active:
+            raise HTTPException(422, "Selecciona un técnico activo")
+
+
 def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: datetime,
-                            exclude_appointment_id: int | None = None) -> None:
-    # Serialize reservations for the current single-capacity workshop on Postgres.
+                            exclude_appointment_id: int | None = None,
+                            bay_id: int | None = None,
+                            technician_user_id: int | None = None) -> None:
+    # Serialize reservations while capacity is resolved by bay and technician.
     # The lock lives only until commit/rollback and does not require an extension.
     if session.get_bind().dialect.name == "postgresql":
         session.execute(text("SELECT pg_advisory_xact_lock(714205124)"))
@@ -1619,15 +1647,26 @@ def ensure_appointment_slot(session: Session, starts_at: datetime, ends_at: date
     )
     if exclude_appointment_id is not None:
         statement = statement.where(Appointment.id != exclude_appointment_id)
-    conflict = session.exec(statement).first()
-    if conflict:
-        raise HTTPException(409, "Ese horario ya tiene una cita solicitada o confirmada")
+    conflicts = session.exec(statement).all()
+    for conflict in conflicts:
+        # A request without a resource reserves the whole workshop until the
+        # administration assigns it. Assigned appointments may run in parallel
+        # only when neither bay nor technician is shared.
+        shared_global = (bay_id is None and technician_user_id is None) or (
+            conflict.bay_id is None and conflict.technician_user_id is None)
+        shared_bay = bay_id is not None and bay_id == conflict.bay_id
+        shared_technician = (technician_user_id is not None and
+                             technician_user_id == conflict.technician_user_id)
+        if shared_global or shared_bay or shared_technician:
+            raise HTTPException(409, "Ese horario ocupa la capacidad seleccionada del taller")
 
 
 @app.post("/api/v1/appointments", response_model=Appointment, status_code=201, dependencies=[Depends(require_admin)])
 def create_appointment(data: AppointmentCreate, session: Session = Depends(get_session),
                        background_tasks: BackgroundTasks = None):
-    ensure_appointment_slot(session, data.starts_at, data.ends_at)
+    validate_appointment_resources(session, data.bay_id, data.technician_user_id)
+    ensure_appointment_slot(session, data.starts_at, data.ends_at,
+                            bay_id=data.bay_id, technician_user_id=data.technician_user_id)
     customer_id = data.customer_id
     customer = session.get(Customer, customer_id) if customer_id else None
     if not customer:
@@ -1659,7 +1698,11 @@ def list_appointments(from_date: datetime | None = None, to_date: datetime | Non
     if to_date:
         statement = statement.where(Appointment.starts_at < to_date)
         external_statement = external_statement.where(ExternalCalendarEvent.starts_at < to_date)
-    local = [{**row.model_dump(), "source": "gudex"} for row in session.exec(statement).all()]
+    local = [{**row.model_dump(), "source": "gudex",
+              "bay_name": (session.get(WorkshopBay, row.bay_id).name if row.bay_id else None),
+              "technician_name": (session.get(User, row.technician_user_id).full_name
+                                  if row.technician_user_id else None)}
+             for row in session.exec(statement).all()]
     external = []
     if selected and selected.enabled:
         external_statement = external_statement.where(ExternalCalendarEvent.calendar_id == selected.calendar_id)
@@ -1681,7 +1724,9 @@ def update_appointment_status(appointment_id: int, status: str, session: Session
     if not appointment:
         raise HTTPException(404, "Cita no encontrada")
     if status == "confirmed":
-        ensure_appointment_slot(session, appointment.starts_at, appointment.ends_at, appointment_id)
+        validate_appointment_resources(session, appointment.bay_id, appointment.technician_user_id)
+        ensure_appointment_slot(session, appointment.starts_at, appointment.ends_at, appointment_id,
+                                appointment.bay_id, appointment.technician_user_id)
     appointment.status = status
     appointment.sync_status = "pending"
     session.add(appointment)
@@ -1701,9 +1746,15 @@ def update_appointment(appointment_id: int, data: AppointmentUpdate, session: Se
     changes = data.model_dump(exclude_unset=True)
     if changes.get("vehicle_id") and (not session.get(Vehicle, changes["vehicle_id"]) or session.get(Vehicle, changes["vehicle_id"]).customer_id != appointment.customer_id):
         raise HTTPException(422, "El vehículo no pertenece al cliente de la cita")
+    bay_id = changes.get("bay_id", appointment.bay_id)
+    technician_user_id = changes.get("technician_user_id", appointment.technician_user_id)
+    validate_appointment_resources(session, bay_id, technician_user_id)
     starts_at, ends_at = changes.get("starts_at", appointment.starts_at), changes.get("ends_at", appointment.ends_at)
-    if starts_at != appointment.starts_at or ends_at != appointment.ends_at or changes.get("status") in {"requested", "confirmed"}:
-        ensure_appointment_slot(session, starts_at, ends_at, exclude_appointment_id=appointment_id)
+    if (starts_at != appointment.starts_at or ends_at != appointment.ends_at or
+            "bay_id" in changes or "technician_user_id" in changes or
+            changes.get("status") in {"requested", "confirmed"}):
+        ensure_appointment_slot(session, starts_at, ends_at, exclude_appointment_id=appointment_id,
+                                bay_id=bay_id, technician_user_id=technician_user_id)
     if changes.get("status") and changes["status"] not in {"requested", "confirmed", "cancelled", "completed"}:
         raise HTTPException(422, "Estado de cita inválido")
     for key, value in changes.items():
@@ -1732,10 +1783,13 @@ def cancel_appointment(appointment_id: int, session: Session = Depends(get_sessi
 def request_appointment(data: AppointmentCreate, request: Request, session: Session = Depends(get_session),
                         background_tasks: BackgroundTasks = None):
     customer_id = request.state.customer_id
+    if data.bay_id is not None or data.technician_user_id is not None:
+        raise HTTPException(403, "La asignación de bahía y técnico la confirma el taller")
     if data.vehicle_id:
         vehicle = session.get(Vehicle, data.vehicle_id)
         if not vehicle or vehicle.customer_id != customer_id:
             raise HTTPException(404, "Vehículo no encontrado")
+    # Customers ask for a time; resource assignment remains administrative.
     ensure_appointment_slot(session, data.starts_at, data.ends_at)
     appointment = Appointment.model_validate(data, update={"customer_id": customer_id, "status": "requested"})
     session.add(appointment)
@@ -1770,6 +1824,8 @@ def update_customer_appointment(appointment_id: int, data: AppointmentUpdate, re
     if appointment.status in {"cancelled", "completed"}:
         raise HTTPException(409, "Esta cita ya no se puede modificar")
     changes = data.model_dump(exclude_unset=True)
+    if "bay_id" in changes or "technician_user_id" in changes:
+        raise HTTPException(403, "La asignación de bahía y técnico la confirma el taller")
     allowed = {"starts_at", "ends_at", "service_type", "notes", "vehicle_id"}
     if set(changes) - allowed:
         raise HTTPException(403, "Solo puedes modificar los datos de tu solicitud")

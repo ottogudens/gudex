@@ -71,6 +71,8 @@ class Appointment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     customer_id: int = Field(foreign_key="customer.id", index=True)
     vehicle_id: Optional[int] = Field(default=None, foreign_key="vehicle.id", index=True)
+    bay_id: Optional[int] = Field(default=None, foreign_key="workshopbay.id", index=True)
+    technician_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     starts_at: datetime = Field(index=True)
     ends_at: datetime
     service_type: str = Field(max_length=120)
@@ -78,6 +80,16 @@ class Appointment(SQLModel, table=True):
     status: str = Field(default="requested", max_length=24)
     google_event_id: Optional[str] = Field(default=None, index=True, max_length=200)
     sync_status: str = Field(default="pending", max_length=24)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class WorkshopBay(SQLModel, table=True):
+    """Physical workshop resource used to plan simultaneous appointments."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True, max_length=80)
+    notes: str = Field(default="", max_length=500)
+    active: bool = True
     created_at: datetime = Field(default_factory=now_utc)
 
 
@@ -353,6 +365,46 @@ class WorkOrderEvidence(SQLModel, table=True):
     caption: Optional[str] = Field(default=None, max_length=250)
     uploaded_by_email: str = Field(max_length=254)
     created_at: datetime = Field(default_factory=now_utc)
+
+
+class WorkOrderQualityCheck(SQLModel, table=True):
+    """Traceable technical handoff and administrative quality gate for an order."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True, unique=True)
+    fluids_checked: bool = False
+    leaks_checked: bool = False
+    fasteners_checked: bool = False
+    road_test_done: bool = False
+    technician_completed_at: Optional[datetime] = None
+    technician_notes: str = Field(default="", max_length=4000)
+    reviewed_by_email: Optional[str] = Field(default=None, max_length=254)
+    reviewed_at: Optional[datetime] = None
+    result: str = Field(default="pending", max_length=24)
+    review_notes: str = Field(default="", max_length=4000)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+class DiagnosticFinding(SQLModel, table=True):
+    """Structured diagnostic evidence; it is never a final diagnosis without technician confirmation."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(foreign_key="workorder.id", index=True)
+    work_order_service_id: Optional[int] = Field(default=None, foreign_key="workorderservice.id", index=True)
+    scanner_report_id: Optional[int] = Field(default=None, foreign_key="scannerreport.id", index=True)
+    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    module: str = Field(default="", max_length=120)
+    dtc_code: str = Field(default="", max_length=32, index=True)
+    symptom: str = Field(default="", max_length=1000)
+    freeze_frame: str = Field(default="", max_length=4000)
+    measurements: str = Field(default="", max_length=4000)
+    test_performed: str = Field(default="", max_length=4000)
+    test_result: str = Field(default="", max_length=4000)
+    conclusion: str = Field(default="", max_length=4000)
+    technician_confirmed_at: Optional[datetime] = None
+    recorded_by_email: str = Field(max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
 
 
 class Quote(SQLModel, table=True):

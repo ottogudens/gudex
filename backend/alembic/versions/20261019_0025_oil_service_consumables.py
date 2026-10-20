@@ -9,8 +9,11 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("maintenanceexecution", sa.Column("oil_used", sa.String(length=1000), nullable=False, server_default=""))
-    op.add_column("maintenanceexecution", sa.Column("filters_used", sa.String(length=2000), nullable=False, server_default=""))
+    columns = {row["name"] for row in sa.inspect(op.get_bind()).get_columns("maintenanceexecution")}
+    if "oil_used" not in columns:
+        op.add_column("maintenanceexecution", sa.Column("oil_used", sa.String(length=1000), nullable=False, server_default=""))
+    if "filters_used" not in columns:
+        op.add_column("maintenanceexecution", sa.Column("filters_used", sa.String(length=2000), nullable=False, server_default=""))
 
 
 def downgrade():

@@ -10,10 +10,16 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("vehicle", sa.Column("public_service_card_enabled", sa.Boolean(), nullable=False, server_default=sa.false()))
-    op.add_column("maintenanceplan", sa.Column("category", sa.String(length=32), nullable=False, server_default="general"))
-    op.add_column("maintenanceexecution", sa.Column("next_due_km", sa.Integer(), nullable=True))
-    op.add_column("maintenanceexecution", sa.Column("next_due_at", sa.DateTime(), nullable=True))
+    inspector = sa.inspect(op.get_bind())
+    columns = lambda table: {row["name"] for row in inspector.get_columns(table)}
+    if "public_service_card_enabled" not in columns("vehicle"):
+        op.add_column("vehicle", sa.Column("public_service_card_enabled", sa.Boolean(), nullable=False, server_default=sa.false()))
+    if "category" not in columns("maintenanceplan"):
+        op.add_column("maintenanceplan", sa.Column("category", sa.String(length=32), nullable=False, server_default="general"))
+    if "next_due_km" not in columns("maintenanceexecution"):
+        op.add_column("maintenanceexecution", sa.Column("next_due_km", sa.Integer(), nullable=True))
+    if "next_due_at" not in columns("maintenanceexecution"):
+        op.add_column("maintenanceexecution", sa.Column("next_due_at", sa.DateTime(), nullable=True))
     QuoteRequest.__table__.create(op.get_bind(), checkfirst=True)
 
 

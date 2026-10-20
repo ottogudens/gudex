@@ -60,6 +60,8 @@ class ScannerReportRead(SQLModel):
 class AppointmentCreate(SQLModel):
     customer_id: Optional[int] = None
     vehicle_id: Optional[int] = None
+    bay_id: Optional[int] = None
+    technician_user_id: Optional[int] = None
     starts_at: datetime
     ends_at: datetime
     service_type: str
@@ -68,6 +70,8 @@ class AppointmentCreate(SQLModel):
 
 class AppointmentUpdate(SQLModel):
     vehicle_id: Optional[int] = None
+    bay_id: Optional[int] = None
+    technician_user_id: Optional[int] = None
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     service_type: Optional[str] = None

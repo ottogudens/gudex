@@ -1690,6 +1690,8 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
   late Future<List<Map<String, dynamic>>> _quotes;
   late Future<List<Map<String, dynamic>>> _templates;
   late Future<Map<String, dynamic>> _workSessions;
+  late Future<Map<String, dynamic>> _qualityCheck;
+  late Future<List<Map<String, dynamic>>> _diagnosticFindings;
   Set<String> _moduleKinds = {};
   Set<int> _inspectionModuleIds = {};
   bool _hasExistingQuotes = false;
@@ -1759,6 +1761,8 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     _quotes = _loadQuotes();
     _templates = _loadList('/api/v1/inspection-templates');
     _workSessions = _loadWorkSessions();
+    _qualityCheck = _loadQualityCheck();
+    _diagnosticFindings = _loadDiagnosticFindings();
     _refreshModules();
     _restoreDraft();
   }
@@ -1815,6 +1819,102 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
     return result is Map
         ? Map<String, dynamic>.from(result)
         : <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> _loadQualityCheck() async {
+    final result = await widget.api.get('/api/v1/work-orders/${widget.order['id']}/quality-check');
+    return result is Map ? Map<String, dynamic>.from(result) : <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> _loadDiagnosticFindings() =>
+      _loadList('/api/v1/work-orders/${widget.order['id']}/diagnostics');
+
+  Future<void> _editQualityCheck(Map<String, dynamic> current) async {
+    bool fluids = current['fluids_checked'] == true;
+    bool leaks = current['leaks_checked'] == true;
+    bool fasteners = current['fasteners_checked'] == true;
+    bool roadTest = current['road_test_done'] == true;
+    final notes = TextEditingController(text: '${current['technician_notes'] ?? ''}');
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: const Text('Control técnico antes de entrega'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            CheckboxListTile(contentPadding: EdgeInsets.zero, value: fluids, title: const Text('Fluidos y niveles verificados'), onChanged: (v) => update(() => fluids = v ?? false)),
+            CheckboxListTile(contentPadding: EdgeInsets.zero, value: leaks, title: const Text('Sin fugas visibles'), onChanged: (v) => update(() => leaks = v ?? false)),
+            CheckboxListTile(contentPadding: EdgeInsets.zero, value: fasteners, title: const Text('Fijaciones y seguridad revisadas'), onChanged: (v) => update(() => fasteners = v ?? false)),
+            CheckboxListTile(contentPadding: EdgeInsets.zero, value: roadTest, title: const Text('Prueba de ruta realizada'), onChanged: (v) => update(() => roadTest = v ?? false)),
+            TextField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Observaciones técnicas')),
+          ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(context, {'fluids_checked': fluids, 'leaks_checked': leaks, 'fasteners_checked': fasteners, 'road_test_done': roadTest, 'technician_completed': fluids && leaks && fasteners && roadTest, 'technician_notes': notes.text.trim()}), child: const Text('Guardar control')),
+          ],
+        )),
+      );
+      if (data == null) return;
+      await widget.api.putJson('/api/v1/work-orders/${widget.order['id']}/quality-check', data);
+      if (mounted) setState(() => _qualityCheck = _loadQualityCheck());
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      notes.dispose();
+    }
+  }
+
+  Future<void> _reviewQualityCheck() async {
+    final notes = TextEditingController();
+    try {
+      final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Aprobar para entrega'),
+        content: TextField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Comentario de administración (opcional)')),
+        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Aprobar control'))],
+      ));
+      if (approved != true) return;
+      await widget.api.postJson('/api/v1/work-orders/${widget.order['id']}/quality-check/review', {'result': 'passed', 'review_notes': notes.text.trim()});
+      if (mounted) setState(() => _qualityCheck = _loadQualityCheck());
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally { notes.dispose(); }
+  }
+
+  Future<void> _addDiagnosticFinding() async {
+    final module = TextEditingController();
+    final dtc = TextEditingController();
+    final symptom = TextEditingController();
+    final test = TextEditingController();
+    final result = TextEditingController();
+    final conclusion = TextEditingController();
+    bool confirmed = false;
+    try {
+      final data = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Registro de diagnóstico'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: module, decoration: const InputDecoration(labelText: 'Módulo o sistema *')),
+            const SizedBox(height: 8), TextField(controller: dtc, decoration: const InputDecoration(labelText: 'Código DTC (opcional)')),
+            const SizedBox(height: 8), TextField(controller: symptom, decoration: const InputDecoration(labelText: 'Síntoma')),
+            const SizedBox(height: 8), TextField(controller: test, decoration: const InputDecoration(labelText: 'Prueba realizada')),
+            const SizedBox(height: 8), TextField(controller: result, decoration: const InputDecoration(labelText: 'Resultado de prueba')),
+            const SizedBox(height: 8), TextField(controller: conclusion, maxLines: 2, decoration: const InputDecoration(labelText: 'Conclusión técnica')),
+            CheckboxListTile(contentPadding: EdgeInsets.zero, value: confirmed, title: const Text('Confirmado para ficha técnica'), onChanged: (v) => update(() => confirmed = v ?? false)),
+          ])),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () {
+            if (module.text.trim().isEmpty || (dtc.text.trim().isEmpty && symptom.text.trim().isEmpty && test.text.trim().isEmpty && conclusion.text.trim().isEmpty)) return;
+            if (confirmed && conclusion.text.trim().isEmpty) return;
+            Navigator.pop(context, {'module': module.text.trim(), 'dtc_code': dtc.text.trim(), 'symptom': symptom.text.trim(), 'test_performed': test.text.trim(), 'test_result': result.text.trim(), 'conclusion': conclusion.text.trim(), 'confirmed': confirmed});
+          }, child: const Text('Guardar'))],
+        ),
+      ));
+      if (data == null) return;
+      await widget.api.postJson('/api/v1/work-orders/${widget.order['id']}/diagnostics', data);
+      if (mounted) setState(() => _diagnosticFindings = _loadDiagnosticFindings());
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      for (final controller in [module, dtc, symptom, test, result, conclusion]) { controller.dispose(); }
+    }
   }
 
   Future<void> _workTimer(String action, [int? sessionId]) async {
@@ -2562,6 +2662,58 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               onAddInspection: (id) => _addInspection(id),
               onApplyTemplate: (id) => _applyTemplate(id),
               onEditInspection: _editInspection),
+          Card(child: ExpansionTile(
+            leading: const Icon(Icons.monitor_heart_outlined),
+            title: const Text('Diagnóstico estructurado'),
+            subtitle: const Text('Códigos, pruebas y conclusiones para la ficha técnica'),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              Align(alignment: Alignment.centerRight, child: OutlinedButton.icon(
+                onPressed: _saving ? null : _addDiagnosticFinding,
+                icon: const Icon(Icons.add), label: const Text('Registrar diagnóstico'),
+              )),
+              FutureBuilder<List<Map<String, dynamic>>>(future: _diagnosticFindings, builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) return const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator());
+                if (snapshot.hasError) return const Text('No se pudieron cargar los diagnósticos.');
+                final findings = snapshot.data ?? [];
+                if (findings.isEmpty) return const Padding(padding: EdgeInsets.only(top: 8), child: Text('Aún no hay hallazgos registrados para esta orden.'));
+                return Column(children: findings.map((finding) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(finding['technician_confirmed_at'] == null ? Icons.pending_actions_outlined : Icons.verified_outlined),
+                  title: Text('${finding['module']}${'${finding['dtc_code'] ?? ''}'.isEmpty ? '' : ' · ${finding['dtc_code']}'}'),
+                  subtitle: Text([
+                    if ('${finding['symptom'] ?? ''}'.isNotEmpty) finding['symptom'],
+                    if ('${finding['conclusion'] ?? ''}'.isNotEmpty) finding['conclusion'],
+                  ].join('\n')),
+                  isThreeLine: '${finding['symptom'] ?? ''}'.isNotEmpty && '${finding['conclusion'] ?? ''}'.isNotEmpty,
+                )).toList());
+              }),
+            ],
+          )),
+          Card(child: ExpansionTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: const Text('Control de calidad y entrega'),
+            subtitle: const Text('Verificación técnica antes de entregar el vehículo'),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              FutureBuilder<Map<String, dynamic>>(future: _qualityCheck, builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) return const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator());
+                if (snapshot.hasError) return const Text('No se pudo cargar el control de calidad.');
+                final quality = snapshot.data ?? <String, dynamic>{};
+                final result = '${quality['result'] ?? 'pending'}';
+                final complete = quality['fluids_checked'] == true && quality['leaks_checked'] == true && quality['fasteners_checked'] == true && quality['road_test_done'] == true;
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(result == 'passed' ? 'Aprobado para entrega' : complete ? 'Pendiente de aprobación administrativa' : 'Pendiente de verificación técnica', style: TextStyle(fontWeight: FontWeight.w700, color: result == 'passed' ? Colors.green : null)),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    OutlinedButton.icon(onPressed: _saving ? null : () => _editQualityCheck(quality), icon: const Icon(Icons.fact_check_outlined), label: const Text('Completar control')),
+                    if (widget.role == 'admin' && complete && result != 'passed') FilledButton.icon(onPressed: _saving ? null : _reviewQualityCheck, icon: const Icon(Icons.check_circle_outline), label: const Text('Aprobar entrega')),
+                  ]),
+                  if ('${quality['technician_notes'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Notas: ${quality['technician_notes']}')),
+                ]);
+              }),
+            ],
+          )),
           if (_moduleKinds.isNotEmpty || _hasExistingQuotes || widget.order['status'] != 'received')
           Card(child: ExpansionTile(
             title: const Text('Gestión general de la orden'),

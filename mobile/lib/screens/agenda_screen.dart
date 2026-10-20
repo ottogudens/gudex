@@ -83,13 +83,23 @@ class _AgendaScreenState extends State<AgendaScreen> {
   }
 
   Future<void> _createAppointment() async {
-    final raw = await widget.api.get('/api/v1/customers');
-    final customers = raw is List
-        ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+    final loaded = await Future.wait([
+      widget.api.get('/api/v1/customers'),
+      widget.api.get('/api/v1/vehicles'),
+      widget.api.get('/api/v1/workshop/bays'),
+      widget.api.get('/api/v1/team/mechanics'),
+    ]);
+    final customers = loaded[0] is List
+        ? (loaded[0] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : <Map<String, dynamic>>[];
-    final vehicleRaw = await widget.api.get('/api/v1/vehicles');
-    final vehicles = vehicleRaw is List
-        ? vehicleRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+    final vehicles = loaded[1] is List
+        ? (loaded[1] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : <Map<String, dynamic>>[];
+    final bays = loaded[2] is List
+        ? (loaded[2] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : <Map<String, dynamic>>[];
+    final mechanics = loaded[3] is List
+        ? (loaded[3] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : <Map<String, dynamic>>[];
     if (customers.isEmpty && widget.role == 'admin' && mounted) {
       final created = await showQuickCreateCustomer(context, widget.api);
@@ -101,6 +111,8 @@ class _AgendaScreenState extends State<AgendaScreen> {
     }
     int customerId = customers.first['id'] as int;
     int? vehicleId;
+    int? bayId;
+    int? technicianUserId;
     final service = TextEditingController(text: 'Mantención preventiva');
     final date = await showDatePicker(
       context: context,
@@ -170,6 +182,39 @@ class _AgendaScreenState extends State<AgendaScreen> {
                 },
               ),
               const SizedBox(height: 10),
+              DropdownButtonFormField<int?>(
+                key: ValueKey('appointment-bay-$bayId'),
+                initialValue: bayId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                    labelText: 'Bahía o puesto',
+                    helperText: 'Permite planificar servicios simultáneos'),
+                items: [
+                  const DropdownMenuItem<int?>(
+                      value: null, child: Text('Sin asignar · reserva general')),
+                  ...bays.where((bay) => bay['active'] != false).map((bay) =>
+                      DropdownMenuItem<int?>(
+                          value: bay['id'] as int,
+                          child: Text(bay['name'].toString(), overflow: TextOverflow.ellipsis))),
+                ],
+                onChanged: (value) => update(() => bayId = value),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int?>(
+                key: ValueKey('appointment-technician-$technicianUserId'),
+                initialValue: technicianUserId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Técnico responsable'),
+                items: [
+                  const DropdownMenuItem<int?>(value: null, child: Text('Sin asignar')),
+                  ...mechanics.map((mechanic) => DropdownMenuItem<int?>(
+                      value: mechanic['id'] as int,
+                      child: Text(mechanic['full_name'].toString(),
+                          overflow: TextOverflow.ellipsis))),
+                ],
+                onChanged: (value) => update(() => technicianUserId = value),
+              ),
+              const SizedBox(height: 10),
               TextField(
                 controller: service,
                 decoration: const InputDecoration(labelText: 'Servicio'),
@@ -201,6 +246,8 @@ class _AgendaScreenState extends State<AgendaScreen> {
         await widget.api.postJson('/api/v1/appointments', {
           'customer_id': customerId,
           if (vehicleId != null) 'vehicle_id': vehicleId,
+          if (bayId != null) 'bay_id': bayId,
+          if (technicianUserId != null) 'technician_user_id': technicianUserId,
           'starts_at': start.toUtc().toIso8601String(),
           'ends_at':
               start.add(const Duration(hours: 1)).toUtc().toIso8601String(),
@@ -218,6 +265,95 @@ class _AgendaScreenState extends State<AgendaScreen> {
       }
     }
     service.dispose();
+  }
+
+  Future<void> _manageBays() async {
+    List<Map<String, dynamic>> bays = const [];
+    try {
+      final raw = await widget.api.get('/api/v1/workshop/bays');
+      bays = raw is List
+          ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          : [];
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+      return;
+    }
+    if (!mounted) return;
+    final name = TextEditingController();
+    final notes = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Puestos de trabajo'),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                if (bays.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text('Crea los puestos reales del taller para permitir atenciones simultáneas.'),
+                  ),
+                for (final bay in bays)
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(bay['name'].toString()),
+                    subtitle: Text((bay['notes'] ?? '').toString().isEmpty
+                        ? 'Sin observaciones'
+                        : bay['notes'].toString()),
+                    value: bay['active'] != false,
+                    onChanged: (value) async {
+                      try {
+                        final saved = await widget.api.patchJson('/api/v1/workshop/bays/${bay['id']}', {
+                          'active': value,
+                        });
+                        update(() => bays = bays.map((item) => item['id'] == bay['id']
+                            ? Map<String, dynamic>.from(saved as Map)
+                            : item).toList());
+                      } catch (error) {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+                      }
+                    },
+                  ),
+                const Divider(height: 26),
+                TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre del puesto')),
+                const SizedBox(height: 8),
+                TextField(controller: notes, decoration: const InputDecoration(labelText: 'Observaciones (opcional)')),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Agregar puesto'),
+                    onPressed: () async {
+                      if (name.text.trim().isEmpty) return;
+                      try {
+                        final saved = await widget.api.postJson('/api/v1/workshop/bays', {
+                          'name': name.text.trim(),
+                          'notes': notes.text.trim(),
+                        });
+                        update(() {
+                          bays = [...bays, Map<String, dynamic>.from(saved as Map)];
+                          name.clear(); notes.clear();
+                        });
+                      } catch (error) {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+                      }
+                    },
+                  ),
+                ),
+              ]),
+            ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
+        ),
+      ),
+    );
+    name.dispose();
+    notes.dispose();
   }
 
   @override
@@ -253,6 +389,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
                       () => _week = _week.add(const Duration(days: 7))),
                   onToday: () => setState(() => _week = DateTime.now()),
                   onCreate: widget.role == 'admin' ? _createAppointment : null,
+                  onManageBays: widget.role == 'admin' ? _manageBays : null,
                 ),
                 const SizedBox(height: 18),
                 if (requested.isNotEmpty) ...[
@@ -326,6 +463,7 @@ class _AgendaHeader extends StatelessWidget {
     required this.onNext,
     required this.onToday,
     this.onCreate,
+    this.onManageBays,
   });
 
   final DateTime start;
@@ -335,6 +473,7 @@ class _AgendaHeader extends StatelessWidget {
   final VoidCallback onNext;
   final VoidCallback onToday;
   final VoidCallback? onCreate;
+  final VoidCallback? onManageBays;
 
   String get _range {
     final end = start.add(const Duration(days: 6));
@@ -377,6 +516,12 @@ class _AgendaHeader extends StatelessWidget {
                 Text('Planifica recepciones y confirma solicitudes.',
                     style: Theme.of(context).textTheme.bodySmall),
               ])),
+          if (onManageBays != null)
+            IconButton(
+              tooltip: 'Configurar puestos',
+              onPressed: onManageBays,
+              icon: const Icon(Icons.garage_outlined),
+            ),
           if (onCreate != null)
             IconButton.filled(
               tooltip: 'Agendar cita',
@@ -603,7 +748,13 @@ class _AppointmentRow extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w700)),
       subtitle: Text(item['source'] == 'google'
           ? 'Google Calendar${item['all_day'] == true ? ' · Todo el día' : ''}'
-          : 'Cliente #${item['customer_id']}'),
+          : [
+              'Cliente #${item['customer_id']}',
+              if ('${item['bay_name'] ?? ''}'.trim().isNotEmpty)
+                'Bahía: ${item['bay_name']}',
+              if ('${item['technician_name'] ?? ''}'.trim().isNotEmpty)
+                'Técnico: ${item['technician_name']}',
+            ].join(' · ')),
       trailing: canConfirm && status == 'requested' && item['source'] != 'google'
           ? FilledButton.tonal(
               onPressed: () => onConfirm(item['id'] as int, 'confirmed'),
