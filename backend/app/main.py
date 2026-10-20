@@ -48,6 +48,8 @@ from app.routers.maintenance import router as maintenance_router, Completion, re
 from app.routers.work_order_services import router as work_order_services_router, vehicle_parts, _can_edit, _service, _assignee, KINDS
 from app.routers.public_card import card_payload, router as public_card_router
 from app.routers.workshop_operations import router as workshop_operations_router
+from app.routers.cash import router as cash_router
+from app.services.cash import backfill_recorded_payments, ensure_default_accounts, record_sale_payment, reverse_sale_payment
 
 logger = logging.getLogger("gudex")
 _is_production = settings.app_env.lower() == "production"
@@ -96,6 +98,7 @@ app.include_router(maintenance_router)
 app.include_router(work_order_services_router)
 app.include_router(public_card_router)
 app.include_router(workshop_operations_router)
+app.include_router(cash_router)
 
 
 def on_startup() -> None:
@@ -112,6 +115,12 @@ def on_startup() -> None:
         logger.info("Producción: migraciones de Alembic verificadas antes del arranque.")
     else:
         create_db_and_tables()
+    with Session(engine) as session:
+        ensure_default_accounts(session)
+        adopted = backfill_recorded_payments(session)
+        session.commit()
+        if adopted:
+            logger.info("Caja central: %s pagos históricos incorporados al libro de movimientos.", adopted)
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     if not uploads_are_persistent():
         logger.error("UPLOAD_DIR=%s no está en un volumen persistente: los PDFs y evidencias se perderán en el "
@@ -2212,6 +2221,9 @@ def record_payment(sale_id: int, data: PaymentCreate, session: Session = Depends
                       provider_reference=data.provider_reference,
                       status="pending_external" if data.method in {"mercado_pago", "mercado_pago_checkout"} else "recorded")
     session.add(payment)
+    session.flush()
+    if payment.status == "recorded":
+        record_sale_payment(session, payment, sale)
     if data.method not in {"mercado_pago", "mercado_pago_checkout"} and paid + data.amount_clp == sale.total_clp:
         sale.status = "paid"
         session.add(sale)
@@ -2387,6 +2399,8 @@ async def mercado_pago_webhook(request: Request, session: Session = Depends(get_
             if was_recorded:
                 sale.status = "refunded"
                 session.add(sale)
+                reverse_sale_payment(session, existing, sale,
+                                     f"Reversión {provider_status} de {sale.receipt_code}")
                 earned = session.exec(select(LoyaltyTransaction).where(LoyaltyTransaction.sale_id == sale.id)).first()
                 if earned:
                     session.exec(select(Customer).where(Customer.id == earned.customer_id).with_for_update()).first()
@@ -2409,9 +2423,14 @@ async def mercado_pago_webhook(request: Request, session: Session = Depends(get_
             pending.status = "recorded"
             pending.provider_reference = provider_id
             session.add(pending)
+            session.flush()
+            record_sale_payment(session, pending, sale)
         else:
-            session.add(Payment(sale_id=sale_id, method="mercado_pago_checkout", amount_clp=amount,
-                                status="recorded", provider_reference=provider_id))
+            confirmed = Payment(sale_id=sale_id, method="mercado_pago_checkout", amount_clp=amount,
+                                status="recorded", provider_reference=provider_id)
+            session.add(confirmed)
+            session.flush()
+            record_sale_payment(session, confirmed, sale)
         sale.status = "paid"
         session.add(sale)
         award_loyalty_points(session, sale)

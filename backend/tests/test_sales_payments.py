@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
 from app.main import create_sale, mercado_pago_webhook, record_payment
-from app.models import Payment, Product, Sale, StockMovement
+from app.models import CashMovement, Payment, Product, Sale, StockMovement
 from app.schemas import PaymentCreate, SaleCreate, SaleLine
 
 
@@ -33,6 +33,9 @@ def test_sale_reduces_stock_and_requires_complete_payment():
         payment = record_payment(sale["id"], PaymentCreate(method="cash", amount_clp=14000), session)
         assert payment.status == "recorded"
         assert session.get(Sale, sale["id"]).status == "paid"
+        cash_entry = session.exec(select(CashMovement).where(CashMovement.payment_id == payment.id)).one()
+        assert cash_entry.direction == "income"
+        assert cash_entry.amount_clp == 14000
 
 
 class _WebhookRequest:
@@ -111,3 +114,5 @@ async def test_approved_webhook_marks_external_payment_as_paid(monkeypatch):
         updated = session.get(Payment, pending.id)
         assert updated.status == "recorded"
         assert updated.provider_reference == payment_id
+        cash_entry = session.exec(select(CashMovement).where(CashMovement.payment_id == pending.id)).one()
+        assert cash_entry.direction == "income"

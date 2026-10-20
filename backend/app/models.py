@@ -516,6 +516,57 @@ class Payment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class CashAccount(SQLModel, table=True):
+    """A real destination for money: drawer, bank, card settlement or gateway."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True, max_length=80)
+    kind: str = Field(default="cash", max_length=24)
+    active: bool = True
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class CashMovement(SQLModel, table=True):
+    """Immutable operational cash ledger. Corrections use a reversing movement."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_id: int = Field(foreign_key="cashaccount.id", index=True)
+    direction: str = Field(max_length=16)  # income, expense, transfer_in, transfer_out, reversal
+    amount_clp: int = Field(gt=0)
+    status: str = Field(default="recorded", max_length=24)
+    source_type: str = Field(default="manual", max_length=40)
+    source_id: Optional[int] = Field(default=None, index=True)
+    payment_id: Optional[int] = Field(default=None, foreign_key="payment.id", index=True, unique=True)
+    customer_id: Optional[int] = Field(default=None, foreign_key="customer.id", index=True)
+    vehicle_id: Optional[int] = Field(default=None, foreign_key="vehicle.id", index=True)
+    work_order_id: Optional[int] = Field(default=None, foreign_key="workorder.id", index=True)
+    category: str = Field(default="general", max_length=80)
+    note: str = Field(default="", max_length=1000)
+    reference: Optional[str] = Field(default=None, max_length=120)
+    counterparty: Optional[str] = Field(default=None, max_length=160)
+    reversal_of_id: Optional[int] = Field(default=None, foreign_key="cashmovement.id", index=True)
+    created_by_email: Optional[str] = Field(default=None, max_length=254)
+    occurred_at: datetime = Field(default_factory=now_utc, index=True)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class CashClosure(SQLModel, table=True):
+    """A shift opening and closing record for the central cash operation."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_id: int = Field(foreign_key="cashaccount.id", index=True)
+    status: str = Field(default="open", max_length=16)
+    opening_amount_clp: int = Field(default=0, ge=0)
+    closing_amount_clp: Optional[int] = Field(default=None, ge=0)
+    expected_amount_clp: Optional[int] = None
+    difference_clp: Optional[int] = None
+    notes: str = Field(default="", max_length=1000)
+    opened_by_email: Optional[str] = Field(default=None, max_length=254)
+    closed_by_email: Optional[str] = Field(default=None, max_length=254)
+    opened_at: datetime = Field(default_factory=now_utc)
+    closed_at: Optional[datetime] = None
+
+
 class LoyaltyTransaction(SQLModel, table=True):
     """Immutable loyalty ledger; a sale can award points only once."""
 

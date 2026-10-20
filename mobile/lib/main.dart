@@ -21,6 +21,7 @@ import 'screens/users_screen.dart';
 import 'screens/agenda_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/pos_screen.dart';
+import 'screens/cashbox_screen.dart';
 import 'screens/workshop_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/integration_settings_screen.dart';
@@ -289,6 +290,10 @@ class _HomePageState extends ConsumerState<HomePage> {
           icon: Icons.point_of_sale_outlined,
           path: '/api/v1/sales'),
       AppModule(
+          title: 'Caja y finanzas',
+          icon: Icons.account_balance_wallet_outlined,
+          path: '/api/v1/cash/summary'),
+      AppModule(
           title: 'Usuarios',
           icon: Icons.people_outlined,
           path: '/api/v1/users'),
@@ -478,6 +483,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                                                                         ? PosScreen(
                                                                             api:
                                                                                 api)
+                                                                        : modules[selected].path ==
+                                                                                '/api/v1/cash/summary'
+                                                                            ? CashboxScreen(api: api)
                                                                         : modules[selected].path ==
                                                                                 '/api/v1/services'
                                                                             ? ServicesScreen(api: api)

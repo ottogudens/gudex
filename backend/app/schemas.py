@@ -513,6 +513,42 @@ class PaymentCreate(SQLModel):
     provider_reference: Optional[str] = None
 
 
+class CashAccountCreate(SQLModel):
+    name: str = Field(min_length=2, max_length=80)
+    kind: str = Field(default="cash", max_length=24)
+
+
+class CashExpenseCreate(SQLModel):
+    account_id: int
+    amount_clp: int = Field(gt=0)
+    category: str = Field(min_length=2, max_length=80)
+    note: str = Field(min_length=2, max_length=1000)
+    reference: Optional[str] = Field(default=None, max_length=120)
+    counterparty: Optional[str] = Field(default=None, max_length=160)
+    customer_id: Optional[int] = None
+    vehicle_id: Optional[int] = None
+    work_order_id: Optional[int] = None
+
+
+class CashTransferCreate(SQLModel):
+    from_account_id: int
+    to_account_id: int
+    amount_clp: int = Field(gt=0)
+    note: str = Field(default="", max_length=1000)
+    reference: Optional[str] = Field(default=None, max_length=120)
+
+
+class CashClosureOpen(SQLModel):
+    account_id: int
+    opening_amount_clp: int = Field(default=0, ge=0)
+    notes: str = Field(default="", max_length=1000)
+
+
+class CashClosureClose(SQLModel):
+    closing_amount_clp: int = Field(ge=0)
+    notes: str = Field(default="", max_length=1000)
+
+
 class LoyaltyRewardCreate(SQLModel):
     name: str = Field(min_length=2, max_length=120)
     description: Optional[str] = Field(default=None, max_length=400)
