@@ -76,12 +76,20 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
           load('/api/v1/customers', 'Clientes', (rows) => _customers = rows),
           load('/api/v1/vehicles', 'Vehículos', (rows) => _vehicles = rows),
           if (widget.role == 'admin')
-            load('/api/v1/customers/engagement', 'Interacción de clientes', (rows) {
-              _customerEngagement = {
-                for (final row in rows)
-                  if (row['customer_id'] is int) row['customer_id'] as int: row,
-              };
-            }),
+            (() async {
+              try {
+                // This is an aggregated summary, not an offset-paginated
+                // resource. Its identifier is customer_id rather than id.
+                final rows = _maps(await widget.api.get('/api/v1/customers/engagement'));
+                _customerEngagement = {
+                  for (final row in rows)
+                    if (row['customer_id'] is int) row['customer_id'] as int: row,
+                };
+              } catch (error) {
+                errors.add('Interacción de clientes: '
+                    '${error.toString().replaceFirst('Exception: ', '')}');
+              }
+            })(),
         ]);
         _error = errors.isEmpty ? null : errors.join('\n');
         _records = _customerSection == 0 ? _customers : _vehicles;
