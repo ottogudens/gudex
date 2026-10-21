@@ -5,8 +5,8 @@ import pytest
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
-from app.main import create_sale, mercado_pago_webhook, record_payment
-from app.models import CashMovement, Payment, Product, Sale, StockMovement
+from app.main import create_sale, mercado_pago_webhook, record_payment, work_order_payment_draft
+from app.models import CashMovement, Customer, Payment, Product, Quote, QuoteItem, Sale, StockMovement, Vehicle, WorkOrder, WorkStatus
 from app.schemas import PaymentCreate, SaleCreate, SaleLine
 
 
@@ -36,6 +36,37 @@ def test_sale_reduces_stock_and_requires_complete_payment():
         cash_entry = session.exec(select(CashMovement).where(CashMovement.payment_id == payment.id)).one()
         assert cash_entry.direction == "income"
         assert cash_entry.amount_clp == 14000
+
+
+def test_order_payment_draft_uses_latest_quote_and_blocks_duplicate_sale():
+    create_db_and_tables()
+    with Session(engine) as session:
+        customer = Customer(full_name="Cliente cobro")
+        session.add(customer); session.flush()
+        vehicle = Vehicle(customer_id=customer.id, plate="CBRO12", make="Marca", model="Modelo")
+        session.add(vehicle); session.flush()
+        order = WorkOrder(code="OT-COBRO", customer_id=customer.id, vehicle_id=vehicle.id,
+                          status=WorkStatus.ready, total_clp=18000)
+        session.add(order); session.flush()
+        quote = Quote(work_order_id=order.id, customer_id=customer.id, vehicle_id=vehicle.id,
+                      description="Mantención", labor_clp=5000, parts_clp=13000)
+        session.add(quote); session.flush()
+        session.add(QuoteItem(quote_id=quote.id, kind="service", description="Mano de obra",
+                              quantity=1, unit_price_clp=5000, line_total_clp=5000))
+        session.add(QuoteItem(quote_id=quote.id, kind="product", description="Filtro",
+                              quantity=1, unit_price_clp=13000, line_total_clp=13000))
+        session.commit()
+
+        draft = work_order_payment_draft(order.id, session)
+        assert draft["existing_sale"] is None
+        assert [line["description"] for line in draft["lines"]] == ["Mano de obra", "Filtro"]
+
+        sale = create_sale(SaleCreate(customer_id=customer.id, vehicle_id=vehicle.id,
+                                      work_order_id=order.id,
+                                      lines=[SaleLine(description="Mano de obra", quantity=1,
+                                                      unit_price_clp=18000)]), session)
+        reused = work_order_payment_draft(order.id, session)
+        assert reused["existing_sale"]["id"] == sale["id"]
 
 
 class _WebhookRequest:

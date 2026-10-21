@@ -2144,6 +2144,43 @@ def delete_scanner_report(report_id: int, session: Session = Depends(get_session
     return {"deleted": True}
 
 
+@app.get("/api/v1/work-orders/{order_id}/payment-draft", dependencies=[Depends(require_admin)])
+def work_order_payment_draft(order_id: int, session: Session = Depends(get_session)):
+    """Build a reviewable POS cart from an order without creating a sale yet."""
+    order = session.get(WorkOrder, order_id)
+    if not order:
+        raise HTTPException(404, "Orden de trabajo no encontrada")
+    if order.status in {WorkStatus.cancelled, WorkStatus.delivered}:
+        raise HTTPException(409, "Esta orden está cancelada o ya fue entregada")
+
+    existing = session.exec(select(Sale).where(Sale.work_order_id == order.id)
+                            .order_by(Sale.created_at.desc())).first()
+    if existing:
+        paid = sum(payment.amount_clp for payment in session.exec(select(Payment).where(
+            Payment.sale_id == existing.id, Payment.status == "recorded")).all())
+        return {
+            "order": order,
+            "existing_sale": {"id": existing.id, "receipt_code": existing.receipt_code,
+                              "status": existing.status, "total_clp": existing.total_clp,
+                              "paid_clp": paid},
+            "lines": [],
+        }
+
+    # La cotización más reciente es la fuente comercial. Sus productos y
+    # servicios pasan al POS como líneas editables antes de cobrar.
+    quote = session.exec(select(Quote).where(Quote.work_order_id == order.id)
+                         .order_by(Quote.created_at.desc())).first()
+    quote_items = session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all() if quote else []
+    lines = [{"kind": item.kind, "product_id": item.product_id,
+              "description": item.description, "quantity": item.quantity,
+              "unit_price_clp": item.unit_price_clp} for item in quote_items]
+    if not lines and order.total_clp:
+        lines = [{"kind": "service", "description": f"Servicios {order.code}",
+                  "quantity": 1, "unit_price_clp": order.total_clp}]
+    return {"order": order, "existing_sale": None, "quote_id": quote.id if quote else None,
+            "lines": lines}
+
+
 @app.post("/api/v1/sales", response_model=SaleRead, status_code=201, dependencies=[Depends(require_admin)])
 def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
     if not data.lines:
@@ -2160,6 +2197,11 @@ def create_sale(data: SaleCreate, session: Session = Depends(get_session)):
         order = session.get(WorkOrder, data.work_order_id)
         if not order or (data.customer_id and order.customer_id != data.customer_id):
             raise HTTPException(409, "Orden de trabajo no válida para la venta")
+        existing = session.exec(select(Sale).where(Sale.work_order_id == order.id)
+                                .order_by(Sale.created_at.desc())).first()
+        if existing:
+            detail = "ya está pagada" if existing.status == "paid" else "ya tiene un cobro pendiente"
+            raise HTTPException(409, f"La orden {order.code} {detail}. Recupera la venta {existing.receipt_code} en el POS.")
     subtotal = 0
     product_quantities: dict[int, float] = {}
     for line in data.lines:

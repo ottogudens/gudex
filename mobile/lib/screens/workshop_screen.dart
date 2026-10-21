@@ -5,6 +5,7 @@ import '../services/api_client.dart';
 import '../services/draft_store.dart';
 import '../widgets/quick_create_dialogs.dart';
 import 'vehicle_history_screen.dart';
+import 'pos_screen.dart';
 import 'work_order_services_panel.dart';
 
 class WorkshopScreen extends StatefulWidget {
@@ -1739,6 +1740,15 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
   bool _restoringDraft = true;
   String? _error;
 
+  Future<void> _passToCheckout() async {
+    final orderId = widget.order['id'] as int?;
+    if (orderId == null) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PosScreen(api: widget.api, initialWorkOrderId: orderId),
+    ));
+    if (mounted) await widget.onChanged();
+  }
+
   static const _statuses = [
     'received',
     'inspecting',
@@ -2671,7 +2681,9 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
               PopupMenuButton<String>(
                 tooltip: 'Acciones de la orden',
                 onSelected: (action) async {
-                  if (action == 'edit') {
+                  if (action == 'charge') {
+                    await _passToCheckout();
+                  } else if (action == 'edit') {
                     final updated = await widget.onEditOrder(widget.order);
                     if (updated != null && mounted) {
                       setState(() => widget.order.addAll(updated));
@@ -2682,6 +2694,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
                   }
                 },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'charge', child: Text('Pasar a cobro')),
                   PopupMenuItem(value: 'edit', child: Text('Editar orden')),
                   PopupMenuItem(value: 'delete', child: Text('Eliminar orden')),
                 ],
@@ -2694,6 +2707,30 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
           if ('${widget.order['initial_notes'] ?? ''}'.trim().isNotEmpty) ...[
             const SizedBox(height: 4),
             Text('Recepción: ${widget.order['initial_notes']}'),
+          ],
+          if (widget.role == 'admin') ...[
+            const SizedBox(height: 14),
+            Card(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  const Icon(Icons.point_of_sale_outlined),
+                  const SizedBox(width: 12),
+                  const Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Cobro de la orden', style: TextStyle(fontWeight: FontWeight.w800)),
+                      Text('Carga productos y servicios de la cotización para revisarlos antes de cobrar.'),
+                    ],
+                  )),
+                  FilledButton(
+                    onPressed: _saving ? null : _passToCheckout,
+                    child: const Text('Pasar a cobro'),
+                  ),
+                ]),
+              ),
+            ),
           ],
           const SizedBox(height: 16),
           WorkOrderServicesPanel(api: widget.api, orderId: widget.order['id'] as int,

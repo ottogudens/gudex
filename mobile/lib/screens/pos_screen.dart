@@ -6,8 +6,9 @@ import '../services/api_client.dart';
 import '../widgets/quick_create_dialogs.dart';
 
 class PosScreen extends StatefulWidget {
-  const PosScreen({required this.api, super.key});
+  const PosScreen({required this.api, this.initialWorkOrderId, super.key});
   final ApiClient api;
+  final int? initialWorkOrderId;
 
   @override
   State<PosScreen> createState() => _PosScreenState();
@@ -26,6 +27,7 @@ class _PosScreenState extends State<PosScreen> {
   final Map<int, double> _cart = {};
   final Map<int, Map<String, dynamic>> _cartProducts = {};
   Map<String, dynamic>? _selectedOrder;
+  Map<String, dynamic>? _existingOrderSale;
   String? _paymentNotice;
   final List<Map<String, dynamic>> _serviceItems = [];
   int? _customerId;
@@ -34,7 +36,7 @@ class _PosScreenState extends State<PosScreen> {
   String _paymentMethod = 'cash';
   String _categoryFilter = 'Todos';
   String _serviceCategoryFilter = 'Todos';
-  String _posLayout = 'compact';
+  bool _orderDraftLoaded = false;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -42,7 +44,14 @@ class _PosScreenState extends State<PosScreen> {
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _refresh();
+    if (widget.initialWorkOrderId != null && mounted) {
+      await _loadOrderDraft(widget.initialWorkOrderId!);
+    }
   }
 
   @override
@@ -125,7 +134,7 @@ class _PosScreenState extends State<PosScreen> {
 
   int get _readyOrderTotal => _workOrderId == null
       ? 0
-      : _money((_readyOrder ?? _selectedOrder)?['total_clp']);
+      : _orderDraftLoaded ? 0 : _money((_readyOrder ?? _selectedOrder)?['total_clp']);
   bool get _hasCartConflict =>
       _cart.entries.any((entry) {
         final product = _findProduct(entry.key);
@@ -133,7 +142,80 @@ class _PosScreenState extends State<PosScreen> {
             product['active'] == false ||
             entry.value > _number(product['stock_quantity']);
       }) ||
-      (_workOrderId != null && _readyOrder == null);
+      (_workOrderId != null && !_orderDraftLoaded && _readyOrder == null);
+
+  Future<void> _loadOrderDraft(int orderId) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final raw = await widget.api.get('/api/v1/work-orders/$orderId/payment-draft');
+      final draft = Map<String, dynamic>.from(raw as Map);
+      final order = Map<String, dynamic>.from(draft['order'] as Map);
+      final existing = draft['existing_sale'] is Map
+          ? Map<String, dynamic>.from(draft['existing_sale'] as Map)
+          : null;
+      if (existing != null) {
+        Map<String, dynamic>? sale;
+        for (final row in _sales) {
+          if (row['id'] == existing['id']) {
+            sale = row;
+            break;
+          }
+        }
+        setState(() {
+          _selectedOrder = order;
+          _workOrderId = orderId;
+          _customerId = order['customer_id'] as int?;
+          _vehicleId = order['vehicle_id'] as int?;
+          _existingOrderSale = sale ?? existing;
+          _paymentNotice = 'La orden ${order['code']} ya tiene el cobro ${existing['receipt_code']}. Recupera esa venta para continuar.';
+        });
+        return;
+      }
+      final lines = _asMaps(draft['lines']);
+      final nextCart = <int, double>{};
+      final nextProducts = <int, Map<String, dynamic>>{};
+      final nextServices = <Map<String, dynamic>>[];
+      for (final line in lines) {
+        final productId = line['product_id'] as int?;
+        if (productId != null && _findProduct(productId) != null) {
+          nextCart[productId] = (nextCart[productId] ?? 0) + _number(line['quantity']);
+          nextProducts[productId] = _findProduct(productId)!;
+        } else {
+          final quantity = _number(line['quantity']);
+          final price = _money(line['unit_price_clp']);
+          nextServices.add({
+            'description': line['description']?.toString() ?? 'Servicio de orden',
+            'quantity': quantity,
+            'unit_price_clp': price,
+            'line_total_clp': (quantity * price).round(),
+          });
+        }
+      }
+      setState(() {
+        _cart
+          ..clear()
+          ..addAll(nextCart);
+        _cartProducts
+          ..clear()
+          ..addAll(nextProducts);
+        _serviceItems
+          ..clear()
+          ..addAll(nextServices);
+        _selectedOrder = order;
+        _workOrderId = orderId;
+        _customerId = order['customer_id'] as int?;
+        _vehicleId = order['vehicle_id'] as int?;
+        _existingOrderSale = null;
+        _orderDraftLoaded = true;
+        _paymentNotice = 'Orden ${order['code']} cargada. Revisa sus líneas y cobra cuando esté listo.';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _paymentNotice = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   int get _total => (_subtotal - _discount).clamp(0, _subtotal).toInt();
 
@@ -405,7 +487,7 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Future<void> _checkout() async {
-    if (_saving || _hasCartConflict) return;
+    if (_saving || _hasCartConflict || _existingOrderSale != null) return;
     if (_cart.isEmpty && _serviceItems.isEmpty && _workOrderId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -474,12 +556,12 @@ class _PosScreenState extends State<PosScreen> {
               'unit_price_clp': item['unit_price_clp'],
             },
           ),
-          if (_workOrderId != null)
-            {
-              'description': 'Orden de trabajo #$_workOrderId',
-              'quantity': 1,
-              'unit_price_clp': _readyOrderTotal,
-            },
+          if (_workOrderId != null && !_orderDraftLoaded)
+              {
+                'description': 'Orden de trabajo #$_workOrderId',
+                'quantity': 1,
+                'unit_price_clp': _readyOrderTotal,
+              },
         ],
       });
       sale = Map<String, dynamic>.from(result as Map);
@@ -492,6 +574,9 @@ class _PosScreenState extends State<PosScreen> {
         _discountController.text = '0';
         _workOrderId = null;
         _vehicleId = null;
+        _selectedOrder = null;
+        _orderDraftLoaded = false;
+        _existingOrderSale = null;
       });
 
       if (total > 0) {
@@ -687,96 +772,24 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Widget _desktopPos(List<Map<String, dynamic>> available, double height) {
-    final layout = _posLayout;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Column(
         children: [
-          _layoutSelector(),
-          const SizedBox(height: 8),
           Expanded(
-            child: layout == 'compact'
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(flex: 3, child: _desktopCatalogs(available)),
-                      const SizedBox(width: 14),
-                      Expanded(flex: 2, child: _checkoutPanel(desktop: true)),
-                    ],
-                  )
-                : layout == 'catalog'
-                    ? Column(
-                        children: [
-                          Expanded(
-                            flex: 6,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(child: _desktopCatalogs(available)),
-                                const SizedBox(width: 12),
-                                Expanded(child: _checkoutPanel(desktop: true)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(height: 176, child: _salesPanel()),
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          Expanded(
-                            flex: 7,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  flex: 5,
-                                  child: _desktopCatalogs(available),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  flex: 6,
-                                  child: _checkoutPanel(desktop: true),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(height: 116, child: _salesPanel()),
-                        ],
-                      ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(flex: 5, child: _desktopCatalogs(available)),
+                const SizedBox(width: 14),
+                Expanded(flex: 4, child: _checkoutPanel(desktop: true)),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
-
-  Widget _layoutSelector() => Align(
-        alignment: Alignment.centerRight,
-        child: SegmentedButton<String>(
-          showSelectedIcon: false,
-          segments: const [
-            ButtonSegment(
-              value: 'compact',
-              icon: Icon(Icons.view_agenda_outlined),
-              label: Text('Compacta'),
-            ),
-            ButtonSegment(
-              value: 'catalog',
-              icon: Icon(Icons.grid_view_outlined),
-              label: Text('Catálogo'),
-            ),
-            ButtonSegment(
-              value: 'checkout',
-              icon: Icon(Icons.point_of_sale_outlined),
-              label: Text('Cobro'),
-            ),
-          ],
-          selected: {_posLayout},
-          onSelectionChanged: (value) =>
-              setState(() => _posLayout = value.first),
-        ),
-      );
 
   Widget _desktopCatalogs(List<Map<String, dynamic>> available) => Column(
         children: [
@@ -1102,7 +1115,7 @@ class _PosScreenState extends State<PosScreen> {
   Widget _checkoutButton() => SizedBox(
         width: double.infinity,
         child: FilledButton.icon(
-          onPressed: _saving ||
+          onPressed: _saving || _existingOrderSale != null ||
                   _hasCartConflict ||
                   (_cart.isEmpty &&
                       _serviceItems.isEmpty &&
@@ -1169,6 +1182,31 @@ class _PosScreenState extends State<PosScreen> {
               ],
             ),
             const SizedBox(height: 8),
+            if (_selectedOrder != null)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.assignment_turned_in_outlined),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(
+                    _existingOrderSale == null
+                        ? 'Cobro de ${_selectedOrder!['code']} · líneas cargadas desde la orden'
+                        : '${_selectedOrder!['code']} ya tiene un cobro en curso',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  )),
+                  if (_existingOrderSale != null)
+                    TextButton(
+                      onPressed: _saving ? null : () => _recoverSale(_existingOrderSale!),
+                      child: const Text('Abrir cobro'),
+                    ),
+                ]),
+              ),
             if (desktop)
               SizedBox(
                 height: 112,
@@ -1299,7 +1337,7 @@ class _PosScreenState extends State<PosScreen> {
                 }
               },
             ),
-            if (_readyOrders.isNotEmpty) ...[
+            if (_readyOrders.isNotEmpty && !_orderDraftLoaded) ...[
               const SizedBox(height: 10),
               DropdownButtonFormField<int?>(
                 isExpanded: true,
@@ -1333,6 +1371,8 @@ class _PosScreenState extends State<PosScreen> {
                     _selectedOrder = order;
                     _customerId = order?['customer_id'] as int? ?? _customerId;
                     _vehicleId = order?['vehicle_id'] as int?;
+                    _existingOrderSale = null;
+                    _orderDraftLoaded = false;
                   });
                 },
               ),
