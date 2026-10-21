@@ -43,6 +43,12 @@ def test_unknown_barcode_can_be_created_from_an_active_count():
     with Session(engine) as session:
         count = create_inventory_count(InventoryCountSessionCreate(name="Conteo de nuevos"), _request(), session)
         line = create_missing_product_for_count(count.id, InventoryCountMissingProduct(
-            barcode="780000000002", name="Producto escaneado", counted_quantity=4), _request(UserRole.mechanic), session)
+            barcode="780000000002", name="Filtro de aceite", counted_quantity=4,
+            manufacturer="WEGA", product_type="Filtro", oem_number="90915-YZZD2",
+            equivalent_codes="MANN W 67/1, TECFIL PSL55"),
+            _request(UserRole.mechanic), session)
         assert line["product"].sku == "780000000002"
         assert line["product"].stock_quantity == 0
+        assert line["product"].manufacturer == "WEGA"
+        assert line["product"].oem_number == "90915-YZZD2"
+        assert line["product"].verification_status == "draft"

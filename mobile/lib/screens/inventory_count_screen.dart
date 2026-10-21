@@ -102,7 +102,88 @@ class _BarcodeScannerState extends State<_BarcodeScanner> { final _controller = 
 class _CountBarcode extends StatefulWidget { const _CountBarcode({required this.api, required this.sessionId, required this.barcode}); final ApiClient api; final int sessionId; final String barcode; @override State<_CountBarcode> createState() => _CountBarcodeState(); }
 class _CountBarcodeState extends State<_CountBarcode> { late Future<Map<String, dynamic>> _lookup; @override void initState() { super.initState(); _lookup = _load(); } Future<Map<String, dynamic>> _load() async { final raw = await widget.api.get('/api/v1/inventory-counts/${widget.sessionId}/lookup?barcode=${Uri.encodeQueryComponent(widget.barcode)}'); return raw is Map ? Map<String, dynamic>.from(raw) : {}; }
   Future<void> _count(Map<String, dynamic> product) async { final quantity = TextEditingController(); try { final value = await showDialog<String>(context: context, builder: (context) => AlertDialog(title: Text(product['name'].toString()), content: TextField(controller: quantity, autofocus: true, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad física contada')), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, quantity.text.trim()), child: const Text('Guardar conteo'))])); final counted = double.tryParse(value ?? ''); if (counted == null || counted < 0) return; await widget.api.putJson('/api/v1/inventory-counts/${widget.sessionId}/lines', {'product_id': product['id'], 'counted_quantity': counted}); if (mounted) Navigator.pop(context); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); } finally { quantity.dispose(); } }
-  Future<void> _createMissing() async { final name = TextEditingController(); final quantity = TextEditingController(); try { final data = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => AlertDialog(title: const Text('Producto no registrado'), content: Column(mainAxisSize: MainAxisSize.min, children: [Text('Código: ${widget.barcode}'), TextField(controller: name, autofocus: true, decoration: const InputDecoration(labelText: 'Nombre del producto')), TextField(controller: quantity, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad física'))]), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, {'name': name.text.trim(), 'counted_quantity': double.tryParse(quantity.text) ?? -1}), child: const Text('Crear y contar'))])); if (data == null || '${data['name']}'.length < 2 || (data['counted_quantity'] as num) < 0) return; await widget.api.postJson('/api/v1/inventory-counts/${widget.sessionId}/missing-product', {'barcode': widget.barcode, ...data}); if (mounted) Navigator.pop(context); } catch (error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')))); } finally { name.dispose(); quantity.dispose(); } }
+  Future<void> _createMissing() async {
+    final fields = <String, TextEditingController>{
+      for (final key in ['name', 'quantity', 'manufacturer', 'oem_number', 'equivalent_codes', 'technical_specs', 'sae_grade', 'api_spec', 'acea_spec', 'oem_approvals', 'data_source_url']) key: TextEditingController(),
+    };
+    var productType = 'Filtro';
+    try {
+      final data = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: const Text('Producto no registrado'),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Align(alignment: Alignment.centerLeft, child: Text('Código escaneado: ${widget.barcode}')),
+                  const SizedBox(height: 12),
+                  TextField(controller: fields['name'], autofocus: true, decoration: const InputDecoration(labelText: 'Nombre del producto *')),
+                  TextField(controller: fields['quantity'], keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad física *')),
+                  DropdownButtonFormField<String>(
+                    initialValue: productType,
+                    decoration: const InputDecoration(labelText: 'Tipo técnico'),
+                    items: const [
+                      DropdownMenuItem(value: 'Filtro', child: Text('Filtro')),
+                      DropdownMenuItem(value: 'Aceite motor', child: Text('Aceite de motor')),
+                      DropdownMenuItem(value: 'Lubricante transmisión', child: Text('Lubricante de transmisión / tracción')),
+                      DropdownMenuItem(value: 'Refrigerante', child: Text('Refrigerante')),
+                      DropdownMenuItem(value: 'Repuesto', child: Text('Repuesto / otro')),
+                    ],
+                    onChanged: (value) => update(() => productType = value ?? productType),
+                  ),
+                  TextField(controller: fields['manufacturer'], decoration: const InputDecoration(labelText: 'Marca / fabricante')),
+                  TextField(controller: fields['oem_number'], decoration: const InputDecoration(labelText: 'Número OEM')),
+                  TextField(controller: fields['equivalent_codes'], decoration: const InputDecoration(labelText: 'Equivalencias (separadas por coma)')),
+                  TextField(controller: fields['technical_specs'], maxLines: 2, decoration: const InputDecoration(labelText: 'Medidas o especificaciones técnicas')),
+                  if (productType.contains('Aceite') || productType.contains('Lubricante')) ...[
+                    TextField(controller: fields['sae_grade'], decoration: const InputDecoration(labelText: 'Viscosidad SAE (ej.: 5W-30)')),
+                    TextField(controller: fields['api_spec'], decoration: const InputDecoration(labelText: 'Norma API')),
+                    TextField(controller: fields['acea_spec'], decoration: const InputDecoration(labelText: 'Norma ACEA')),
+                    TextField(controller: fields['oem_approvals'], decoration: const InputDecoration(labelText: 'Homologaciones OEM')),
+                  ],
+                  TextField(controller: fields['data_source_url'], decoration: const InputDecoration(labelText: 'Enlace a ficha técnica / fuente')),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text('La ficha quedará pendiente de validación. No se asumirá compatibilidad con vehículos hasta verificarla.', style: TextStyle(fontSize: 12)),
+                  ),
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, {
+                  'name': fields['name']!.text.trim(),
+                  'counted_quantity': double.tryParse(fields['quantity']!.text.replaceAll(',', '.')) ?? -1,
+                  'manufacturer': fields['manufacturer']!.text.trim(),
+                  'product_type': productType,
+                  'category': productType.startsWith('Filtro') ? 'Filtros' : productType.contains('Aceite') || productType.contains('Lubricante') ? 'Lubricantes' : 'Repuestos',
+                  'oem_number': fields['oem_number']!.text.trim(),
+                  'equivalent_codes': fields['equivalent_codes']!.text.trim(),
+                  'technical_specs': fields['technical_specs']!.text.trim(),
+                  'sae_grade': fields['sae_grade']!.text.trim(),
+                  'api_spec': fields['api_spec']!.text.trim(),
+                  'acea_spec': fields['acea_spec']!.text.trim(),
+                  'oem_approvals': fields['oem_approvals']!.text.trim(),
+                  'data_source_url': fields['data_source_url']!.text.trim(),
+                }),
+                child: const Text('Crear y contar'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (data == null || '${data['name']}'.length < 2 || (data['counted_quantity'] as num) < 0) return;
+      await widget.api.postJson('/api/v1/inventory-counts/${widget.sessionId}/missing-product', {'barcode': widget.barcode, ...data});
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      for (final controller in fields.values) { controller.dispose(); }
+    }
+  }
   @override Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(future: _lookup, builder: (context, snapshot) { if (snapshot.connectionState != ConnectionState.done) return const Scaffold(body: Center(child: CircularProgressIndicator())); final product = snapshot.data?['product']; return Scaffold(appBar: AppBar(title: const Text('Resultado del escaneo')), body: Center(child: Padding(padding: const EdgeInsets.all(24), child: product is Map ? Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.inventory_2_outlined, size: 60), Text(product['name'].toString(), style: Theme.of(context).textTheme.headlineSmall), Text('Código: ${widget.barcode}'), const SizedBox(height: 16), FilledButton.icon(onPressed: () => _count(Map<String, dynamic>.from(product)), icon: const Icon(Icons.add_task), label: const Text('Registrar cantidad'))]) : Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.help_outline, size: 60), const Text('Código no registrado'), Text(widget.barcode), const SizedBox(height: 16), FilledButton.icon(onPressed: _createMissing, icon: const Icon(Icons.add_box_outlined), label: const Text('Crear producto y contar'))])))); }); }
 
 String _status(dynamic value) => {'counting': 'En conteo', 'review': 'Pendiente de revisión', 'applied': 'Aplicada' }['$value'] ?? '$value';

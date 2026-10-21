@@ -60,11 +60,13 @@ class _InventoryEditorState extends State<InventoryEditor> {
   bool _allowPop = false;
   String? _error;
   String _movement = 'in';
+  bool _technicalDataVerified = false;
 
   @override
   void initState() {
     super.initState();
     final p = widget.product ?? {};
+    _technicalDataVerified = p['verification_status'] == 'verified';
     _fields = {
       for (final key in [
         'name',
@@ -75,6 +77,17 @@ class _InventoryEditorState extends State<InventoryEditor> {
         'minimum_quantity',
         'cost_clp',
         'price_clp',
+        'manufacturer',
+        'product_type',
+        'oem_number',
+        'equivalent_codes',
+        'technical_specs',
+        'application_notes',
+        'sae_grade',
+        'api_spec',
+        'acea_spec',
+        'oem_approvals',
+        'data_source_url',
         'quantity',
         'reason',
       ])
@@ -163,6 +176,18 @@ class _InventoryEditorState extends State<InventoryEditor> {
           'minimum_quantity': _quantity('minimum_quantity'),
           'cost_clp': int.parse(_text('cost_clp')),
           'price_clp': int.parse(_text('price_clp')),
+          'manufacturer': _text('manufacturer'),
+          'product_type': _text('product_type'),
+          'oem_number': _text('oem_number'),
+          'equivalent_codes': _text('equivalent_codes'),
+          'technical_specs': _text('technical_specs'),
+          'application_notes': _text('application_notes'),
+          'sae_grade': _text('sae_grade'),
+          'api_spec': _text('api_spec'),
+          'acea_spec': _text('acea_spec'),
+          'oem_approvals': _text('oem_approvals'),
+          'data_source_url': _text('data_source_url'),
+          'verification_status': _technicalDataVerified ? 'verified' : 'draft',
           if (widget.product == null)
             'stock_quantity': _quantity('stock_quantity'),
         };
@@ -369,6 +394,41 @@ class _InventoryEditorState extends State<InventoryEditor> {
                                             'Precio de venta (CLP)',
                                             number: true,
                                             money: true,
+                                          ),
+                                          const Divider(height: 32),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: Text(
+                                              'Ficha técnica y compatibilidad',
+                                              style: Theme.of(context).textTheme.titleMedium,
+                                            ),
+                                          ),
+                                          const Padding(
+                                            padding: EdgeInsets.only(top: 4, bottom: 16),
+                                            child: Text(
+                                              'Registra sólo datos confirmados por fabricante, proveedor o documento técnico. Una equivalencia no validada puede provocar una aplicación incorrecta.',
+                                            ),
+                                          ),
+                                          _field('manufacturer', 'Marca / fabricante'),
+                                          _field('product_type', 'Tipo (ej.: filtro de aceite, aceite motor, ATF)'),
+                                          _field('oem_number', 'Número OEM'),
+                                          _field('equivalent_codes', 'Equivalencias (separadas por coma)'),
+                                          _field('technical_specs', 'Especificaciones técnicas'),
+                                          _field('application_notes', 'Aplicación y observaciones'),
+                                          _field('sae_grade', 'Viscosidad SAE (lubricantes)'),
+                                          _field('api_spec', 'Norma API (lubricantes)'),
+                                          _field('acea_spec', 'Norma ACEA (lubricantes)'),
+                                          _field('oem_approvals', 'Homologaciones OEM'),
+                                          _field('data_source_url', 'Fuente técnica / ficha del fabricante'),
+                                          SwitchListTile.adaptive(
+                                            contentPadding: EdgeInsets.zero,
+                                            value: _technicalDataVerified,
+                                            title: const Text('Datos técnicos verificados'),
+                                            subtitle: const Text('Actívalo sólo tras contrastar código, aplicación y normas con una fuente confiable.'),
+                                            onChanged: (value) => setState(() {
+                                              _technicalDataVerified = value;
+                                              _dirty = true;
+                                            }),
                                           ),
                                         ],
                                 ),

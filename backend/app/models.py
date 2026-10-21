@@ -460,6 +460,21 @@ class Product(SQLModel, table=True):
     minimum_quantity: float = Field(default=0, ge=0)
     cost_clp: int = Field(default=0, ge=0)
     price_clp: int = Field(default=0, ge=0)
+    # Technical catalogue data is deliberately kept separate from commercial
+    # stock fields.  A barcode identifies a package, but does not by itself
+    # prove the vehicle application or an oil approval.
+    manufacturer: Optional[str] = Field(default=None, max_length=80)
+    product_type: Optional[str] = Field(default=None, max_length=40)
+    oem_number: Optional[str] = Field(default=None, max_length=120)
+    equivalent_codes: Optional[str] = Field(default=None, max_length=1000)
+    technical_specs: Optional[str] = Field(default=None, max_length=2000)
+    application_notes: Optional[str] = Field(default=None, max_length=2000)
+    sae_grade: Optional[str] = Field(default=None, max_length=30)
+    api_spec: Optional[str] = Field(default=None, max_length=80)
+    acea_spec: Optional[str] = Field(default=None, max_length=80)
+    oem_approvals: Optional[str] = Field(default=None, max_length=500)
+    data_source_url: Optional[str] = Field(default=None, max_length=500)
+    verification_status: str = Field(default="draft", max_length=24)
     active: bool = True
 
 

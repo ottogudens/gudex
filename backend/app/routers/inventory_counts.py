@@ -112,7 +112,15 @@ def create_missing_product_for_count(session_id: int, data: InventoryCountMissin
     product = Product(sku=barcode, name=data.name.strip(), category=data.category.strip() if data.category else None,
                       unit=data.unit.strip() or "unidad", stock_quantity=0,
                       minimum_quantity=data.minimum_quantity, cost_clp=data.cost_clp,
-                      price_clp=data.price_clp)
+                      price_clp=data.price_clp, manufacturer=data.manufacturer,
+                      product_type=data.product_type, oem_number=data.oem_number,
+                      equivalent_codes=data.equivalent_codes, technical_specs=data.technical_specs,
+                      application_notes=data.application_notes, sae_grade=data.sae_grade,
+                      api_spec=data.api_spec, acea_spec=data.acea_spec,
+                      oem_approvals=data.oem_approvals, data_source_url=data.data_source_url,
+                      # El escaneo móvil puede registrar antecedentes, pero no
+                      # certifica equivalencias ni aplicaciones por vehículo.
+                      verification_status="draft")
     session.add(product); session.flush()
     line = _upsert_line(session, count, product, data.counted_quantity, "Producto creado durante la toma", request.state.user_email)
     session.commit(); session.refresh(product); session.refresh(line)

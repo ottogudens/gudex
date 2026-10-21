@@ -280,7 +280,29 @@ class ProductUpdate(SQLModel):
     minimum_quantity: Optional[float] = None
     cost_clp: Optional[int] = None
     price_clp: Optional[int] = None
+    manufacturer: Optional[str] = None
+    product_type: Optional[str] = None
+    oem_number: Optional[str] = None
+    equivalent_codes: Optional[str] = None
+    technical_specs: Optional[str] = None
+    application_notes: Optional[str] = None
+    sae_grade: Optional[str] = None
+    api_spec: Optional[str] = None
+    acea_spec: Optional[str] = None
+    oem_approvals: Optional[str] = None
+    data_source_url: Optional[str] = None
+    verification_status: Optional[str] = None
     active: Optional[bool] = None
+
+    @field_validator("verification_status")
+    @classmethod
+    def validate_verification_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if normalized not in {"draft", "verified"}:
+            raise ValueError("El estado técnico debe ser borrador o verificado")
+        return normalized
 
 
 class WorkOrderAssignmentUpdate(SQLModel):
@@ -431,11 +453,31 @@ class ProductCreate(SQLModel):
     minimum_quantity: float = 0
     cost_clp: int = 0
     price_clp: int = 0
+    manufacturer: Optional[str] = None
+    product_type: Optional[str] = None
+    oem_number: Optional[str] = None
+    equivalent_codes: Optional[str] = None
+    technical_specs: Optional[str] = None
+    application_notes: Optional[str] = None
+    sae_grade: Optional[str] = None
+    api_spec: Optional[str] = None
+    acea_spec: Optional[str] = None
+    oem_approvals: Optional[str] = None
+    data_source_url: Optional[str] = None
+    verification_status: str = "draft"
 
     @field_validator("sku")
     @classmethod
     def clean_sku(cls, value: str | None) -> str | None:
         return value.strip().upper() if value and value.strip() else None
+
+    @field_validator("verification_status")
+    @classmethod
+    def validate_verification_status(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"draft", "verified"}:
+            raise ValueError("El estado técnico debe ser borrador o verificado")
+        return normalized
 
     @field_validator("stock_quantity", "minimum_quantity")
     @classmethod
@@ -485,6 +527,17 @@ class InventoryCountMissingProduct(SQLModel):
     minimum_quantity: float = Field(default=0, ge=0)
     cost_clp: int = Field(default=0, ge=0)
     price_clp: int = Field(default=0, ge=0)
+    manufacturer: Optional[str] = Field(default=None, max_length=80)
+    product_type: Optional[str] = Field(default=None, max_length=40)
+    oem_number: Optional[str] = Field(default=None, max_length=120)
+    equivalent_codes: Optional[str] = Field(default=None, max_length=1000)
+    technical_specs: Optional[str] = Field(default=None, max_length=2000)
+    application_notes: Optional[str] = Field(default=None, max_length=2000)
+    sae_grade: Optional[str] = Field(default=None, max_length=30)
+    api_spec: Optional[str] = Field(default=None, max_length=80)
+    acea_spec: Optional[str] = Field(default=None, max_length=80)
+    oem_approvals: Optional[str] = Field(default=None, max_length=500)
+    data_source_url: Optional[str] = Field(default=None, max_length=500)
 
 
 class SaleLine(SQLModel):

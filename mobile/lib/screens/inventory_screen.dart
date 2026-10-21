@@ -351,6 +351,19 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             product['category'],
           ].where((value) => value != null && '$value'.isNotEmpty).join(' · '),
         ),
+        if (product['manufacturer'] != null || product['oem_number'] != null)
+          Text(
+            [
+              product['manufacturer'],
+              product['product_type'],
+              product['oem_number'] == null ? null : 'OEM ${product['oem_number']}',
+            ].where((value) => value != null && '$value'.isNotEmpty).join(' · '),
+          ),
+        if (product['verification_status'] == 'draft')
+          Text(
+            'Ficha técnica pendiente de validación',
+            style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
+          ),
       ],
     );
     final quantity = Column(
