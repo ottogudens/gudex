@@ -703,6 +703,14 @@ class _PosScreenState extends State<PosScreen> {
               padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
               child: Row(
                 children: [
+                  if (widget.initialWorkOrderId != null) ...[
+                    IconButton.filledTonal(
+                      tooltip: 'Volver a la orden',
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(Icons.arrow_back),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
                   Container(
                     width: 44,
                     height: 44,
@@ -721,14 +729,18 @@ class _PosScreenState extends State<PosScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Punto de venta',
+                          widget.initialWorkOrderId != null
+                              ? 'Cobro de orden'
+                              : 'Punto de venta',
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         Text(
-                          'Productos, servicios y cobros',
+                          widget.initialWorkOrderId != null
+                              ? 'Revisa las líneas y vuelve a la orden cuando quieras'
+                              : 'Productos, servicios y cobros',
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: Theme.of(context)
