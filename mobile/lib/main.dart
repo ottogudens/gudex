@@ -22,6 +22,7 @@ import 'screens/agenda_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/pos_screen.dart';
 import 'screens/cashbox_screen.dart';
+import 'screens/inventory_count_screen.dart';
 import 'screens/workshop_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/integration_settings_screen.dart';
@@ -251,6 +252,10 @@ class _HomePageState extends ConsumerState<HomePage> {
             icon: Icons.inventory_2_outlined,
             path: '/api/v1/products'),
         AppModule(
+            title: 'Toma de inventario',
+            icon: Icons.qr_code_scanner_outlined,
+            path: '/api/v1/inventory-counts'),
+        AppModule(
             title: 'Agenda',
             icon: Icons.calendar_month_outlined,
             path: '/api/v1/appointments'),
@@ -277,6 +282,10 @@ class _HomePageState extends ConsumerState<HomePage> {
           title: 'Inventario',
           icon: Icons.inventory_2_outlined,
           path: '/api/v1/products'),
+      AppModule(
+          title: 'Toma de inventario',
+          icon: Icons.qr_code_scanner_outlined,
+          path: '/api/v1/inventory-counts'),
       AppModule(
           title: 'Agenda',
           icon: Icons.calendar_month_outlined,
@@ -486,6 +495,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                                                                         : modules[selected].path ==
                                                                                 '/api/v1/cash/summary'
                                                                             ? CashboxScreen(api: api)
+                                                                            : modules[selected].path ==
+                                                                                    '/api/v1/inventory-counts'
+                                                                                ? InventoryCountScreen(api: api, canApply: widget.role == 'admin')
                                                                         : modules[selected].path ==
                                                                                 '/api/v1/services'
                                                                             ? ServicesScreen(api: api)

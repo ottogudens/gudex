@@ -458,6 +458,28 @@ class StockAdjustment(SQLModel):
         return value.strip()
 
 
+class InventoryCountSessionCreate(SQLModel):
+    name: str = Field(min_length=3, max_length=140)
+    blind_count: bool = True
+
+
+class InventoryCountLineInput(SQLModel):
+    product_id: int
+    counted_quantity: float = Field(ge=0)
+    note: str = Field(default="", max_length=1000)
+
+
+class InventoryCountMissingProduct(SQLModel):
+    barcode: str = Field(min_length=3, max_length=80)
+    name: str = Field(min_length=2, max_length=160)
+    counted_quantity: float = Field(ge=0)
+    category: Optional[str] = Field(default=None, max_length=80)
+    unit: str = Field(default="unidad", max_length=24)
+    minimum_quantity: float = Field(default=0, ge=0)
+    cost_clp: int = Field(default=0, ge=0)
+    price_clp: int = Field(default=0, ge=0)
+
+
 class SaleLine(SQLModel):
     product_id: Optional[int] = None
     description: str

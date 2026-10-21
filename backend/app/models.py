@@ -467,6 +467,34 @@ class StockMovement(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class InventoryCountSession(SQLModel, table=True):
+    """A controlled physical stock count; stock changes only when it is applied."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True, unique=True, max_length=32)
+    name: str = Field(max_length=140)
+    status: str = Field(default="counting", max_length=24)
+    blind_count: bool = True
+    created_by_email: Optional[str] = Field(default=None, max_length=254)
+    reviewed_by_email: Optional[str] = Field(default=None, max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+    submitted_at: Optional[datetime] = None
+    applied_at: Optional[datetime] = None
+
+
+class InventoryCountLine(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("session_id", "product_id", name="uq_inventory_count_line"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="inventorycountsession.id", index=True)
+    product_id: int = Field(foreign_key="product.id", index=True)
+    expected_quantity: float = Field(default=0)
+    counted_quantity: float = Field(default=0, ge=0)
+    note: str = Field(default="", max_length=1000)
+    counted_by_email: Optional[str] = Field(default=None, max_length=254)
+    counted_at: datetime = Field(default_factory=now_utc)
+
+
 class ScannerReport(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
