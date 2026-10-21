@@ -42,7 +42,8 @@ class _CashboxScreenState extends State<CashboxScreen> {
   }
 
   int _amount(String text) => int.tryParse(text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-  String _money(dynamic value) => '$${(value is num ? value.toInt() : int.tryParse('$value') ?? 0).toString().replaceAllMapped(RegExp(r'(?=(\d{3})+(?!\d))'), (m) => '.')}';
+  String _money(dynamic value) =>
+      '\$${(value is num ? value.toInt() : int.tryParse('$value') ?? 0).toString().replaceAllMapped(RegExp(r'(?=(\d{3})+(?!\d))'), (m) => '.')}';
 
   Future<void> _addExpense(List<Map<String, dynamic>> accounts) async {
     if (accounts.isEmpty) return;
