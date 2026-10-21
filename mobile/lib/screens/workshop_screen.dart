@@ -284,7 +284,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
     final model = TextEditingController();
     final year = TextEditingController();
     final vin = TextEditingController();
-    final engine = TextEditingController();
+    final engineNumber = TextEditingController();
+    final engineCode = TextEditingController();
+    final displacement = TextEditingController();
     final mileage = TextEditingController();
     int customerId = _customers.first['id'] as int;
     try {
@@ -362,9 +364,21 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                 const InputDecoration(labelText: 'VIN')),
                         const SizedBox(height: 10),
                         TextFormField(
-                            controller: engine,
-                            decoration:
-                                const InputDecoration(labelText: 'Motor')),
+                            controller: engineNumber,
+                            decoration: const InputDecoration(labelText: 'Número de motor'),
+                            textCapitalization: TextCapitalization.characters),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                            controller: engineCode,
+                            decoration: const InputDecoration(labelText: 'Código de motor'),
+                            textCapitalization: TextCapitalization.characters),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                            controller: displacement,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Cilindrada (cc)'),
+                            validator: (v) => v == null || v.trim().isEmpty || int.tryParse(v.trim()) != null
+                                ? null : 'Ingresa la cilindrada en cc'),
                         const SizedBox(height: 10),
                         TextFormField(
                             controller: mileage,
@@ -395,8 +409,12 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                             if (parsedYear != null) 'year': parsedYear,
                             if (vin.text.trim().isNotEmpty)
                               'vin': vin.text.trim().toUpperCase(),
-                            if (engine.text.trim().isNotEmpty)
-                              'engine': engine.text.trim(),
+                            if (engineNumber.text.trim().isNotEmpty)
+                              'engine_number': engineNumber.text.trim().toUpperCase(),
+                            if (engineCode.text.trim().isNotEmpty)
+                              'engine_code': engineCode.text.trim().toUpperCase(),
+                            if (int.tryParse(displacement.text.trim()) != null)
+                              'displacement_cc': int.parse(displacement.text.trim()),
                             if (parsedMileage != null)
                               'current_mileage_km': parsedMileage,
                           });
@@ -413,7 +431,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
       model.dispose();
       year.dispose();
       vin.dispose();
-      engine.dispose();
+      engineNumber.dispose();
+      engineCode.dispose();
+      displacement.dispose();
       mileage.dispose();
     }
   }
@@ -616,8 +636,12 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
         TextEditingController(text: vehicle['model']?.toString() ?? '');
     final year = TextEditingController(text: vehicle['year']?.toString() ?? '');
     final vin = TextEditingController(text: vehicle['vin']?.toString() ?? '');
-    final engine =
-        TextEditingController(text: vehicle['engine']?.toString() ?? '');
+    final engineNumber = TextEditingController(text:
+        vehicle['engine_number']?.toString() ?? vehicle['engine']?.toString() ?? '');
+    final engineCode =
+        TextEditingController(text: vehicle['engine_code']?.toString() ?? '');
+    final displacement =
+        TextEditingController(text: vehicle['displacement_cc']?.toString() ?? '');
     final mileage = TextEditingController(
         text: vehicle['current_mileage_km']?.toString() ?? '');
     final notes =
@@ -692,9 +716,21 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                                 const InputDecoration(labelText: 'VIN')),
                         const SizedBox(height: 10),
                         TextFormField(
-                            controller: engine,
-                            decoration:
-                                const InputDecoration(labelText: 'Motor')),
+                            controller: engineNumber,
+                            decoration: const InputDecoration(labelText: 'Número de motor'),
+                            textCapitalization: TextCapitalization.characters),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                            controller: engineCode,
+                            decoration: const InputDecoration(labelText: 'Código de motor'),
+                            textCapitalization: TextCapitalization.characters),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                            controller: displacement,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Cilindrada (cc)'),
+                            validator: (v) => v == null || v.trim().isEmpty || int.tryParse(v.trim()) != null
+                                ? null : 'Ingresa la cilindrada en cc'),
                         const SizedBox(height: 10),
                         TextFormField(
                             controller: mileage,
@@ -727,7 +763,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
                             'model': model.text.trim(),
                             'year': int.tryParse(year.text.trim()),
                             'vin': vin.text.trim().toUpperCase(),
-                            'engine': engine.text.trim(),
+                            'engine_number': engineNumber.text.trim().isEmpty ? null : engineNumber.text.trim().toUpperCase(),
+                            'engine_code': engineCode.text.trim().isEmpty ? null : engineCode.text.trim().toUpperCase(),
+                            'displacement_cc': int.tryParse(displacement.text.trim()),
                             'current_mileage_km':
                                 int.tryParse(mileage.text.trim()),
                             'notes': notes.text.trim()
@@ -754,7 +792,9 @@ class _WorkshopScreenState extends State<WorkshopScreen> {
       model.dispose();
       year.dispose();
       vin.dispose();
-      engine.dispose();
+      engineNumber.dispose();
+      engineCode.dispose();
+      displacement.dispose();
       mileage.dispose();
       notes.dispose();
     }

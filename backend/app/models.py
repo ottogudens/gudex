@@ -138,7 +138,12 @@ class Vehicle(SQLModel, table=True):
     make: str = Field(max_length=60)
     model: str = Field(max_length=60)
     year: Optional[int] = None
+    # `engine` se conserva durante la transición para no perder registros antiguos.
+    # Los nuevos campos separan identificación legal y especificación técnica.
     engine: Optional[str] = Field(default=None, max_length=80)
+    engine_number: Optional[str] = Field(default=None, max_length=80, index=True)
+    engine_code: Optional[str] = Field(default=None, max_length=80)
+    displacement_cc: Optional[int] = Field(default=None, ge=0)
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
     public_service_card_enabled: bool = False

@@ -140,7 +140,11 @@ class VehicleCreate(SQLModel):
     make: str
     model: str
     year: Optional[int] = None
+    # Compatibilidad: engine recibe el antiguo valor si aún existe un cliente móvil sin actualizar.
     engine: Optional[str] = None
+    engine_number: Optional[str] = Field(default=None, max_length=80)
+    engine_code: Optional[str] = Field(default=None, max_length=80)
+    displacement_cc: Optional[int] = Field(default=None, ge=0, le=20000)
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
     public_service_card_enabled: bool = False
@@ -206,6 +210,9 @@ class VehicleUpdate(SQLModel):
     model: Optional[str] = None
     year: Optional[int] = None
     engine: Optional[str] = None
+    engine_number: Optional[str] = Field(default=None, max_length=80)
+    engine_code: Optional[str] = Field(default=None, max_length=80)
+    displacement_cc: Optional[int] = Field(default=None, ge=0, le=20000)
     current_mileage_km: Optional[int] = None
     notes: Optional[str] = None
     public_service_card_enabled: Optional[bool] = None

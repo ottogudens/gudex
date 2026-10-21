@@ -663,7 +663,13 @@ def create_vehicle(data: VehicleCreate, session: Session = Depends(get_session),
         raise HTTPException(409, "Ya existe un vehículo con esa patente")
     if data.vin and session.exec(select(Vehicle).where(Vehicle.vin == data.vin)).first():
         raise HTTPException(409, "Ya existe un vehículo con ese VIN")
-    vehicle = Vehicle.model_validate(data)
+    values = data.model_dump()
+    # El campo histórico `engine` siempre representó texto libre. Al crear un
+    # vehículo nuevo lo tratamos como número de motor para preservar la API
+    # anterior sin mezclarlo con código o cilindrada.
+    if not values.get("engine_number") and values.get("engine"):
+        values["engine_number"] = values["engine"]
+    vehicle = Vehicle.model_validate(values)
     session.add(vehicle)
     session.commit()
     session.refresh(vehicle)

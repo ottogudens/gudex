@@ -38,7 +38,10 @@ def _order_context(session: Session, order: WorkOrder, customer_view: bool) -> d
                        "reported_symptoms": order.reported_symptoms, "diagnosis": order.diagnosis if not customer_view else None,
                        "total_clp": order.total_clp if not customer_view else None},
         "vehicle": {"id": vehicle.id, "plate": vehicle.plate, "make": vehicle.make,
-                    "model": vehicle.model, "year": vehicle.year, "engine": vehicle.engine} if vehicle else None,
+                    "model": vehicle.model, "year": vehicle.year,
+                    "engine_number": vehicle.engine_number or vehicle.engine,
+                    "engine_code": vehicle.engine_code,
+                    "displacement_cc": vehicle.displacement_cc} if vehicle else None,
         "customer": {"full_name": customer.full_name} if customer else None,
         "inspections": [{"category": item.category, "item": item.item, "result": item.result,
                          "measured_value": item.measured_value, "notes": item.notes}

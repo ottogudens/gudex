@@ -81,7 +81,9 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
       'model': 'Modelo',
       'year': 'Año',
       'vin': 'VIN',
-      'engine': 'Motor',
+      'engine_number': 'Número de motor',
+      'engine_code': 'Código de motor',
+      'displacement_cc': 'Cilindrada (cc)',
       'current_mileage_km': 'Kilometraje'
     };
     final controllers = {
@@ -111,7 +113,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                               child: TextField(
                                   controller: controllers[field.key],
                                   enabled: !saving,
-                                  keyboardType: ['year', 'current_mileage_km']
+                                  keyboardType: ['year', 'current_mileage_km', 'displacement_cc']
                                           .contains(field.key)
                                       ? TextInputType.number
                                       : TextInputType.text,
@@ -147,7 +149,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                         'Completa patente, marca y modelo.');
                                     return;
                                   }
-                                  if (['year', 'current_mileage_km']
+                                  if (['year', 'current_mileage_km', 'displacement_cc']
                                           .contains(field) &&
                                       text.isNotEmpty &&
                                       (int.tryParse(text) == null ||
@@ -158,7 +160,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                   }
                                   payload[field] = text.isEmpty
                                       ? null
-                                      : ['year', 'current_mileage_km']
+                                      : ['year', 'current_mileage_km', 'displacement_cc']
                                               .contains(field)
                                           ? int.parse(text)
                                           : text;
