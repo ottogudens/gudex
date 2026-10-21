@@ -36,6 +36,7 @@ class _PosScreenState extends State<PosScreen> {
   String _paymentMethod = 'cash';
   String _categoryFilter = 'Todos';
   String _serviceCategoryFilter = 'Todos';
+  int _catalogTab = 0;
   bool _orderDraftLoaded = false;
   bool _loading = true;
   bool _saving = false;
@@ -670,10 +671,32 @@ class _PosScreenState extends State<PosScreen> {
           children: [
             if (_paymentNotice != null)
               Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Semantics(
                   liveRegion: true,
-                  child: Text(_paymentNotice!),
+                  child: Material(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      child: Row(children: [
+                        Icon(Icons.info_outline, size: 18,
+                            color: Theme.of(context).colorScheme.onSecondaryContainer),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(_paymentNotice!, maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).colorScheme.onSecondaryContainer))),
+                        IconButton(
+                          tooltip: 'Cerrar aviso',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => setState(() => _paymentNotice = null),
+                          icon: const Icon(Icons.close, size: 18),
+                        ),
+                      ]),
+                    ),
+                  ),
                 ),
               ),
             Padding(
@@ -793,9 +816,24 @@ class _PosScreenState extends State<PosScreen> {
 
   Widget _desktopCatalogs(List<Map<String, dynamic>> available) => Column(
         children: [
-          Expanded(child: _catalogPanel(available, desktop: true)),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: 0, icon: Icon(Icons.inventory_2_outlined), label: Text('Productos')),
+                ButtonSegment(value: 1, icon: Icon(Icons.build_circle_outlined), label: Text('Servicios')),
+              ],
+              selected: {_catalogTab},
+              onSelectionChanged: (value) => setState(() => _catalogTab = value.first),
+            ),
+          ),
           const SizedBox(height: 10),
-          Expanded(child: _serviceCatalogPanel(desktop: true)),
+          Expanded(
+            child: _catalogTab == 0
+                ? _catalogPanel(available, desktop: true)
+                : _serviceCatalogPanel(desktop: true),
+          ),
         ],
       );
 
@@ -1453,11 +1491,11 @@ class _PosScreenState extends State<PosScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
-                  'Revisa la venta: hay productos sin stock suficiente o una orden que ya no está lista para pago. Ajusta o quita las líneas indicadas.',
+                  'Revisa la venta: hay productos sin stock suficiente. Ajusta o quita las líneas indicadas.',
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
-            if (_workOrderId != null && _readyOrder == null)
+            if (_workOrderId != null && !_orderDraftLoaded && _readyOrder == null)
               TextButton(
                 onPressed: () => setState(() {
                   _workOrderId = null;
