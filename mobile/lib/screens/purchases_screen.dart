@@ -194,11 +194,34 @@ class _PurchaseDetailState extends State<_PurchaseDetail> {
         final lines = receipt['lines'] is List ? receipt['lines'] as List : const [];
         final pending = receipt['status'] == 'review';
         return Column(children: [
-          Padding(padding: const EdgeInsets.all(16), child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(receipt['supplier'] is Map ? '${receipt['supplier']['name']}' : 'Proveedor sin identificar', style: Theme.of(context).textTheme.titleLarge),
-            Text('Documento ${receipt['folio'] ?? receipt['code']} · Total ${formatClp((receipt['total_amount_clp'] as num?)?.toInt() ?? 0)}'),
-            if (receipt['extraction_note'] != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${receipt['extraction_note']}')),
-          ]))),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      receipt['supplier'] is Map
+                          ? '${receipt['supplier']['name']}'
+                          : 'Proveedor sin identificar',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    Text(
+                      'Documento ${receipt['folio'] ?? receipt['code']} · '
+                      'Total ${formatClp((receipt['total_amount_clp'] as num?)?.toInt() ?? 0)}',
+                    ),
+                    if (receipt['extraction_note'] != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text('${receipt['extraction_note']}'),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           Expanded(child: ListView.builder(itemCount: lines.length, itemBuilder: (context, index) {
             final line = Map<String, dynamic>.from(lines[index] as Map);
             final matched = line['product_id'] != null;
