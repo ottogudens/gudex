@@ -507,6 +507,36 @@ class StockAdjustment(SQLModel):
         return value.strip()
 
 
+class SupplierCreate(SQLModel):
+    rut: Optional[str] = Field(default=None, max_length=24)
+    name: str = Field(min_length=2, max_length=180)
+    email: Optional[str] = Field(default=None, max_length=254)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    address: Optional[str] = Field(default=None, max_length=300)
+
+
+class SupplierUpdate(SQLModel):
+    rut: Optional[str] = Field(default=None, max_length=24)
+    name: Optional[str] = Field(default=None, min_length=2, max_length=180)
+    email: Optional[str] = Field(default=None, max_length=254)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    address: Optional[str] = Field(default=None, max_length=300)
+    active: Optional[bool] = None
+
+
+class PurchaseReceiptLineUpdate(SQLModel):
+    product_id: Optional[int] = None
+    supplier_code: Optional[str] = Field(default=None, max_length=120)
+    description: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    quantity: Optional[float] = Field(default=None, gt=0)
+    unit_cost_clp: Optional[int] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class PurchaseReceiptApply(SQLModel):
+    account_id: Optional[int] = None
+
+
 class InventoryCountSessionCreate(SQLModel):
     name: str = Field(min_length=3, max_length=140)
     blind_count: bool = True

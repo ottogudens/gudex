@@ -23,6 +23,7 @@ import 'screens/scanner_screen.dart';
 import 'screens/pos_screen.dart';
 import 'screens/cashbox_screen.dart';
 import 'screens/inventory_count_screen.dart';
+import 'screens/purchases_screen.dart';
 import 'screens/workshop_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/integration_settings_screen.dart';
@@ -287,6 +288,10 @@ class _HomePageState extends ConsumerState<HomePage> {
           icon: Icons.qr_code_scanner_outlined,
           path: '/api/v1/inventory-counts'),
       AppModule(
+          title: 'Compras y proveedores',
+          icon: Icons.local_shipping_outlined,
+          path: '/api/v1/purchases'),
+      AppModule(
           title: 'Agenda',
           icon: Icons.calendar_month_outlined,
           path: '/api/v1/appointments'),
@@ -495,6 +500,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                                                                         : modules[selected].path ==
                                                                                 '/api/v1/cash/summary'
                                                                             ? CashboxScreen(api: api)
+                                                                            : modules[selected].path == '/api/v1/purchases'
+                                                                                ? PurchasesScreen(api: api)
                                                                             : modules[selected].path ==
                                                                                     '/api/v1/inventory-counts'
                                                                                 ? InventoryCountScreen(api: api, canApply: widget.role == 'admin')
@@ -617,6 +624,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ? 'General'
           : title.contains('POS') ||
                   title.contains('Inventario') ||
+                  title.contains('Compras') ||
                   title.contains('Scanner') ||
                   title.contains('Agenda')
               ? 'Operación'
@@ -704,6 +712,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         title.toLowerCase().contains('trabajos'))
       return Icons.assignment_outlined;
     if (title.contains('Inventario')) return Icons.inventory_2_outlined;
+    if (title.contains('Compras')) return Icons.local_shipping_outlined;
     if (title.toLowerCase().contains('cliente') ||
         title.toLowerCase().contains('vehículos'))
       return Icons.directions_car_outlined;

@@ -478,6 +478,56 @@ class Product(SQLModel, table=True):
     active: bool = True
 
 
+class Supplier(SQLModel, table=True):
+    """Commercial supplier, independent from a one-off cash counterparty."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rut: Optional[str] = Field(default=None, unique=True, index=True, max_length=24)
+    name: str = Field(index=True, max_length=180)
+    email: Optional[str] = Field(default=None, max_length=254)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    address: Optional[str] = Field(default=None, max_length=300)
+    active: bool = True
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class PurchaseReceipt(SQLModel, table=True):
+    """Supplier document staged for review before it changes stock or cash."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True, unique=True, max_length=32)
+    supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id", index=True)
+    document_type: str = Field(default="purchase_invoice", max_length=40)
+    folio: Optional[str] = Field(default=None, max_length=80)
+    issue_date: Optional[datetime] = None
+    net_amount_clp: int = Field(default=0, ge=0)
+    tax_amount_clp: int = Field(default=0, ge=0)
+    total_amount_clp: int = Field(default=0, ge=0)
+    status: str = Field(default="review", max_length=24)
+    source_format: str = Field(max_length=12)
+    original_filename: str = Field(max_length=255)
+    storage_path: str = Field(max_length=500)
+    extraction_note: Optional[str] = Field(default=None, max_length=2000)
+    cash_movement_id: Optional[int] = Field(default=None, foreign_key="cashmovement.id", index=True)
+    created_by_email: Optional[str] = Field(default=None, max_length=254)
+    reviewed_by_email: Optional[str] = Field(default=None, max_length=254)
+    created_at: datetime = Field(default_factory=now_utc)
+    applied_at: Optional[datetime] = None
+
+
+class PurchaseReceiptLine(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    purchase_receipt_id: int = Field(foreign_key="purchasereceipt.id", index=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True)
+    supplier_code: Optional[str] = Field(default=None, max_length=120)
+    description: str = Field(max_length=300)
+    quantity: float = Field(default=1, gt=0)
+    unit_cost_clp: int = Field(default=0, ge=0)
+    line_total_clp: int = Field(default=0, ge=0)
+    match_status: str = Field(default="unmatched", max_length=24)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
 class StockMovement(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     product_id: int = Field(foreign_key="product.id", index=True)

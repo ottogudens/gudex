@@ -50,6 +50,7 @@ from app.routers.public_card import card_payload, router as public_card_router
 from app.routers.workshop_operations import router as workshop_operations_router
 from app.routers.cash import router as cash_router
 from app.routers.inventory_counts import router as inventory_counts_router
+from app.routers.purchases import router as purchases_router
 from app.services.cash import backfill_recorded_payments, ensure_default_accounts, record_sale_payment, reverse_sale_payment
 
 logger = logging.getLogger("gudex")
@@ -101,6 +102,7 @@ app.include_router(public_card_router)
 app.include_router(workshop_operations_router)
 app.include_router(cash_router)
 app.include_router(inventory_counts_router)
+app.include_router(purchases_router)
 
 
 def on_startup() -> None:
