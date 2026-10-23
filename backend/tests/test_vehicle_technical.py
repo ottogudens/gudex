@@ -90,6 +90,54 @@ def test_research_rejects_uncited_and_unknown_fields():
     assert len(proposals) == 1 and proposals[0].value == "TEST"
 
 
+def test_research_identity_uses_full_vehicle_profile_and_invalidates_stale_data(vehicle):
+    with Session(engine) as session:
+        current = session.get(Vehicle, vehicle.id)
+        current.vin = "JTDBR32E720123456"
+        current.engine_number = "LEGAL-123"
+        current.engine_code = "2NR-FE"
+        current.displacement_cc = 1496
+        current.current_mileage_km = 45670
+        current.notes = "Vehículo de mercado chileno"
+        session.add(current)
+        session.commit()
+        request = SimpleNamespace(state=SimpleNamespace(user_email="admin@test.cl"))
+        for key, value in (("version", "Sport"), ("transmission", "CVT K313"),
+                           ("market", "Chile"), ("drive", "FWD")):
+            technical.save(vehicle.id, key, technical.TechnicalUpdate(value=value), request, session)
+        values = technical.technical_payload(session, vehicle.id)["values"]
+        identity = technical.vehicle_research_identity(current, values)
+        assert identity["vin"] == "JTDBR32E720123456"
+        assert identity["engine_number"] == "LEGAL-123"
+        assert identity["engine_code"] == "2NR-FE"
+        assert identity["displacement"] == "1496 cc"
+        assert identity["transmission"] == "CVT K313"
+        assert identity["current_mileage_km"] == 45670
+        assert technical.research_identity_gaps(identity) == []
+        before = technical.identity_signature(session, vehicle.id)
+        current.engine_code = "2NR-FKE"
+        session.add(current)
+        session.commit()
+        assert technical.identity_signature(session, vehicle.id) != before
+
+
+@pytest.mark.anyio
+async def test_research_blocks_parts_and_fluids_without_exact_identity(vehicle, monkeypatch):
+    calls = []
+
+    async def research(identity, fields):
+        calls.append((identity, fields[0]["group"]))
+        return []
+
+    monkeypatch.setattr(technical, "research_vehicle", research)
+    await technical.enrich_vehicle(vehicle.id)
+    assert {group for _, group in calls}.isdisjoint({"filters", "fluids"})
+    with Session(engine) as session:
+        status = technical.technical_payload(session, vehicle.id)["values"]["research_status"]["value"]
+        assert "filters: faltan datos" in status
+        assert "fluids: faltan datos" in status
+
+
 def test_additive_migration_preserves_vehicle():
     import importlib.util
     from pathlib import Path

@@ -52,13 +52,68 @@ KEYS = {item["key"] for item in FIELDS}
 
 def identity_signature(session, vehicle_id):
     vehicle = session.get(Vehicle, vehicle_id)
-    identity = {k: getattr(vehicle, k) for k in ("make", "model", "year", "engine", "vin")} if vehicle else {}
+    identity = {k: getattr(vehicle, k) for k in (
+        "plate", "make", "model", "year", "engine", "engine_number", "engine_code",
+        "displacement_cc", "vin", "notes",
+    )} if vehicle else {}
     seen = set()
     for row in entries(session, vehicle_id):
         if row.key not in seen and row.key in {f["key"] for f in FIELDS if f["group"] == "information"}:
             identity[row.key] = row.value
             seen.add(row.key)
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+IDENTITY_TECHNICAL_KEYS = {
+    "version", "engine_code", "displacement", "fuel", "transmission", "drive", "market",
+}
+
+
+def vehicle_research_identity(vehicle: Vehicle, values: dict) -> dict:
+    """Build the complete, normalized identity supplied to technical research.
+
+    The legal engine number is kept distinct from the engine *code*: only the
+    latter identifies a technical variant.  Empty fields are omitted so the
+    provider cannot mistake an empty string for evidence.
+    """
+    technical = {key: values[key]["value"] for key in IDENTITY_TECHNICAL_KEYS
+                 if isinstance(values.get(key), dict) and str(values[key].get("value", "")).strip()}
+    identity = {
+        "plate": vehicle.plate,
+        "vin": vehicle.vin,
+        "make": vehicle.make,
+        "model": vehicle.model,
+        "year": vehicle.year,
+        "legacy_engine": vehicle.engine,
+        "engine_number": vehicle.engine_number,
+        "engine_code_registered": vehicle.engine_code,
+        "displacement_cc_registered": vehicle.displacement_cc,
+        "current_mileage_km": vehicle.current_mileage_km,
+        "registration_notes": vehicle.notes,
+        **technical,
+    }
+    # Prefer a manually entered technical-card engine code over the legacy
+    # field, then fall back to the dedicated Vehicle column.
+    if not identity.get("engine_code") and vehicle.engine_code:
+        identity["engine_code"] = vehicle.engine_code
+    if not identity.get("displacement") and vehicle.displacement_cc:
+        identity["displacement"] = f"{vehicle.displacement_cc} cc"
+    return {key: value for key, value in identity.items()
+            if value is not None and (not isinstance(value, str) or value.strip())}
+
+
+def research_identity_gaps(identity: dict) -> list[str]:
+    """Return the minimum missing identity required for fitment/fluid claims."""
+    missing = []
+    for key, label in (("make", "marca"), ("model", "modelo"), ("year", "año")):
+        if not identity.get(key):
+            missing.append(label)
+    # VIN is ideal.  Without it, exact version + engine code + market must be
+    # present before publishing parts, capacities, or fluid specifications.
+    if not identity.get("vin"):
+        alternate = (("version", "versión"), ("engine_code", "código de motor"), ("market", "mercado"))
+        missing.extend(label for key, label in alternate if not identity.get(key))
+    return missing
 
 
 class TechnicalUpdate(BaseModel):
@@ -167,11 +222,14 @@ async def enrich_vehicle(vehicle_id: int, bind=None):
         vehicle = session.get(Vehicle, vehicle_id)
         if not vehicle:
             return
-        original = {k: getattr(vehicle, k) for k in ("make", "model", "year", "engine")}
+        original = {k: getattr(vehicle, k) for k in (
+            "plate", "make", "model", "year", "engine", "engine_number", "engine_code",
+            "displacement_cc", "vin", "current_mileage_km", "notes",
+        )}
         values = technical_payload(session, vehicle_id)["values"]
         signature = identity_signature(session, vehicle_id)
-        identity = {**original, **{k: v["value"] for k, v in values.items()
-                    if k in {"version", "engine_code", "displacement", "fuel", "transmission", "drive", "market"}}}
+        identity = vehicle_research_identity(vehicle, values)
+        identity_gaps = research_identity_gaps(identity)
         # Retry AI suggestions (which are not verified), but preserve manual
         # drafts and verified data. A previous search must not freeze the card.
         fields = [f for f in FIELDS if f["key"] != "research_status" and
@@ -181,6 +239,13 @@ async def enrich_vehicle(vehicle_id: int, bind=None):
             proposals = []
             failed_groups = []
             for group in sorted({f["group"] for f in fields}):
+                # Information/care can state what identification is missing,
+                # but fitment and fluid facts must never be guessed from a
+                # generic make/model/year search.
+                if group in {"filters", "fluids"} and identity_gaps:
+                    failed_groups.append(
+                        f"{group}: faltan datos para una variante exacta ({', '.join(identity_gaps)})")
+                    continue
                 try:
                     proposals.extend(await research_vehicle(identity, [f for f in fields if f["group"] == group]))
                 except HTTPException as exc:
@@ -190,7 +255,7 @@ async def enrich_vehicle(vehicle_id: int, bind=None):
             current = technical_payload(session, vehicle_id)["values"]
             if not vehicle or identity_signature(session, vehicle_id) != signature or any(getattr(vehicle, k) != v for k, v in original.items()) or any(
                 current.get(k, {}).get("value") != values.get(k, {}).get("value")
-                for k in {"version", "engine_code", "displacement", "fuel", "transmission", "drive", "market"}
+                for k in IDENTITY_TECHNICAL_KEYS
             ):
                 return 0
             count = 0

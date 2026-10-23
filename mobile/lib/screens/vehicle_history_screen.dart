@@ -1166,7 +1166,9 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                                       'Modelo': 'model',
                                       'Año': 'year',
                                       'VIN': 'vin',
-                                      'Motor': 'engine',
+                                      'Número de motor': 'engine_number',
+                                      'Código de motor': 'engine_code',
+                                      'Cilindrada': 'displacement_cc',
                                       'Kilometraje': 'current_mileage_km'
                                     }.entries)
                                       Padding(
@@ -1186,7 +1188,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
                     ]),
                     _page([
                       const Text(
-                          'Las sugerencias requieren revisión técnica. Los datos pendientes no confirman compatibilidad.'),
+                          'Para buscar filtros, capacidades y fluidos con precisión, completa el VIN o bien versión, código de motor y mercado. Las sugerencias requieren revisión técnica.'),
                       if (values['research_status'] is Map)
                         Card(child: ListTile(
                           leading: const Icon(Icons.travel_explore_outlined),
