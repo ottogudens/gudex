@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Product, PurchaseReceipt, PurchaseReceiptLine, StockMovement, Supplier
-from app.routers.purchases import apply_purchase
+from app.routers.purchases import _fit, apply_purchase
 from app.schemas import PurchaseReceiptApply
 from app.services import purchase_documents
 from app.services.purchase_documents import extract_pdf, extract_xml
@@ -65,6 +65,11 @@ TOTAL A PAGAR $39.270"""
         {"supplier_code": "MNT-20", "description": "Aceite 5W30 sintético", "quantity": 1.0,
          "unit_cost_clp": 25000, "line_total_clp": 25000},
     ]
+
+
+def test_purchase_document_text_is_bounded_to_database_contract():
+    assert _fit("X" * 301, 300) == "X" * 300
+    assert _fit("   ", 20, fallback="Sin dato") == "Sin dato"
 
 
 def test_applying_reviewed_purchase_increases_stock_and_updates_latest_cost():

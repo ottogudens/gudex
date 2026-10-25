@@ -50,6 +50,14 @@ def _find_product(session: Session, code: str | None) -> Product | None:
     return None
 
 
+def _fit(value: object | None, length: int, *, fallback: str | None = None) -> str | None:
+    """Keep untrusted supplier-document text within the database contract."""
+    if value is None:
+        return fallback
+    text_value = str(value).strip()
+    return (text_value[:length] if text_value else fallback)
+
+
 @router.get("/api/v1/suppliers", dependencies=[Depends(require_admin)])
 def list_suppliers(session: Session = Depends(get_session)):
     return session.exec(select(Supplier).where(Supplier.active == True).order_by(Supplier.name)).all()  # noqa: E712
@@ -83,7 +91,7 @@ def list_purchases(session: Session = Depends(get_session)):
 
 @router.post("/api/v1/purchases/import", status_code=201, dependencies=[Depends(require_admin)])
 async def import_purchase_document(request: Request, file: UploadFile = File(...), session: Session = Depends(get_session)):
-    filename = Path(file.filename or "documento").name
+    filename = _fit(Path(file.filename or "documento").name, 255, fallback="documento") or "documento"
     suffix = Path(filename).suffix.lower()
     if suffix not in {".xml", ".pdf"}:
         raise HTTPException(422, "Adjunta una factura XML o PDF")
@@ -97,23 +105,28 @@ async def import_purchase_document(request: Request, file: UploadFile = File(...
     destination = Path(settings.upload_dir) / "purchase-receipts" / f"{uuid4().hex}{suffix}"
     try:
         supplier_data = extracted["supplier"]
+        supplier_rut = _fit(supplier_data.get("rut"), 24)
+        supplier_name = _fit(supplier_data.get("name"), 180)
+        supplier_address = _fit(supplier_data.get("address"), 300)
         supplier = None
-        if supplier_data.get("rut"):
-            supplier = session.exec(select(Supplier).where(Supplier.rut == supplier_data["rut"])).first()
-        if not supplier and supplier_data.get("name"):
-            supplier = Supplier(rut=supplier_data.get("rut"), name=supplier_data["name"], address=supplier_data.get("address"))
+        if supplier_rut:
+            supplier = session.exec(select(Supplier).where(Supplier.rut == supplier_rut)).first()
+        if not supplier and supplier_name:
+            supplier = Supplier(rut=supplier_rut, name=supplier_name, address=supplier_address)
             session.add(supplier); session.flush()
         destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(content)
         receipt = PurchaseReceipt(code=f"PC-{datetime.now():%y%m%d}-{uuid4().hex[:6].upper()}", supplier_id=supplier.id if supplier else None,
-            folio=extracted.get("folio"), issue_date=extracted.get("issue_date"), net_amount_clp=extracted.get("net_amount_clp", 0),
+            folio=_fit(extracted.get("folio"), 80), issue_date=extracted.get("issue_date"), net_amount_clp=extracted.get("net_amount_clp", 0),
             tax_amount_clp=extracted.get("tax_amount_clp", 0), total_amount_clp=extracted.get("total_amount_clp", 0),
             source_format=suffix.removeprefix("."), original_filename=filename, storage_path=str(destination),
-            extraction_note=extracted.get("note"), created_by_email=request.state.user_email)
+            extraction_note=_fit(extracted.get("note"), 2000), created_by_email=request.state.user_email)
         session.add(receipt); session.flush()
         for item in extracted.get("lines", []):
             product = _find_product(session, item.get("supplier_code"))
             session.add(PurchaseReceiptLine(purchase_receipt_id=receipt.id, product_id=product.id if product else None,
-                supplier_code=item.get("supplier_code"), description=item["description"], quantity=item["quantity"],
+                supplier_code=_fit(item.get("supplier_code"), 120),
+                description=_fit(item.get("description"), 300, fallback="Ítem sin descripción") or "Ítem sin descripción",
+                quantity=item["quantity"],
                 unit_cost_clp=item["unit_cost_clp"], line_total_clp=item["line_total_clp"],
                 match_status="matched" if product else "unmatched"))
         session.commit(); session.refresh(receipt)
