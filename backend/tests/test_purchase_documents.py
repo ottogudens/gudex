@@ -1,11 +1,15 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, engine
+from app.main import app
 from app.models import Product, PurchaseReceipt, PurchaseReceiptLine, StockMovement, Supplier
 from app.routers.purchases import _fit, apply_purchase
+from app.security import create_access_token
+from app.models import User, UserRole
 from app.schemas import PurchaseReceiptApply
 from app.services import purchase_documents
 from app.services.purchase_documents import extract_pdf, extract_xml
@@ -67,6 +71,7 @@ TOTAL A PAGAR $39.270"""
     assert result["supplier"]["name"] == "Comercial Repuestos SpA"
     assert result["folio"] == "45678"
     assert result["issue_date"].strftime("%Y-%m-%d") == "2026-10-22"
+    assert result["issue_date"].tzinfo is not None
     assert result["net_amount_clp"] == 33000
     assert result["tax_amount_clp"] == 6270
     assert result["total_amount_clp"] == 39270
@@ -81,6 +86,32 @@ TOTAL A PAGAR $39.270"""
 def test_purchase_document_text_is_bounded_to_database_contract():
     assert _fit("X" * 301, 300) == "X" * 300
     assert _fit("   ", 20, fallback="Sin dato") == "Sin dato"
+
+
+def test_purchase_import_accepts_sii_decimal_xml_values():
+    create_db_and_tables()
+    suffix = uuid4().hex[:10]
+    with Session(engine) as session:
+        user = User(email=f"purchase-{suffix}@test.cl", full_name="Admin compras",
+                    password_hash="unused", role=UserRole.admin)
+        session.add(user); session.commit(); session.refresh(user)
+        token = create_access_token(user)
+    xml = b'''<?xml version="1.0" encoding="ISO-8859-1"?>
+    <DTE><Documento><Encabezado><IdDoc><Folio>24933</Folio><FchEmis>2026-10-06</FchEmis></IdDoc>
+    <Emisor><RUTEmisor>76825877-5</RUTEmisor><RznSoc>Proveedor Gocar</RznSoc></Emisor>
+    <Totales><MntNeto>242600</MntNeto><IVA>46094</IVA><MntTotal>288694</MntTotal></Totales></Encabezado>
+    <Detalle><CdgItem><VlrCodigo>218575</VlrCodigo></CdgItem><NmbItem>QUARTZ 7000 10W40</NmbItem>
+    <QtyItem>3.000000</QtyItem><PrcItem>49900.000000</PrcItem><MontoItem>149700</MontoItem></Detalle>
+    <Detalle><CdgItem><VlrCodigo>236656</VlrCodigo></CdgItem><NmbItem>QUARTZ INEO MDC 5W30</NmbItem>
+    <QtyItem>1.000000</QtyItem><PrcItem>92900.000000</PrcItem><MontoItem>92900</MontoItem></Detalle>
+    </Documento></DTE>'''
+    with TestClient(app) as client:
+        response = client.post("/api/v1/purchases/import", headers={"Authorization": f"Bearer {token}"},
+                               files={"file": ("F024933T33.xml", xml, "application/xml")})
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["folio"] == "24933" and body["total_amount_clp"] == 288694
+    assert [(line["quantity"], line["unit_cost_clp"]) for line in body["lines"]] == [(3.0, 49900), (1.0, 92900)]
 
 
 def test_applying_reviewed_purchase_increases_stock_and_updates_latest_cost():

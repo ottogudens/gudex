@@ -8,7 +8,7 @@ affect stock or cash.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Any
 
@@ -75,7 +75,10 @@ def _date(value: str | None) -> datetime | None:
         return None
     for pattern in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
         try:
-            return datetime.strptime(value[:10], pattern)
+            # SII DTE dates do not carry an offset. They represent a Chilean
+            # document date, so UTC midnight is sufficient for storage and
+            # satisfies the timezone-aware database contract.
+            return datetime.strptime(value[:10], pattern).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
     return None
