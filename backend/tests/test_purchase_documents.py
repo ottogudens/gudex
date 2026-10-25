@@ -7,7 +7,8 @@ from app.database import create_db_and_tables, engine
 from app.models import Product, PurchaseReceipt, PurchaseReceiptLine, StockMovement, Supplier
 from app.routers.purchases import apply_purchase
 from app.schemas import PurchaseReceiptApply
-from app.services.purchase_documents import extract_xml
+from app.services import purchase_documents
+from app.services.purchase_documents import extract_pdf, extract_xml
 
 
 def _request():
@@ -27,6 +28,43 @@ def test_chilean_dte_xml_extracts_supplier_totals_and_lines():
     assert result["total_amount_clp"] == 11900
     assert result["lines"] == [{"supplier_code": "WG-123", "description": "Filtro de aceite", "quantity": 2.5,
                                 "unit_cost_clp": 4000, "line_total_clp": 10000}]
+
+
+def test_text_pdf_extracts_supplier_document_fields_and_safe_lines(monkeypatch):
+    class FakePage:
+        def extract_text(self):
+            return """Comercial Repuestos SpA
+RUT: 76.123.456-7
+Factura Electrónica
+Folio: 45678
+Fecha de emisión: 22-10-2026
+Código Descripción Cantidad Precio Total
+WG-123 Filtro de aceite Wega 2 UN 4.000 8.000
+MNT-20 Aceite 5W30 sintético 1 UN 25.000 25.000
+Neto $33.000
+IVA $6.270
+TOTAL A PAGAR $39.270"""
+
+    class FakeReader:
+        def __init__(self, stream):
+            self.pages = [FakePage()]
+
+    monkeypatch.setattr(purchase_documents, "PdfReader", FakeReader)
+    result = extract_pdf(b"%PDF-pretend")
+
+    assert result["supplier"]["rut"] == "76.123.456-7"
+    assert result["supplier"]["name"] == "Comercial Repuestos SpA"
+    assert result["folio"] == "45678"
+    assert result["issue_date"].strftime("%Y-%m-%d") == "2026-10-22"
+    assert result["net_amount_clp"] == 33000
+    assert result["tax_amount_clp"] == 6270
+    assert result["total_amount_clp"] == 39270
+    assert result["lines"] == [
+        {"supplier_code": "WG-123", "description": "Filtro de aceite Wega", "quantity": 2.0,
+         "unit_cost_clp": 4000, "line_total_clp": 8000},
+        {"supplier_code": "MNT-20", "description": "Aceite 5W30 sintético", "quantity": 1.0,
+         "unit_cost_clp": 25000, "line_total_clp": 25000},
+    ]
 
 
 def test_applying_reviewed_purchase_increases_stock_and_updates_latest_cost():
