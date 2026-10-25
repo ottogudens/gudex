@@ -1,4 +1,5 @@
 """Supplier registry and controlled purchase receipt intake."""
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +19,7 @@ from app.security import require_admin
 from app.services.purchase_documents import extract_pdf, extract_xml
 
 router = APIRouter(tags=["compras y proveedores"])
+logger = logging.getLogger("gudex.purchases")
 
 
 def _supplier_payload(row: Supplier) -> dict:
@@ -91,29 +93,41 @@ async def import_purchase_document(request: Request, file: UploadFile = File(...
         extracted = extract_xml(content) if suffix == ".xml" else extract_pdf(content)
     except Exception as exc:
         raise HTTPException(422, f"No se pudo leer el documento: {exc}") from exc
-    supplier_data = extracted["supplier"]
-    supplier = None
-    if supplier_data.get("rut"):
-        supplier = session.exec(select(Supplier).where(Supplier.rut == supplier_data["rut"])).first()
-    if not supplier and supplier_data.get("name"):
-        supplier = Supplier(rut=supplier_data.get("rut"), name=supplier_data["name"], address=supplier_data.get("address"))
-        session.add(supplier); session.flush()
     destination = Path(settings.upload_dir) / "purchase-receipts" / f"{uuid4().hex}{suffix}"
-    destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(content)
-    receipt = PurchaseReceipt(code=f"PC-{datetime.now():%y%m%d}-{uuid4().hex[:6].upper()}", supplier_id=supplier.id if supplier else None,
-        folio=extracted.get("folio"), issue_date=extracted.get("issue_date"), net_amount_clp=extracted.get("net_amount_clp", 0),
-        tax_amount_clp=extracted.get("tax_amount_clp", 0), total_amount_clp=extracted.get("total_amount_clp", 0),
-        source_format=suffix.removeprefix("."), original_filename=filename, storage_path=str(destination),
-        extraction_note=extracted.get("note"), created_by_email=request.state.user_email)
-    session.add(receipt); session.flush()
-    for item in extracted.get("lines", []):
-        product = _find_product(session, item.get("supplier_code"))
-        session.add(PurchaseReceiptLine(purchase_receipt_id=receipt.id, product_id=product.id if product else None,
-            supplier_code=item.get("supplier_code"), description=item["description"], quantity=item["quantity"],
-            unit_cost_clp=item["unit_cost_clp"], line_total_clp=item["line_total_clp"],
-            match_status="matched" if product else "unmatched"))
-    session.commit(); session.refresh(receipt)
-    return _receipt_payload(receipt, session, include_lines=True)
+    try:
+        supplier_data = extracted["supplier"]
+        supplier = None
+        if supplier_data.get("rut"):
+            supplier = session.exec(select(Supplier).where(Supplier.rut == supplier_data["rut"])).first()
+        if not supplier and supplier_data.get("name"):
+            supplier = Supplier(rut=supplier_data.get("rut"), name=supplier_data["name"], address=supplier_data.get("address"))
+            session.add(supplier); session.flush()
+        destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(content)
+        receipt = PurchaseReceipt(code=f"PC-{datetime.now():%y%m%d}-{uuid4().hex[:6].upper()}", supplier_id=supplier.id if supplier else None,
+            folio=extracted.get("folio"), issue_date=extracted.get("issue_date"), net_amount_clp=extracted.get("net_amount_clp", 0),
+            tax_amount_clp=extracted.get("tax_amount_clp", 0), total_amount_clp=extracted.get("total_amount_clp", 0),
+            source_format=suffix.removeprefix("."), original_filename=filename, storage_path=str(destination),
+            extraction_note=extracted.get("note"), created_by_email=request.state.user_email)
+        session.add(receipt); session.flush()
+        for item in extracted.get("lines", []):
+            product = _find_product(session, item.get("supplier_code"))
+            session.add(PurchaseReceiptLine(purchase_receipt_id=receipt.id, product_id=product.id if product else None,
+                supplier_code=item.get("supplier_code"), description=item["description"], quantity=item["quantity"],
+                unit_cost_clp=item["unit_cost_clp"], line_total_clp=item["line_total_clp"],
+                match_status="matched" if product else "unmatched"))
+        session.commit(); session.refresh(receipt)
+        return _receipt_payload(receipt, session, include_lines=True)
+    except Exception as exc:
+        # A route-level HTTP error is returned through FastAPI's normal
+        # middleware chain, preserving CORS headers for the Flutter web app.
+        # The original exception remains in Railway's runtime logs.
+        session.rollback()
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("No se pudo limpiar el archivo temporal de compra %s", destination)
+        logger.exception("No se pudo guardar la factura de compra %s", filename)
+        raise HTTPException(500, "No se pudo registrar la factura. Revisa la configuración de base de datos y vuelve a intentarlo.") from exc
 
 
 @router.get("/api/v1/purchases/{receipt_id}", dependencies=[Depends(require_admin)])
