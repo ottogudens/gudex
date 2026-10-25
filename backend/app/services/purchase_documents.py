@@ -49,6 +49,27 @@ def _number(value: str | None) -> int:
     return int(round(_decimal(value)))
 
 
+def _xml_decimal(value: str | None) -> float:
+    """Read xsd:decimal values used by SII DTE XML documents.
+
+    DTE fields such as ``QtyItem`` and ``PrcItem`` always use a period as the
+    decimal separator (``3.000000``).  The display-oriented parser above treats
+    long dotted values as Chilean thousand groups, which would turn that value
+    into three million and overflow the database on import.
+    """
+    if not value:
+        return 0.0
+    cleaned = re.sub(r"[^0-9+\-.]", "", value).strip()
+    try:
+        return max(0.0, float(cleaned))
+    except ValueError:
+        return 0.0
+
+
+def _xml_number(value: str | None) -> int:
+    return int(round(_xml_decimal(value)))
+
+
 def _date(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -70,8 +91,8 @@ def extract_xml(content: bytes) -> dict[str, Any]:
         code = None
         for item_code in (node for node in detail.iter() if _local(node.tag) == "CdgItem"):
             code = _text(item_code, "VlrCodigo") or code
-        quantity = _decimal(_text(detail, "QtyItem")) or 1
-        unit_cost = _number(_text(detail, "PrcItem"))
+        quantity = _xml_decimal(_text(detail, "QtyItem")) or 1
+        unit_cost = _xml_number(_text(detail, "PrcItem"))
         total = _number(_text(detail, "MontoItem"))
         if not unit_cost and total:
             unit_cost = int(round(total / quantity))

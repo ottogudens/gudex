@@ -30,6 +30,17 @@ def test_chilean_dte_xml_extracts_supplier_totals_and_lines():
                                 "unit_cost_clp": 4000, "line_total_clp": 10000}]
 
 
+def test_chilean_dte_decimal_quantity_and_price_are_not_read_as_thousands():
+    xml = b'''<DTE><Documento><Encabezado><Emisor><RUTEmisor>76.123.456-7</RUTEmisor><RznSoc>Proveedor</RznSoc></Emisor>
+    <Totales><MntTotal>288694</MntTotal></Totales></Encabezado>
+    <Detalle><CdgItem><VlrCodigo>218575</VlrCodigo></CdgItem><NmbItem>Aceite</NmbItem>
+    <QtyItem>3.000000</QtyItem><PrcItem>49900.000000</PrcItem><MontoItem>149700</MontoItem></Detalle>
+    </Documento></DTE>'''
+    result = extract_xml(xml)
+    assert result["lines"] == [{"supplier_code": "218575", "description": "Aceite", "quantity": 3.0,
+                                "unit_cost_clp": 49900, "line_total_clp": 149700}]
+
+
 def test_text_pdf_extracts_supplier_document_fields_and_safe_lines(monkeypatch):
     class FakePage:
         def extract_text(self):
