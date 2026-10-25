@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import update
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError, ProgrammingError, SQLAlchemyError
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -126,8 +127,24 @@ async def import_purchase_document(request: Request, file: UploadFile = File(...
             destination.unlink(missing_ok=True)
         except OSError:
             logger.warning("No se pudo limpiar el archivo temporal de compra %s", destination)
-        logger.exception("No se pudo guardar la factura de compra %s", filename)
-        raise HTTPException(500, "No se pudo registrar la factura. Revisa la configuración de base de datos y vuelve a intentarlo.") from exc
+        incident = uuid4().hex[:8].upper()
+        logger.exception("Compra importada falló [%s] para %s", incident, filename)
+        if isinstance(exc, OSError):
+            message = f"No se pudo guardar el archivo de la factura (referencia {incident}). Revisa el almacenamiento persistente."
+            status = 503
+        elif isinstance(exc, (ProgrammingError, OperationalError)):
+            message = f"La base de datos no está lista para registrar compras (referencia {incident}). Espera el despliegue o revisa las migraciones."
+            status = 503
+        elif isinstance(exc, IntegrityError):
+            message = f"La factura o proveedor entra en conflicto con un registro existente (referencia {incident}). Revisa RUT y folio."
+            status = 409
+        elif isinstance(exc, (DataError, SQLAlchemyError)):
+            message = f"Los datos de la factura no se pudieron guardar (referencia {incident}). Revisa los campos detectados."
+            status = 422
+        else:
+            message = f"No se pudo registrar la factura (referencia {incident})."
+            status = 500
+        raise HTTPException(status, message) from exc
 
 
 @router.get("/api/v1/purchases/{receipt_id}", dependencies=[Depends(require_admin)])
