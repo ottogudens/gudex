@@ -415,8 +415,14 @@ class DiagnosticFinding(SQLModel, table=True):
 class Quote(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     work_order_id: Optional[int] = Field(default=None, foreign_key="workorder.id", index=True)
-    customer_id: int = Field(foreign_key="customer.id", index=True)
-    vehicle_id: int = Field(foreign_key="vehicle.id", index=True)
+    # A quote may start as a walk-in / telephone enquiry before the person or
+    # their vehicle becomes a registered customer record.
+    customer_id: Optional[int] = Field(default=None, foreign_key="customer.id", index=True)
+    vehicle_id: Optional[int] = Field(default=None, foreign_key="vehicle.id", index=True)
+    prospect_name: Optional[str] = Field(default=None, max_length=160)
+    prospect_phone: Optional[str] = Field(default=None, max_length=40)
+    prospect_email: Optional[str] = Field(default=None, max_length=254)
+    prospect_vehicle: Optional[str] = Field(default=None, max_length=180)
     description: str = Field(max_length=250)
     labor_clp: int = Field(default=0, ge=0)
     parts_clp: int = Field(default=0, ge=0)

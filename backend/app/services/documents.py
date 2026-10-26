@@ -153,11 +153,21 @@ def quote_pdf(quote, order, customer, vehicle, items=None) -> bytes:
     story = _header(styles, "Cotización", code, quote.created_at)
     if quote.status == "draft":
         story.append(Paragraph("BORRADOR · Pendiente de envío al cliente", styles["Heading2"]))
-    for label, value in (
-        ("Cliente", customer.full_name), ("RUT", customer.rut),
-        ("Vehículo", f"{vehicle.make} {vehicle.model} · {vehicle.plate}"),
+    client_name = customer.full_name if customer else (getattr(quote, "prospect_name", None) or "Cliente no registrado")
+    client_rut = customer.rut if customer else "No informado"
+    vehicle_label = (f"{vehicle.make} {vehicle.model} · {vehicle.plate}" if vehicle
+                     else (getattr(quote, "prospect_vehicle", None) or "Vehículo no informado"))
+    prospect_contact = " · ".join(filter(None, (
+        getattr(quote, "prospect_phone", None), getattr(quote, "prospect_email", None),
+    )))
+    details = [("Cliente", client_name), ("RUT", client_rut)]
+    if not customer and prospect_contact:
+        details.append(("Contacto", prospect_contact))
+    details.extend((
+        ("Vehículo", vehicle_label),
         ("Orden de trabajo", order.code if order else "Sin orden asociada"),
-    ):
+    ))
+    for label, value in details:
         story.append(Paragraph(f"<b>{label}:</b> {_text(value)}", styles["GudexBody"]))
     story += [Spacer(1, 5 * mm), Paragraph("Trabajo propuesto", styles["Heading2"]),
               Paragraph(_text(quote.description), styles["GudexBody"])]

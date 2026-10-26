@@ -422,6 +422,10 @@ class QuoteCreate(SQLModel):
     description: str = Field(min_length=1, max_length=250, pattern=r"\S")
     labor_clp: int = Field(default=0, ge=0)
     parts_clp: int = Field(default=0, ge=0)
+    prospect_name: Optional[str] = Field(default=None, max_length=160)
+    prospect_phone: Optional[str] = Field(default=None, max_length=40)
+    prospect_email: Optional[str] = Field(default=None, max_length=254)
+    prospect_vehicle: Optional[str] = Field(default=None, max_length=180)
     notes: Optional[str] = None
     lines: list[QuoteLineCreate] = Field(default_factory=list)
 
@@ -441,6 +445,10 @@ class QuoteRead(SQLModel):
     vehicle_id: Optional[int] = None
     order_code: Optional[str] = None
     vehicle_plate: Optional[str] = None
+    prospect_name: Optional[str] = None
+    prospect_phone: Optional[str] = None
+    prospect_email: Optional[str] = None
+    prospect_vehicle: Optional[str] = None
     lines: list[QuoteLineRead] = Field(default_factory=list)
 
 

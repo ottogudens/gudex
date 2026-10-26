@@ -88,6 +88,10 @@ class _QuotesScreenState extends State<_QuotesScreen> {
     final form = GlobalKey<FormState>();
     final description = TextEditingController(text: quote?['description']?.toString() ?? 'Productos y servicios cotizados');
     final notes = TextEditingController(text: quote?['notes']?.toString());
+    final prospectName = TextEditingController(text: quote?['prospect_name']?.toString() ?? '');
+    final prospectPhone = TextEditingController(text: quote?['prospect_phone']?.toString() ?? '');
+    final prospectEmail = TextEditingController(text: quote?['prospect_email']?.toString() ?? '');
+    final prospectVehicle = TextEditingController(text: quote?['prospect_vehicle']?.toString() ?? '');
     int? customerId = quote?['customer_id'] as int?;
     int? vehicleId = quote?['vehicle_id'] as int?;
     int? orderId = quote?['work_order_id'] as int?;
@@ -113,11 +117,12 @@ class _QuotesScreenState extends State<_QuotesScreen> {
             title: Text(quote == null ? 'Nueva cotización' : 'Editar borrador'),
             content: SizedBox(width: 720, child: Form(key: form, child: SingleChildScrollView(child: Column(
               mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                DropdownButtonFormField<int>(
-                  initialValue: customerId, isExpanded: true, decoration: const InputDecoration(labelText: 'Cliente *'),
+                DropdownButtonFormField<int?>(
+                  initialValue: customerId, isExpanded: true, decoration: const InputDecoration(labelText: 'Cliente (opcional)'),
                   items: [
-                    ..._customers.map((c) => DropdownMenuItem<int>(value: c['id'] as int, child: Text(c['full_name'].toString(), overflow: TextOverflow.ellipsis))),
-                    const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 8), Text('Crear nuevo cliente')]))
+                    const DropdownMenuItem<int?>(value: null, child: Text('Cotización rápida · sin cliente registrado')),
+                    ..._customers.map((c) => DropdownMenuItem<int?>(value: c['id'] as int, child: Text(c['full_name'].toString(), overflow: TextOverflow.ellipsis))),
+                    const DropdownMenuItem<int?>(value: -1, child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 8), Text('Crear nuevo cliente')]))
                   ],
                   onChanged: (value) async {
                     if (value == -1) {
@@ -127,15 +132,23 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                       update(() { customerId = value; vehicleId = null; orderId = null; });
                     }
                   },
-                  validator: (value) => value == null || value == -1 ? 'Selecciona un cliente' : null,
                 ),
+                if (customerId == null) ...[
+                  const SizedBox(height: 10),
+                  Text('Datos de contacto opcionales', style: Theme.of(context).textTheme.titleSmall),
+                  TextField(controller: prospectName, maxLength: 160, decoration: const InputDecoration(labelText: 'Nombre o empresa')),
+                  TextField(controller: prospectPhone, maxLength: 40, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono')),
+                  TextField(controller: prospectEmail, maxLength: 254, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Correo electrónico')),
+                  TextField(controller: prospectVehicle, maxLength: 180, decoration: const InputDecoration(labelText: 'Vehículo informado (opcional)')),
+                ],
                 const SizedBox(height: 12),
-                DropdownButtonFormField<int>(
+                DropdownButtonFormField<int?>(
                   key: ValueKey('quote-vehicle-$customerId-$vehicleId'), initialValue: customerVehicles.any((v) => v['id'] == vehicleId) ? vehicleId : null,
-                  isExpanded: true, decoration: const InputDecoration(labelText: 'Vehículo *'),
+                  isExpanded: true, decoration: const InputDecoration(labelText: 'Vehículo (opcional)'),
                   items: [
-                    ...customerVehicles.map((v) => DropdownMenuItem<int>(value: v['id'] as int, child: Text('${v['plate']} · ${v['make']} ${v['model']}', overflow: TextOverflow.ellipsis))),
-                    if (customerId != null) const DropdownMenuItem<int>(value: -1, child: Row(children: [Icon(Icons.add_road), SizedBox(width: 8), Text('Crear nuevo vehículo')]))
+                    const DropdownMenuItem<int?>(value: null, child: Text('Sin vehículo registrado')),
+                    ...customerVehicles.map((v) => DropdownMenuItem<int?>(value: v['id'] as int, child: Text('${v['plate']} · ${v['make']} ${v['model']}', overflow: TextOverflow.ellipsis))),
+                    if (customerId != null) const DropdownMenuItem<int?>(value: -1, child: Row(children: [Icon(Icons.add_road), SizedBox(width: 8), Text('Crear nuevo vehículo')]))
                   ],
                   onChanged: customerId == null ? null : (value) async {
                     if (value == -1) {
@@ -145,7 +158,6 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                       update(() { vehicleId = value; orderId = null; });
                     }
                   },
-                  validator: (value) => value == null || value == -1 ? 'Selecciona o crea un vehículo' : null,
                 ),
                 if (customerId != null && customerVehicles.isEmpty)
                   const Padding(padding: EdgeInsets.only(top: 8), child: Text('Este cliente no tiene vehículos. Selecciona “Crear nuevo vehículo”.')),
@@ -215,6 +227,10 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                 Navigator.pop(dialogContext, {
                   'customer_id': customerId, 'vehicle_id': vehicleId, 'work_order_id': orderId,
                   'description': description.text.trim(), 'labor_clp': serviceTotal, 'parts_clp': productTotal,
+                  'prospect_name': prospectName.text.trim().isEmpty ? null : prospectName.text.trim(),
+                  'prospect_phone': prospectPhone.text.trim().isEmpty ? null : prospectPhone.text.trim(),
+                  'prospect_email': prospectEmail.text.trim().isEmpty ? null : prospectEmail.text.trim(),
+                  'prospect_vehicle': prospectVehicle.text.trim().isEmpty ? null : prospectVehicle.text.trim(),
                   'notes': notes.text.trim().isEmpty ? null : notes.text.trim(),
                   'lines': lines.map((line) => {
                     'kind': line['kind'], 'product_id': line['product_id'], 'service_id': line['service_id'],
@@ -236,7 +252,7 @@ class _QuotesScreenState extends State<_QuotesScreen> {
       }, 'Borrador guardado');
     } finally {
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      description.dispose(); notes.dispose();
+      description.dispose(); notes.dispose(); prospectName.dispose(); prospectPhone.dispose(); prospectEmail.dispose(); prospectVehicle.dispose();
     }
   }
 
@@ -351,8 +367,8 @@ class _QuotesScreenState extends State<_QuotesScreen> {
             final draft = q['status'] == 'draft';
             return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('COT-${q['id']} · ${q['customer_name']}', style: Theme.of(context).textTheme.titleMedium),
-                Text('${q['vehicle_plate']}${q['order_code'] == null ? ' · Sin orden asociada' : ' · ${q['order_code']}'}'),
+                Text('COT-${q['id']} · ${q['customer_name'] ?? 'Cotización rápida'}', style: Theme.of(context).textTheme.titleMedium),
+                Text('${q['vehicle_plate'] ?? 'Sin vehículo registrado'}${q['order_code'] == null ? ' · Sin orden asociada' : ' · ${q['order_code']}'}'),
                 const SizedBox(height: 8),
                 Text(q['description'].toString()),
                 if (q['notes'] != null) Text(q['notes'].toString()),
@@ -361,10 +377,10 @@ class _QuotesScreenState extends State<_QuotesScreen> {
                 Wrap(spacing: 8, children: [
                   if (draft) TextButton.icon(onPressed: _busy ? null : () => _edit(q), icon: const Icon(Icons.edit_outlined), label: const Text('Editar')),
                   TextButton.icon(onPressed: _busy ? null : () => _pdf(q), icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Ver PDF')),
-                  if (draft) TextButton.icon(onPressed: _busy ? null : () => _publish(q), icon: const Icon(Icons.send_outlined), label: const Text('Enviar al portal')),
+                  if (draft && q['customer_id'] != null && q['vehicle_id'] != null) TextButton.icon(onPressed: _busy ? null : () => _publish(q), icon: const Icon(Icons.send_outlined), label: const Text('Enviar al portal')),
                   if (!draft) TextButton.icon(onPressed: _busy ? null : () => _pdf(q, share: true), icon: const Icon(Icons.share_outlined),
                     label: Text(kIsWeb ? 'Descargar PDF para enviar' : 'Compartir PDF')),
-                  if (!draft) TextButton.icon(onPressed: _busy ? null : () => _email(q), icon: const Icon(Icons.email_outlined),
+                  if (!draft && q['customer_id'] != null && q['vehicle_id'] != null) TextButton.icon(onPressed: _busy ? null : () => _email(q), icon: const Icon(Icons.email_outlined),
                     label: const Text('Enviar por Gmail')),
                 ]),
               ],

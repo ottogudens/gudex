@@ -1270,9 +1270,13 @@ def quote_context(session: Session, data: QuoteCreate, order: WorkOrder | None =
     vehicle_id = order.vehicle_id if order else vehicle_id
     customer = session.get(Customer, customer_id) if customer_id else None
     vehicle = session.get(Vehicle, vehicle_id) if vehicle_id else None
-    if not customer:
+    if customer_id and not customer:
         raise HTTPException(404, "Cliente no encontrado")
-    if not vehicle or vehicle.customer_id != customer.id:
+    if vehicle_id and not vehicle:
+        raise HTTPException(404, "Vehículo no encontrado")
+    if vehicle and not customer:
+        raise HTTPException(422, "Selecciona también el cliente propietario del vehículo")
+    if vehicle and vehicle.customer_id != customer.id:
         raise HTTPException(422, "Selecciona un vehículo perteneciente al cliente")
     return order, customer, vehicle
 
@@ -1306,11 +1310,15 @@ def save_quote(session: Session, data: QuoteCreate, order: WorkOrder | None = No
     lines, labor_clp, parts_clp = normalized_quote_lines(session, data)
     values = {
         "work_order_id": order.id if order else None,
-        "customer_id": customer.id,
-        "vehicle_id": vehicle.id,
+        "customer_id": customer.id if customer else None,
+        "vehicle_id": vehicle.id if vehicle else None,
         "description": data.description.strip(),
         "labor_clp": labor_clp,
         "parts_clp": parts_clp,
+        "prospect_name": data.prospect_name.strip() if data.prospect_name and data.prospect_name.strip() else None,
+        "prospect_phone": data.prospect_phone.strip() if data.prospect_phone and data.prospect_phone.strip() else None,
+        "prospect_email": data.prospect_email.strip().lower() if data.prospect_email and data.prospect_email.strip() else None,
+        "prospect_vehicle": data.prospect_vehicle.strip() if data.prospect_vehicle and data.prospect_vehicle.strip() else None,
         "notes": data.notes,
     }
     if quote is None:
@@ -1348,14 +1356,14 @@ def list_work_order_quotes(order_id: int, session: Session = Depends(get_session
 def list_quotes(limit: int = DEFAULT_PAGE_LIMIT, offset: int = 0, session: Session = Depends(get_session)):
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     rows = session.exec(select(Quote, WorkOrder, Customer, Vehicle)
-                        .join(Customer, Quote.customer_id == Customer.id)
-                        .join(Vehicle, Quote.vehicle_id == Vehicle.id)
+                        .outerjoin(Customer, Quote.customer_id == Customer.id)
+                        .outerjoin(Vehicle, Quote.vehicle_id == Vehicle.id)
                         .outerjoin(WorkOrder, Quote.work_order_id == WorkOrder.id)
                         .order_by(Quote.created_at.desc(), Quote.id.desc())
                         .offset(offset).limit(limit)).all()
-    return [{**quote.model_dump(), "customer_name": customer.full_name,
-             "customer_id": customer.id, "order_code": order.code if order else None,
-             "vehicle_plate": vehicle.plate,
+    return [{**quote.model_dump(), "customer_name": customer.full_name if customer else quote.prospect_name,
+             "customer_id": customer.id if customer else None, "order_code": order.code if order else None,
+             "vehicle_plate": vehicle.plate if vehicle else quote.prospect_vehicle,
              "lines": [item.model_dump() for item in session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()]}
             for quote, order, customer, vehicle in rows]
 
@@ -1417,8 +1425,8 @@ def download_quote(quote_id: int, session: Session = Depends(get_session)):
     if not quote:
         raise HTTPException(404, "Cotización no encontrada")
     order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
-    customer = session.get(Customer, quote.customer_id)
-    vehicle = session.get(Vehicle, quote.vehicle_id)
+    customer = session.get(Customer, quote.customer_id) if quote.customer_id else None
+    vehicle = session.get(Vehicle, quote.vehicle_id) if quote.vehicle_id else None
     items = session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()
     return Response(content=quote_pdf(quote, order, customer, vehicle, items), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="cotizacion-{quote.id}.pdf"'})
@@ -1431,10 +1439,10 @@ async def email_quote(quote_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404, "Cotización no encontrada")
     if quote.status == "draft":
         raise HTTPException(409, "Publica la cotización antes de enviarla por correo")
-    customer = session.get(Customer, quote.customer_id)
-    vehicle = session.get(Vehicle, quote.vehicle_id)
+    customer = session.get(Customer, quote.customer_id) if quote.customer_id else None
+    vehicle = session.get(Vehicle, quote.vehicle_id) if quote.vehicle_id else None
     if not customer or not customer.email or not vehicle or vehicle.customer_id != customer.id:
-        raise HTTPException(422, "El cliente debe tener correo y corresponder al vehículo")
+        raise HTTPException(422, "Para enviar por correo, vincula la cotización a un cliente registrado con correo y vehículo")
     order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None
     items = session.exec(select(QuoteItem).where(QuoteItem.quote_id == quote.id)).all()
     pdf = quote_pdf(quote, order, customer, vehicle, items)
@@ -1486,6 +1494,8 @@ def publish_quote(quote_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404, "Cotización no encontrada")
     if quote.status != "draft":
         raise HTTPException(409, "La cotización ya fue publicada o respondida")
+    if not quote.customer_id or not quote.vehicle_id:
+        raise HTTPException(422, "Vincula primero un cliente y un vehículo registrados para enviarla al portal")
     quote.status = "sent"
     session.add(quote)
     order = session.get(WorkOrder, quote.work_order_id) if quote.work_order_id else None

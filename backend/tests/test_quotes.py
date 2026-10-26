@@ -109,6 +109,37 @@ def test_standalone_quote_accepts_catalog_and_manual_lines(quote_context):
     assert quote_id in [q['id'] for q in client.get('/api/v1/portal/quotes', headers=headers['customer']).json()]
 
 
+def test_walkin_quote_does_not_require_registered_customer_or_vehicle(quote_context):
+    client, _, _, headers = quote_context
+    payload = {
+        'work_order_id': None,
+        'customer_id': None,
+        'vehicle_id': None,
+        'prospect_name': 'Taller Los Alerces',
+        'prospect_phone': '+56 9 1234 5678',
+        'prospect_email': 'contacto@alerces.test',
+        'prospect_vehicle': 'Toyota Yaris 2018',
+        'description': 'Cotización telefónica',
+        'lines': [
+            {'kind': 'service', 'description': 'Diagnóstico inicial', 'quantity': 1, 'unit_price_clp': 25000},
+        ],
+    }
+    created = client.post('/api/v1/quotes', json=payload, headers=headers['admin'])
+    assert created.status_code == 201, created.text
+    quote_id = created.json()['id']
+    assert created.json()['customer_id'] is None
+    assert created.json()['vehicle_id'] is None
+
+    row = next(q for q in client.get('/api/v1/quotes', headers=headers['admin']).json() if q['id'] == quote_id)
+    assert row['customer_name'] == 'Taller Los Alerces'
+    assert row['vehicle_plate'] == 'Toyota Yaris 2018'
+    assert row['prospect_phone'] == '+56 9 1234 5678'
+    assert client.get(f'/api/v1/quotes/{quote_id}/pdf', headers=headers['admin']).status_code == 200
+    publish = client.post(f'/api/v1/quotes/{quote_id}/publish', headers=headers['admin'])
+    assert publish.status_code == 422
+    assert 'cliente' in publish.json()['detail'].lower()
+
+
 def test_quote_email_requires_publication_and_uses_customer_address(quote_context, monkeypatch):
     client, order_id, customer_id, headers = quote_context
     with Session(engine) as session:
