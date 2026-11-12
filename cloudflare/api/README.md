@@ -67,10 +67,12 @@ movimientos de stock, servicios y categorías; también altas/ediciones y archiv
 seguro de productos. El conteo físico permite crear sesiones ciegas, registrar
 SKU escaneados, enviar diferencias a revisión y aplicarlas por el administrador
 en una transacción D1. El stock esperado se oculta mientras el conteo ciego está
-abierto; toda diferencia aplicada deja movimientos de inventario. La revisión de
-código hizo atómica la creación de producto y su línea de conteo y redujo las
-consultas por lote. Aún no se ha migrado el resto de ventas/compras, caja, uso de
-repuestos en órdenes ni archivos R2.
+abierto; toda diferencia aplicada deja movimientos de inventario. Se migró el
+registro de repuestos por trabajo, verificación de compatibilidad vinculada a
+la identidad del vehículo, historial/referencias verificadas y resumen de uso.
+Registrar o instalar un repuesto conserva la regla actual y no descuenta stock;
+la evidencia adjunta seguirá sin abrirse hasta completar R2. Aún faltan compras,
+ventas, caja y uso de repuestos integrado a inventario.
 
 Pages de `admin.gudex.cl` reenvía las rutas API al Worker de producción. La
 versión actual se desplegó el 12-11-2026; las consultas sin aserción a órdenes

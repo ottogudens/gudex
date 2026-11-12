@@ -3,6 +3,7 @@ import { publicOilCard } from "./public_oil_card.js";
 import { handleWorkOrders } from "./work_orders.js";
 import { handleCatalog } from "./catalog.js";
 import { handleInventoryCounts } from "./inventory_counts.js";
+import { handleParts, vehicleParts } from "./parts.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -137,13 +138,12 @@ async function vehicleHistory(env, vehicle) {
     const oilExecution = executions.find(row => plans.some(plan => plan.id === row.plan_id && plan.category === "oil"));
     oilCard = oilExecution ? { id: null, vehicle_id: vehicleId, source_execution_id: oilExecution.id, service_name: oilExecution.plan_name, performed_at: oilExecution.performed_at, mileage_km: oilExecution.mileage_km, next_due_km: oilExecution.next_due_km, next_due_at: oilExecution.next_due_at, oil_used: oilExecution.oil_used, filters_used: oilExecution.filters_used, customer_note: "", oil_image_url: null, filter_image_url: null } : null;
   }
-  const installed = await all("SELECT * FROM installedpart WHERE vehicle_id=? ORDER BY recorded_at DESC");
-  const safeParts = installed.map(row => ({ ...row, photo_url: null }));
+  const { installed_parts, verified_part_references } = await vehicleParts(db, vehicleId);
   const appointments = await all("SELECT id,customer_id,vehicle_id,bay_id,technician_user_id,starts_at,ends_at,service_type,notes,status,sync_status,created_at FROM appointment WHERE vehicle_id=? ORDER BY starts_at DESC");
   quotes = await all("SELECT * FROM quote WHERE vehicle_id=? ORDER BY counted_at DESC");
   const diagnostics = await all("SELECT * FROM diagnosticfinding WHERE vehicle_id=? ORDER BY created_at DESC");
   const reports = (await db.prepare("SELECT id,vehicle_id,work_order_id,work_order_service_id,filename,source,scanned_at,mileage_km,summary FROM scannerreport WHERE vehicle_id=? ORDER BY scanned_at DESC").bind(vehicleId).all()).results;
-  return { vehicle, technical: { fields, values }, maintenance_plans: plans, maintenance_executions: executions, oil_card: oilCard, installed_parts: safeParts, verified_part_references: [], customer, work_orders: orders, work_order_services: services, diagnostic_findings: diagnostics, quotes, appointments, scanner_reports: reports.map(row => ({ ...row, download_url: null })) };
+  return { vehicle, technical: { fields, values }, maintenance_plans: plans, maintenance_executions: executions, oil_card: oilCard, installed_parts, verified_part_references, customer, work_orders: orders, work_order_services: services, diagnostic_findings: diagnostics, quotes, appointments, scanner_reports: reports.map(row => ({ ...row, download_url: null })) };
 }
 async function completeMaintenance(env, planId, data, actor) {
   const plan = await env.DB.prepare("SELECT * FROM maintenanceplan WHERE id=?").bind(planId).first();
@@ -209,6 +209,8 @@ export default {
     try {
       const inventoryResponse = await handleInventoryCounts(request, env, user);
       if (inventoryResponse) return inventoryResponse;
+      const partsResponse = await handleParts(request, env, user);
+      if (partsResponse) return partsResponse;
       const catalogResponse = await handleCatalog(request, env, user);
       if (catalogResponse) return catalogResponse;
       const workOrdersResponse = await handleWorkOrders(request, env, user);
