@@ -4,7 +4,7 @@
 
 ## Estado base (12 de noviembre de 2026)
 
-- **Pages de staging:** `gudexapp-staging`, enlazado a `ottogudens/gudex`; rama actual `codex/cloudflare-migration-customer-backup`; raíz `mobile`; build `bash scripts/build_cloudflare.sh`; salida `build/web`. El commit `eb687bc` se publicó como `f7ae63ec` con Functions habilitadas.
+- **Pages de staging:** `gudexapp-staging`, enlazado a `ottogudens/gudex`; rama actual `codex/cloudflare-migration-customer-backup`; raíz `mobile`; build `bash scripts/build_cloudflare.sh`; salida `build/web`. El commit `ba5e544` se publicó como `7965860b` con Functions habilitadas.
 - **D1 de staging:** `gudexapp-staging`. Se importaron y conciliaron los respaldos recibidos: 20 clientes, 18 vehículos, 7 órdenes, 6 servicios de orden, 21 inspecciones, 7 planes, 6 ejecuciones de mantenimiento, 12 tarjetas de aceite, 82 entradas técnicas, 8 reportes de escáner, 8 sesiones, 3 asignaciones, 1 recepción, 1 control de calidad, 2 cotizaciones, 19 productos, 60 servicios y 10 categorías. `PRAGMA foreign_key_check` no reportó errores.
 - **Cuentas:** no se copiaron hashes ni tokens de acceso/recuperación. Cuatro usuarios históricos requeridos por el historial están inactivos y pendientes de clave. Se creó en staging la cuenta administrativa solicitada, almacenando su contraseña como hash Argon2id.
 - **Worker/API:** `gudexapp-api-staging` usa D1 staging y responde `200` en `/health`; expone CRUD básico de clientes tras validar JWT de Access. Las llamadas de negocio directas sin aserción reciben `401`. El alcance no cubre aún el conjunto de contratos FastAPI.
