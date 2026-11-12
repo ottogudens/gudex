@@ -1,5 +1,6 @@
 const WEB_ORIGIN = "https://gudexapp-staging.pages.dev";
 import { publicOilCard } from "./public_oil_card.js";
+import { handleWorkOrders } from "./work_orders.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -204,6 +205,8 @@ export default {
     if (!user) return json({ detail: "Inicia sesión con Cloudflare Access para continuar" }, 401, origin);
     if (method === "POST" && path === "/auth/access") return json({ access_token: "cloudflare-access", token_type: "bearer", role: user.role, full_name: user.full_name, expires_in: 28800 }, 200, origin);
     try {
+      const workOrdersResponse = await handleWorkOrders(request, env, user);
+      if (workOrdersResponse) return workOrdersResponse;
       const fields = "id,full_name,rut,email,phone,notes,created_at,archived_at";
       if (method === "GET" && path === "/api/v1/customers") {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 100), 1), 500);

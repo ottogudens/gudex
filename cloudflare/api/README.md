@@ -50,19 +50,26 @@ credenciales cifradas de integraciones. Los usuarios históricos permanecen
 inactivos con clave pendiente; el administrador se autentica mediante la política
 de Cloudflare Access existente.
 
-El Worker `gudexapp-api-production` usa esa D1 y el mismo conjunto parcial de
-rutas de clientes, vehículos e historial disponible en staging. El hostname
-`bknd.gudex.cl` está asociado al Worker. `GET /tarjeta-aceite` es público, consulta
-solo vehículos con `public_service_card_enabled=1` y no entrega información de
-contacto ni historial completo. El resto de rutas requiere una aserción válida de
-Cloudflare Access. Los adjuntos de imágenes no se copiaron a R2; la tarjeta sirve
-sus campos de texto y kilometraje.
+El Worker `gudexapp-api-production` usa esa D1 y tiene el hostname
+`bknd.gudex.cl`. Además de clientes, vehículos, historial y mantenciones, ya
+incluye el núcleo de órdenes: `GET/POST /api/v1/work-orders`, lectura por ID,
+edición con transiciones de estado, asignación (`PUT .../{id}/assignment`),
+listado de mecánicos, listado/alta/actualización de trabajos asociados y baja
+segura de órdenes. Una orden con historial se cancela para conservar trazabilidad;
+solo una orden sin actividad asociada se elimina. `GET /tarjeta-aceite` es público,
+consulta únicamente vehículos con `public_service_card_enabled=1` y no entrega
+información de contacto ni historial completo. El resto de rutas requiere una
+aserción válida de Cloudflare Access. Los adjuntos de imágenes no se copiaron a
+R2; la tarjeta sirve sus campos de texto y kilometraje.
 
-Pages de `admin.gudex.cl` ahora reenvía las rutas API al Worker de producción.
-La cobertura de la API sigue siendo parcial; las funcionalidades todavía no
-portadas requieren su implementación en Workers antes de considerar terminada
-la migración integral. Railway permanece como rollback y no es llamado por esta
-API de Cloudflare.
+Pages de `admin.gudex.cl` reenvía las rutas API al Worker de producción. La
+versión actual se desplegó el 12-11-2026; las consultas sin aserción a órdenes
+responden HTTP 401, mientras `/health` y la tarjeta pública responden HTTP 200.
+No se validó un recorrido interno autenticado de punta a punta. La cobertura de
+la API sigue siendo parcial: inspecciones, cotizaciones, sesiones, control de
+calidad, repuestos, caja, inventario, compras, ventas, portal, integraciones y
+archivos todavía requieren portar y validar sus operaciones. Railway permanece
+como rollback y esta API de Cloudflare no lo llama.
 
 ## Acceso temporal de staging
 
