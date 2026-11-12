@@ -10,7 +10,19 @@
 - **Worker/API:** `gudexapp-api-staging` responde correctamente en `/health`; las demás rutas todavía no están disponibles en el Worker remoto. El código local inicial cubre autenticación, usuarios y CRUD básico de clientes, pero no el conjunto de contratos FastAPI.
 - **DNS y dominios:** la cuenta consultada todavía no contiene la zona `gudex.cl`; Pages no tiene aún dominio personalizado. No se ha cambiado DNS.
 - **R2 y archivos:** R2 estaba deshabilitado al último chequeo. El respaldo JSON no contenía adjuntos.
-- **Aplicación origen:** backend FastAPI/SQLModel con 35 revisiones Alembic y aproximadamente 230 operaciones HTTP; frontend Flutter Web; bridge Baileys separado.
+- **Aplicación origen:** backend FastAPI/SQLModel con 35 revisiones Alembic y 235 operaciones HTTP documentadas; frontend Flutter Web; bridge Baileys separado.
+
+## Avance de las etapas 0–2 (12 de noviembre de 2026)
+
+- **Etapa 0 — iniciada:** se generó [`inventario-api-cloudflare.md`](inventario-api-cloudflare.md) desde OpenAPI: 235 operaciones en 184 rutas, clasificadas por 30 dominios/etiquetas. Incluye método, ruta, resumen, rol/dependencia observable, `operationId` y ubicación del handler. Aún faltan el mapa ruta→pantalla Flutter, efectos laterales, tareas/eventos externos, formatos exactos y revisión de permisos por recurso; por eso el inventario no se considera aceptado ni cerrado.
+- **Etapa 1 — validación estructural inicial:** SQLModel define 59 tablas y 118 índices. La comparación de nombres contra `sqlite_master` de D1 staging dio 177 objetos en ambos lados, sin nombres faltantes ni extras al excluir `_cf_KV` y `gudex_schema_migrations`. Esto no compara definición de columnas, tipos efectivos, defaults, nulabilidad, restricciones/acciones FK ni el resultado de las transformaciones históricas.
+- **Alembic:** el repositorio tiene 35 revisiones, con único head `20261026_0035`. Se identificaron actualizaciones de datos en `0020` (traspaso de ítems de cotización) y `0032` (relleno de número de motor), además de cambios de esquema posteriores. El esquema creado desde metadata no demuestra por sí solo que esas transformaciones se ejecutaron ni que el historial D1 pueda reconstruirse reproduciblemente.
+- **Etapa 2 — revisión de seguridad iniciada, bloqueada para puesta en servicio:** la API local implementa Argon2id (parámetros de 64 MiB, 3 iteraciones, paralelismo 4) y JWT HS256 de 8 horas, pero el Worker remoto solo tiene `/health`. Cloudflare documenta 10 ms de CPU por invocación en Free; Workers Paid ofrece 30 s por defecto, configurable hasta 5 min, y tiene mínimo de US$5/mes más consumos que excedan las cuotas. La cuenta Free rechazó la configuración CPU que requiere el Worker; no se redujeron los parámetros de hashing ni se habilitó facturación.
+- **Hallazgos de paridad pendientes:** el Worker local no implementa el límite de intentos de login que tiene FastAPI (20 por minuto); su CORS está fijado a `gudexapp-staging.pages.dev` y falta parametrizarlo antes de `admin.gudex.cl`. Se añadió límite de 200 caracteres para claves nuevas (paridad con el contrato del origen) y respuesta 503 si falta `JWT_SECRET` o tiene menos de 32 caracteres. Aún se debe revisar expiración/revocación, permisos por propiedad, flujos de recuperación, formato OAuth2 y respuestas de error.
+
+Referencias oficiales consultadas: [límites de CPU de Workers](https://developers.cloudflare.com/workers/platform/limits/) y [planes/precios de Workers](https://developers.cloudflare.com/workers/platform/pricing/).
+
+**Estado de salida:** las etapas 0–2 están comenzadas y hay entregables de descubrimiento, pero ninguna se declara completada. No se modificó DNS ni producción y no se desplegó el Worker funcional.
 
 ## Reglas que se mantienen durante el proyecto
 
@@ -26,7 +38,8 @@
 
 **Trabajo**
 
-- Generar un inventario de las ~230 rutas FastAPI: método, URL, modelo, rol, validaciones, efectos laterales, archivos y módulos Flutter que las consumen.
+- Generar un inventario de las 235 operaciones FastAPI: método, URL, modelo, rol, validaciones, efectos laterales, archivos y módulos Flutter que las consumen.
+- Actualizar el reporte base con `python cloudflare/scripts/generate_api_inventory.py` y completar las verificaciones funcionales indicadas al final del documento.
 - Clasificar rutas por dominio y frecuencia de uso; identificar operaciones sin pantalla activa, callbacks externos y tareas programadas.
 - Definir contratos JSON, códigos de error, formato de fechas/moneda, paginación e idempotencia compartidos entre FastAPI y Workers.
 - Confirmar qué funciones y flujos deben conservarse y cuáles pueden retirarse, en especial Baileys.

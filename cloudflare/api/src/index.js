@@ -43,6 +43,7 @@ function normalizeRut(value) {
 }
 function validatePassword(password) {
   if(typeof password!=="string" || password.length<6) return "La contraseña debe tener al menos 6 caracteres";
+  if(password.length>200) return "La contraseña no puede superar 200 caracteres";
   if(commonPasswords.has(password.toLowerCase())) return "Esa contraseña es demasiado común; elige otra";
   return null;
 }
@@ -72,6 +73,7 @@ async function handle(request, env) {
   if(method==="OPTIONS") return origin===WEB_ORIGIN ? new Response(null,{status:204,headers:{"Access-Control-Allow-Origin":WEB_ORIGIN,"Access-Control-Allow-Methods":"GET, POST, PATCH, DELETE, OPTIONS","Access-Control-Allow-Headers":"Authorization, Content-Type","Access-Control-Max-Age":"600","Vary":"Origin"}}) : new Response(null,{status:403});
   if(method==="GET"&&path==="/health") {try {await env.DB.prepare("SELECT 1").first();return response({status:"ok",database:"ok"},200,origin);}catch{return response({status:"unavailable",database:"error"},503,origin);}}
   if(method==="POST"&&path==="/auth/token") {
+    if(typeof env.JWT_SECRET!=="string" || env.JWT_SECRET.length<32) return response({detail:"Servicio de autenticación no configurado"},503,origin);
     const raw=await request.text(), form=new URLSearchParams(raw), email=normalizeEmail(form.get("username")), password=form.get("password")||"";
     const user=await env.DB.prepare("SELECT * FROM user WHERE email=?").bind(email).first();
     let valid=false; if(user?.active) {try {valid=await argon2Verify({password,hash:user.password_hash});}catch{valid=false;}}
@@ -80,6 +82,7 @@ async function handle(request, env) {
     return response({access_token,token_type:"bearer",role:user.role,full_name:user.full_name,expires_in:28800},200,origin);
   }
   if(!path.startsWith("/api/v1/")) return response({detail:"No encontrado"},404,origin);
+  if(typeof env.JWT_SECRET!=="string" || env.JWT_SECRET.length<32) return response({detail:"Servicio de autenticación no configurado"},503,origin);
   const {user, error}=await auth(request,env,path); if(error)return response(error.body,error.status,origin);
   try {
     if(path==="/api/v1/account/password"&&method==="POST") {
