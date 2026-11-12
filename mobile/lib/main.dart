@@ -45,7 +45,7 @@ part 'social_screen.dart';
 // screen is extracted into its own file.
 // ---------------------------------------------------------------------------
 const _storage = FlutterSecureStorage();
-const _apiBaseUrl = apiBaseUrl;
+final _apiBaseUrl = apiBaseUrl;
 
 // Keep the global ValueNotifier alive for screens that still reference it
 // directly.  New code should use [themeModeProvider] instead.

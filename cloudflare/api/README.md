@@ -17,9 +17,11 @@ verifica con firma RS256, emisor y audiencias antes de mapearla al administrador
 
 La entrada de staging es `src/access_staging.js`; la implementación que conserva
 login Gudex por contraseña, usuarios y otros endpoints permanece en `src/index.js`.
-No se migraron hashes. El frontend de staging llama a Pages Functions, que reenvía
-las rutas de API al Worker junto con la aserción de Access. La pantalla de acceso
-por contraseña sigue activa en los demás builds.
+No se migraron hashes. El frontend de staging usa el hostname actual como base
+de API y llama a Pages Functions en el mismo origen; Pages reenvía las rutas al
+Worker junto con la aserción de Access. Así puede funcionar desde
+`gudexapp-staging.pages.dev` y `admin.gudex.cl`. La pantalla de acceso por
+contraseña sigue activa en los demás builds.
 
 El login original usa Argon2id (64 MiB, 3 iteraciones, paralelismo 4). No se deben
 debilitar esos parámetros para caber en Workers Free, que limita cada invocación
@@ -39,8 +41,8 @@ No usar en producción.
 
 ## Acceso temporal de staging
 
-Cloudflare Access protege `https://gudexapp-staging.pages.dev` y los aliases
-`*.gudexapp-staging.pages.dev` con una política que permite solo al correo
+Cloudflare Access protege `https://gudexapp-staging.pages.dev`, los aliases
+`*.gudexapp-staging.pages.dev` y `admin.gudex.cl` con una política que permite solo al correo
 propietario de la cuenta, usando PIN por correo y sesiones de 8 horas. Se verificó
 que el hostname canónico y el alias de la última publicación redirigen a Access.
 En staging, la pantalla canjea la aserción Access por una sesión de interfaz; cada
