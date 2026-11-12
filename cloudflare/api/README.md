@@ -4,9 +4,11 @@ El Worker desplegado `gudexapp-api-staging` está en
 `https://gudexapp-api-staging.agenciaskalechile.workers.dev` y usa la D1
 `gudexapp-staging`. Staging implementa `GET /health`, login por Cloudflare Access,
 CRUD básico de clientes y vehículos, y lectura del historial del vehículo.
-No acepta llamadas de negocio sin una aserción JWT válida de Access. La política
-de staging limita el acceso a una identidad propietaria; su aserción se verifica
-con firma RS256, emisor y audiencias antes de mapearla al administrador
+También gestiona planes de mantención, vencimientos y registro idempotente de
+ejecuciones, actualizando kilometraje y la tarjeta de aceite dentro de una batch
+de D1. No acepta llamadas de negocio sin una aserción JWT válida de Access. La
+política de staging limita el acceso a una identidad propietaria; su aserción se
+verifica con firma RS256, emisor y audiencias antes de mapearla al administrador
 `admin@gudex.cl` en D1.
 
 La entrada de staging es `src/access_staging.js`; la implementación que conserva
@@ -26,7 +28,8 @@ Las variables `ACCESS_TEAM_DOMAIN`, `ACCESS_AUDS`, `ACCESS_EMAIL` y
 `ACCESS_ADMIN_EMAIL` deben concordar con las aplicaciones y la política de
 Cloudflare Access. Nunca apuntar este Worker a datos productivos. Esta modalidad
 es solo para staging y un administrador; faltan usuarios internos, rate-limits,
-las escrituras del historial de vehículos y la mayoría de las rutas FastAPI. Los
+las otras escrituras del historial de vehículos, flujo de órdenes/servicios y la
+mayoría de las rutas FastAPI. Los
 adjuntos de scanner/fotos aún no están en R2 y el historial no expone sus archivos.
 No usar en producción.
 

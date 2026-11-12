@@ -141,6 +141,54 @@ async function vehicleHistory(env, vehicle) {
   const reports = (await db.prepare("SELECT id,vehicle_id,work_order_id,work_order_service_id,filename,source,scanned_at,mileage_km,summary FROM scannerreport WHERE vehicle_id=? ORDER BY scanned_at DESC").bind(vehicleId).all()).results;
   return { vehicle, technical: { fields, values }, maintenance_plans: plans, maintenance_executions: executions, oil_card: oilCard, installed_parts: safeParts, verified_part_references: [], customer, work_orders: orders, work_order_services: services, diagnostic_findings: diagnostics, quotes, appointments, scanner_reports: reports.map(row => ({ ...row, download_url: null })) };
 }
+async function completeMaintenance(env, planId, data, actor) {
+  const plan = await env.DB.prepare("SELECT * FROM maintenanceplan WHERE id=?").bind(planId).first();
+  if (!plan) return { error: { status: 404, detail: "Plan de mantención no encontrado" } };
+  if (typeof data.request_key !== "string" || data.request_key.length < 8 || data.request_key.length > 80) return { error: { status: 422, detail: "Identificador de solicitud inválido" } };
+  const mileage = Number(data.mileage_km);
+  if (!Number.isInteger(mileage) || mileage < 0) return { error: { status: 422, detail: "Registra un kilometraje válido para completar la mantención" } };
+  const textLimits = { materials: 4000, oil_used: 1000, filters_used: 2000, notes: 4000 };
+  for (const [key, max] of Object.entries(textLimits)) if (data[key] != null && (typeof data[key] !== "string" || data[key].length > max)) return { error: { status: 422, detail: "Los detalles de la mantención superan el largo permitido" } };
+  const text = Object.fromEntries(Object.keys(textLimits).map(key => [key, data[key] || ""]));
+  const existing = await env.DB.prepare("SELECT * FROM maintenanceexecution WHERE plan_id=? AND request_key=?").bind(planId, data.request_key).first();
+  if (existing) {
+    if (["mileage_km", "work_order_id", ...Object.keys(textLimits)].some(key => (existing[key] ?? null) !== (key === "work_order_id" ? (data[key] ?? null) : key === "mileage_km" ? mileage : text[key]))) return { error: { status: 409, detail: "La solicitud ya fue utilizada con otros datos" } };
+    return { execution: existing, existing: true };
+  }
+  if (!plan.active) return { error: { status: 409, detail: "El plan está archivado" } };
+  const vehicle = await env.DB.prepare("SELECT * FROM vehicle WHERE id=?").bind(plan.vehicle_id).first();
+  if (!vehicle) return { error: { status: 404, detail: "Vehículo no encontrado" } };
+  if (mileage < Math.max(vehicle.current_mileage_km || 0, plan.last_service_km || 0)) return { error: { status: 409, detail: "El kilometraje no puede ser menor al último registrado" } };
+  let workOrderId = data.work_order_id == null ? null : Number(data.work_order_id);
+  if (workOrderId != null) {
+    if (!Number.isInteger(workOrderId)) return { error: { status: 422, detail: "Orden de trabajo inválida" } };
+    const order = await env.DB.prepare("SELECT vehicle_id,status FROM workorder WHERE id=?").bind(workOrderId).first();
+    if (!order || order.vehicle_id !== vehicle.id || !["in_progress", "ready", "delivered"].includes(order.status)) return { error: { status: 409, detail: "Selecciona una orden del vehículo en trabajo, lista o entregada" } };
+  }
+  const now = new Date(), nextKm = data.next_due_km == null ? (plan.interval_km ? mileage + plan.interval_km : null) : Number(data.next_due_km);
+  const nextAt = data.next_due_at == null ? (plan.interval_days ? new Date(now.getTime() + plan.interval_days * 86400000).toISOString() : null) : new Date(data.next_due_at).toISOString();
+  if (nextKm != null && (!Number.isInteger(nextKm) || nextKm <= mileage)) return { error: { status: 422, detail: "La próxima mantención debe tener mayor kilometraje" } };
+  if (data.next_due_at != null && (!Number.isFinite(Date.parse(data.next_due_at)) || Date.parse(nextAt) <= now.getTime())) return { error: { status: 422, detail: "La próxima mantención debe tener una fecha futura" } };
+  if (nextKm == null && nextAt == null) return { error: { status: 422, detail: "Registra kilometraje o fecha de próxima mantención" } };
+  const performedAt = now.toISOString(), executionColumns = ["plan_id", "vehicle_id", "work_order_id", "request_key", "plan_name", "mileage_km", "interval_km", "interval_days", "next_due_km", "next_due_at", "materials", "oil_used", "filters_used", "notes", "recorded_by", "performed_at"];
+  const executionValues = [plan.id, vehicle.id, workOrderId, data.request_key, plan.name, mileage, plan.interval_km, plan.interval_days, nextKm, nextAt, text.materials, text.oil_used, text.filters_used, text.notes, actor, performedAt];
+  const batch = [
+    env.DB.prepare(`INSERT INTO maintenanceexecution(${executionColumns.join(",")}) VALUES(${executionColumns.map(() => "?").join(",")})`).bind(...executionValues),
+    env.DB.prepare("UPDATE maintenanceplan SET last_service_km=?,last_service_at=? WHERE id=?").bind(mileage, performedAt, plan.id),
+    env.DB.prepare("UPDATE vehicle SET current_mileage_km=? WHERE id=?").bind(mileage, vehicle.id),
+  ];
+  if (plan.category === "oil") batch.push(env.DB.prepare("INSERT INTO oilservicecard(vehicle_id,source_execution_id,service_name,performed_at,mileage_km,next_due_km,next_due_at,oil_used,filters_used,customer_note,oil_image_path,oil_image_content_type,filter_image_path,filter_image_content_type,updated_by,updated_at) VALUES(?,(SELECT id FROM maintenanceexecution WHERE plan_id=? AND request_key=?),?,?,?,?,?,?,?, '',NULL,NULL,NULL,NULL,?,?) ON CONFLICT(vehicle_id) DO UPDATE SET source_execution_id=excluded.source_execution_id,service_name=excluded.service_name,performed_at=excluded.performed_at,mileage_km=excluded.mileage_km,next_due_km=excluded.next_due_km,next_due_at=excluded.next_due_at,oil_used=excluded.oil_used,filters_used=excluded.filters_used,customer_note='',oil_image_path=NULL,oil_image_content_type=NULL,filter_image_path=NULL,filter_image_content_type=NULL,updated_by=excluded.updated_by,updated_at=excluded.updated_at").bind(vehicle.id, plan.id, data.request_key, plan.name, performedAt, mileage, nextKm, nextAt, text.oil_used, text.filters_used, actor, performedAt));
+  try {
+    const results = await env.DB.batch(batch), executionId = results[0]?.meta?.last_row_id;
+    return { execution: await env.DB.prepare("SELECT * FROM maintenanceexecution WHERE id=?").bind(executionId).first(), existing: false };
+  } catch (error) {
+    if (/UNIQUE constraint failed/.test(String(error))) {
+      const raced = await env.DB.prepare("SELECT * FROM maintenanceexecution WHERE plan_id=? AND request_key=?").bind(planId, data.request_key).first();
+      if (raced) return { execution: raced, existing: true };
+    }
+    throw error;
+  }
+}
 
 export default {
   async fetch(request, env) {
@@ -209,6 +257,65 @@ export default {
         }
         await env.DB.prepare("DELETE FROM vehicle WHERE id=?").bind(id).run();
         return json({ deleted: true }, 200, origin);
+      }
+      if (method === "GET" && path === "/api/v1/maintenance-plans") {
+        const { results } = await env.DB.prepare("SELECT * FROM maintenanceplan ORDER BY active DESC,name").all();
+        return json(results, 200, origin);
+      }
+      if (method === "POST" && path === "/api/v1/maintenance-plans") {
+        const data = await request.json(), vehicleId = Number(data?.vehicle_id), name = String(data?.name || "").trim(), category = data?.category || "general";
+        const intervalKm = data?.interval_km == null ? null : Number(data.interval_km), intervalDays = data?.interval_days == null ? null : Number(data.interval_days);
+        if (!Number.isInteger(vehicleId) || !name || name.length < 2 || name.length > 120 || !["oil", "filters", "preventive", "general"].includes(category) || (intervalKm != null && (!Number.isInteger(intervalKm) || intervalKm < 1)) || (intervalDays != null && (!Number.isInteger(intervalDays) || intervalDays < 1)) || (!intervalKm && !intervalDays)) return json({ detail: "Define un nombre y un intervalo válido por kilometraje, tiempo o ambos" }, 422, origin);
+        const vehicle = await env.DB.prepare("SELECT id,current_mileage_km FROM vehicle WHERE id=?").bind(vehicleId).first();
+        if (!vehicle) return json({ detail: "Vehículo no encontrado" }, 404, origin);
+        const lastKm = data.last_service_km == null ? vehicle.current_mileage_km : Number(data.last_service_km);
+        if (lastKm != null && (!Number.isInteger(lastKm) || lastKm < 0)) return json({ detail: "Kilometraje de última mantención inválido" }, 422, origin);
+        const now = new Date().toISOString(), result = await env.DB.prepare("INSERT INTO maintenanceplan(vehicle_id,name,category,interval_km,interval_days,last_service_km,last_service_at,active) VALUES(?,?,?,?,?,?,?,1)").bind(vehicleId, name, category, intervalKm, intervalDays, lastKm, now).run();
+        return json(await env.DB.prepare("SELECT * FROM maintenanceplan WHERE id=?").bind(result.meta.last_row_id).first(), 201, origin);
+      }
+      if (method === "GET" && path === "/api/v1/maintenance-plans/due") {
+        const plans = (await env.DB.prepare("SELECT * FROM maintenanceplan WHERE active=1 ORDER BY name").all()).results, now = Date.now(), due = [];
+        for (const plan of plans) {
+          const vehicle = await env.DB.prepare("SELECT * FROM vehicle WHERE id=?").bind(plan.vehicle_id).first();
+          if (!vehicle) continue;
+          const latest = await env.DB.prepare("SELECT next_due_km,next_due_at FROM maintenanceexecution WHERE plan_id=? ORDER BY performed_at DESC,id DESC LIMIT 1").bind(plan.id).first();
+          const nextKm = latest?.next_due_km ?? (plan.last_service_km != null && plan.interval_km ? plan.last_service_km + plan.interval_km : null);
+          const nextAt = latest?.next_due_at ?? (plan.interval_days ? new Date(Date.parse(plan.last_service_at) + plan.interval_days * 86400000).toISOString() : null);
+          const dueByKm = nextKm != null && vehicle.current_mileage_km != null && vehicle.current_mileage_km >= nextKm;
+          const dueByDate = nextAt != null && Number.isFinite(Date.parse(nextAt)) && now >= Date.parse(nextAt);
+          if (dueByKm || dueByDate) {
+            const customer = await env.DB.prepare("SELECT id,full_name,rut,email,phone,notes,created_at,archived_at FROM customer WHERE id=?").bind(vehicle.customer_id).first();
+            due.push({ plan, vehicle, customer, due_by_km: Boolean(dueByKm), due_by_date: Boolean(dueByDate) });
+          }
+        }
+        return json(due, 200, origin);
+      }
+      const planMatch = path.match(/^\/api\/v1\/maintenance-plans\/(\d+)(?:\/(executions|complete))?$/);
+      if (planMatch && method === "PATCH" && !planMatch[2]) {
+        const id = Number(planMatch[1]), old = await env.DB.prepare("SELECT * FROM maintenanceplan WHERE id=?").bind(id).first();
+        if (!old) return json({ detail: "Plan de mantención no encontrado" }, 404, origin);
+        const data = await request.json(), next = { ...old };
+        for (const key of ["name", "category", "interval_km", "interval_days", "active"]) if (key in data) next[key] = data[key];
+        if (typeof next.name !== "string" || next.name.trim().length < 2 || next.name.trim().length > 120 || !["oil", "filters", "preventive", "general"].includes(next.category) || (next.interval_km != null && (!Number.isInteger(Number(next.interval_km)) || Number(next.interval_km) < 1)) || (next.interval_days != null && (!Number.isInteger(Number(next.interval_days)) || Number(next.interval_days) < 1)) || (!next.interval_km && !next.interval_days)) return json({ detail: "Define un nombre y un intervalo válido por kilometraje, tiempo o ambos" }, 422, origin);
+        await env.DB.prepare("UPDATE maintenanceplan SET name=?,category=?,interval_km=?,interval_days=?,active=? WHERE id=?").bind(next.name.trim(), next.category, next.interval_km == null ? null : Number(next.interval_km), next.interval_days == null ? null : Number(next.interval_days), next.active ? 1 : 0, id).run();
+        return json(await env.DB.prepare("SELECT * FROM maintenanceplan WHERE id=?").bind(id).first(), 200, origin);
+      }
+      if (planMatch && method === "DELETE" && !planMatch[2]) {
+        const id = Number(planMatch[1]), result = await env.DB.prepare("UPDATE maintenanceplan SET active=0 WHERE id=?").bind(id).run();
+        if (!result.meta.changes) return json({ detail: "Plan de mantención no encontrado" }, 404, origin);
+        return json({ archived: true }, 200, origin);
+      }
+      if (planMatch && method === "POST" && planMatch[2] === "executions") {
+        const result = await completeMaintenance(env, Number(planMatch[1]), await request.json(), user.email);
+        if (result.error) return json({ detail: result.error.detail }, result.error.status, origin);
+        return json(result.execution, 200, origin);
+      }
+      if (planMatch && method === "POST" && planMatch[2] === "complete") {
+        const mileageParam = url.searchParams.get("mileage_km"), vehiclePlan = await env.DB.prepare("SELECT v.current_mileage_km FROM maintenanceplan p JOIN vehicle v ON v.id=p.vehicle_id WHERE p.id=?").bind(Number(planMatch[1])).first();
+        const mileage = mileageParam == null ? vehiclePlan?.current_mileage_km : Number(mileageParam);
+        const result = await completeMaintenance(env, Number(planMatch[1]), { request_key: crypto.randomUUID(), mileage_km: mileage }, user.email);
+        if (result.error) return json({ detail: result.error.detail }, result.error.status, origin);
+        return json(await env.DB.prepare("SELECT * FROM maintenanceplan WHERE id=?").bind(Number(planMatch[1])).first(), 200, origin);
       }
       if (method === "POST" && path === "/api/v1/customers") {
         const data = validateCustomer(await request.json());
