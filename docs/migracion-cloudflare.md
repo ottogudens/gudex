@@ -32,25 +32,23 @@ Referencias oficiales: [FastAPI en Python Workers](https://developers.cloudflare
 - `baileys-bridge` guarda su sesión en filesystem persistente (`/data/baileys-auth`) y está documentado como conector no oficial limitado a pruebas.
 - El checkout está en detached HEAD (`70b98f9`) y limpio al momento del levantamiento.
 
-## Estado de la cuenta Cloudflare consultada (12-11-2026)
+## Estado de Cloudflare (12-11-2026)
 
-El usuario confirmó que esta es la cuenta destino. En la verificación más reciente, la zona `gudex.cl` todavía no aparece en esa cuenta. No se modificó DNS. R2 requiere habilitación desde el dashboard.
+El usuario confirmó que la cuenta Cloudflare conectada es la cuenta destino. La zona `gudex.cl` está activa y tiene los proyectos Pages y Worker conectados a sus dominios. R2 continúa deshabilitado en la cuenta; por ello, los adjuntos no se han migrado.
 
-El proyecto Pages `gudexapp-staging` (`gudexapp-staging.pages.dev`) está conectado por GitHub al repositorio `ottogudens/gudex`, con rama de producción actual `codex/cloudflare-migration-customer-backup`, raíz `/mobile`, comando `bash scripts/build_cloudflare.sh` y salida `build/web`. El último build publicado desde el commit `ffcd0e0` terminó exitosamente. Staging apunta a la API staging, no a producción.
+El proyecto Pages `gudexapp-staging` está conectado a `ottogudens/gudex`, rama de producción `codex/cloudflare-migration-customer-backup`, raíz `/mobile`, comando `bash scripts/build_cloudflare.sh` y salida `build/web`. Aunque el proyecto conserva el nombre `staging`, su despliegue de producción atiende `admin.gudex.cl`. El despliegue `d6185d5d-c88e-4da1-94c1-1a93ec2351cb`, desde el commit `f4affbb51f862f22ee927ed1b2bd92c8c194ca0b`, terminó correctamente. Su `API_URL` de producción es `https://admin.gudex.cl`; la Pages Function reenvía las rutas API al Worker de producción y propaga la aserción Cloudflare Access.
 
-La base D1 `gudexapp-staging` (UUID `ba3fa019-fb27-4740-bb96-7a3504517099`) tiene el esquema inicial de 59 tablas y 118 índices, y los respaldos JSON/XLSX importados y conciliados; ver sección de carga y [plan de desarrollo por etapas](plan-desarrollo-migracion-cloudflare.md).
+La D1 `gudexapp-production` (UUID `01e28fec-5510-4370-aaf8-db07540eac78`) se creó separada de staging y contiene el esquema de la aplicación y los datos de negocio importados desde los respaldos existentes. Los conteos importados quedaron conciliados y `PRAGMA foreign_key_check` no detectó errores. No se importaron hashes de contraseñas, tokens de sesión/recuperación ni secretos de integración; por lo tanto, las cuentas históricas necesitan restablecer sus claves y las integraciones deben reautorizarse.
 
-El Worker `gudexapp-api-staging` está vinculado a esa D1. `GET /health` responde `200 {"status":"ok","database":"ok"}`. En el Worker remoto aún no se han publicado las rutas de la app, por lo que el resto no está funcional.
+El Worker `gudexapp-api-production` está enlazado a esa D1 y tiene el dominio `bknd.gudex.cl`. `GET /health` responde `200 {"status":"ok","database":"ok"}`. `GET /tarjeta-aceite` atiende la tarjeta pública desde D1 solo para vehículos habilitados. La ruta se validó en el dominio con una patente autorizada, sin exponer datos personales. Esto no equivale a migrar el backend completo: el Worker todavía cubre solo una fracción de las aproximadamente 230 operaciones FastAPI. No se debe apagar Railway hasta portar y validar los módulos restantes.
 
-### Carga de respaldos a D1 staging
+### Carga de respaldos a D1
 
 El 12 de noviembre de 2026 se importaron a `gudexapp-staging` los respaldos entregados por el usuario: JSON de clientes/vehículos/trabajos y dos planillas XLSX de productos y servicios. Se cargaron 20 clientes, 18 vehículos, 7 órdenes, 6 servicios en órdenes, 21 inspecciones, 7 planes y 6 ejecuciones de mantención, 12 tarjetas de aceite, 82 entradas técnicas, 8 reportes de escáner, 8 sesiones de trabajo, 3 asignaciones, 1 recepción, 1 control de calidad, 2 cotizaciones, 19 productos, 60 servicios y 10 categorías. Los adjuntos no estaban incluidos en el JSON y no se migraron.
 
-La importación se ejecutó en lotes desde un manifiesto temporal local excluido del repositorio. La lectura posterior confirmó los conteos esperados y `PRAGMA foreign_key_check` sin filas. Se preservaron cuatro IDs de usuarios históricos referenciados como cuentas mecánico inactivas con `RESET_REQUIRED`; no se copiaron hashes ni tokens de acceso/recuperación. Además, se creó en D1 staging la cuenta administrativa solicitada por el usuario con rol `admin` y activa. Su contraseña solo se guardó como hash Argon2id; no se documenta aquí.
+La importación se ejecutó en lotes desde un manifiesto temporal local excluido del repositorio. La lectura posterior confirmó los conteos esperados y `PRAGMA foreign_key_check` sin filas. Los usuarios históricos están inactivos o con contraseña pendiente; no se copiaron hashes ni tokens de acceso/recuperación. Los secretos de integración tampoco se copiaron.
 
-La UI Pages de staging ya compila y está publicada. Aún no se puede iniciar sesión ni operar con estos datos hasta desplegar y conectar las rutas funcionales del Worker; el endpoint remoto confirmado es `/health`.
-
-Se inició localmente la primera migración de autenticación, usuarios internos y CRUD básico de clientes en `cloudflare/api/src/index.js`, con verificación de Argon2id compatible y tokens HS256. El bundle compila, pero no se actualizó el Worker remoto: Cloudflare rechazó el aumento de CPU porque la cuenta está en el plan Free. El límite es necesario para verificar los parámetros Argon2id existentes; debilitarlos rompería compatibilidad y seguridad. La clave JWT temporal generada para este intento se eliminó después del rechazo. Para desplegar esta versión hay que habilitar un plan que permita configurar límites CPU y volver a generar el secreto JWT; todavía falta validar compatibilidad completa de datos y permisos antes de conectar Pages.
+Staging sigue disponible en D1 y en el Worker `gudexapp-api-staging`. Producción usa recursos separados. La aplicación Flutter publicada está protegida por Cloudflare Access: una solicitud externa sin sesión a `admin.gudex.cl` recibe `302`, comportamiento esperado; falta validar un flujo interno autenticado con la cuenta administradora.
 
 ## Fases de migración
 
@@ -75,4 +73,4 @@ El plan operativo vigente por etapas, dominios y criterios de salida está en [p
 
 ## Próximo paso recomendado
 
-En Cloudflare, habilitar R2 y agregar/activar la zona `gudex.cl`, conservando los registros DNS existentes antes de cambiar nameservers. En paralelo, crear una API de staging y conectarla a Pages con `API_URL`; luego levantar el inventario técnico de rutas/modelos para estimar el port. No cambiar producción ni apagar Railway/Vercel hasta superar los criterios de aceptación.
+Completar y validar autenticación de administrador en producción; después migrar los módulos funcionales por etapas, empezando por clientes/vehículos/taller e inventario, y habilitar R2 para adjuntos. Mantener Railway como rollback hasta que cada operación usada por la aplicación, las integraciones y los archivos estén en Cloudflare y se haya conciliado una carga final de datos. La tarjeta de aceite y el `health check` ya funcionan en Cloudflare, pero por sí solos no permiten retirar Railway.
