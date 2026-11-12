@@ -77,7 +77,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   urgentCount: urgent.length,
                   appointmentCount: _number(metrics['today_appointments']),
                   onRefresh: _refresh,
-                  onOpenAgenda: () => widget.onOpenModule(4),
+                  onOpenAgenda: () => widget.onOpenModule(6),
                 ),
                 const SizedBox(height: 20),
                 _MetricsGrid(
@@ -101,14 +101,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _number(metrics['today_appointments']).toString(),
                       Icons.calendar_today_outlined,
                       GudexColors.success,
-                      () => widget.onOpenModule(4),
+                      () => widget.onOpenModule(6),
                     ),
                     _MetricData(
                       'Solicitudes nuevas',
                       _number(metrics['requested_appointments']).toString(),
                       Icons.mark_email_unread_outlined,
                       const Color(0xFF9A6700),
-                      () => widget.onOpenModule(4),
+                      () => widget.onOpenModule(6),
                     ),
                     _MetricData(
                       'Stock bajo',
@@ -122,7 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _money(metrics['sales_today_clp']),
                       Icons.point_of_sale_outlined,
                       const Color(0xFF147A6C),
-                      () => widget.onOpenModule(6),
+                      () => widget.onOpenModule(8),
                     ),
                   ],
                 ),
@@ -164,7 +164,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: Icons.event_available_outlined,
                   color: GudexColors.success,
                   actionLabel: 'Abrir agenda',
-                  onAction: () => widget.onOpenModule(4),
+                  onAction: () => widget.onOpenModule(6),
                   child: schedule.isEmpty
                       ? _EmptyOperationalState(
                           icon: Icons.event_available_outlined,
@@ -172,7 +172,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           detail:
                               'Puedes reservar una atención desde la agenda.',
                           actionLabel: 'Agendar cita',
-                          onAction: () => widget.onOpenModule(4),
+                          onAction: () => widget.onOpenModule(6),
                         )
                       : Column(
                           children: [
@@ -183,7 +183,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 title: item['service_type'].toString(),
                                 detail:
                                     '${_shortDate(item['starts_at'])} · ${spanishStatus(item['status'])}',
-                                onTap: () => widget.onOpenModule(4),
+                                onTap: () => widget.onOpenModule(6),
                               ),
                           ],
                         ),

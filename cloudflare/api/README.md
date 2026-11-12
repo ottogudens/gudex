@@ -74,6 +74,11 @@ Registrar o instalar un repuesto conserva la regla actual y no descuenta stock;
 la evidencia adjunta seguirá sin abrirse hasta completar R2. Aún faltan compras,
 ventas, caja y uso de repuestos integrado a inventario.
 
+La ruta `/api/v1/dashboard` entrega las métricas operativas que usa el panel
+principal (órdenes atrasadas/activas, citas, stock bajo, cotizaciones y ventas
+del día). La navegación de escritorio inicia con todos los grupos del menú
+abiertos y los accesos del panel dirigen a sus módulos correspondientes.
+
 Pages de `admin.gudex.cl` reenvía las rutas API al Worker de producción. La
 versión actual se desplegó el 12-11-2026; las consultas sin aserción a órdenes
 responden HTTP 401, mientras `/health` y la tarjeta pública responden HTTP 200.

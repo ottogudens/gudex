@@ -245,7 +245,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
   bool _navExpanded = true;
-  final Set<String> _expandedGroups = {'General', 'Operación', 'Gestión'};
+  final Set<String> _expandedGroups = {
+    'General', 'Operación', 'Gestión', 'Clientes y taller', 'Marketing'
+  };
 
   List<AppModule> get _modules {
     if (widget.role == 'customer') {
@@ -445,7 +447,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 borderRadius: BorderRadius.circular(20),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(20),
-                                  onTap: () => setState(() => _selected = 4),
+                                  onTap: () => setState(() => _selected = 6),
                                   child: Padding(
                                     padding: const EdgeInsets.all(18),
                                     child: Row(children: [
