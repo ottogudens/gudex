@@ -27,6 +27,14 @@ Referencias oficiales consultadas: [límites de CPU de Workers](https://develope
 
 **Estado de salida:** la etapa 0 conserva revisión funcional pendiente; la etapa 1 tiene coincidencia DDL con SQLModel, pero falta comparar PostgreSQL en vivo; la etapa 2 habilita acceso temporal de un administrador mediante Cloudflare Access; la etapa 3 cubre CRUD base de clientes/vehículos y lectura de historial. Falta la prueba interactiva del PIN/sesión y funcional del frontend con identidad autenticada. El resto de la API Gudex sigue pendiente. DNS y producción no se modificaron. El Worker aún no tiene CI de despliegue conectado al repo.
 
+### Actualización de avance (12 de noviembre de 2026)
+
+- El commit `9ad6f43d1323bbc71dafde87497bfcbcd7644662` se publicó en la rama `codex/cloudflare-migration-customer-backup`.
+- Se desplegó en el Worker productivo `gudexapp-api-production`, conservando D1 de producción y Cloudflare Access. Los endpoints de productos, movimientos, servicios/categorías y conteos físicos quedaron añadidos. La creación de producto y su línea de conteo es atómica; el conteo ciego no revela existencias hasta la revisión. El ajuste de inventario solo ocurre al registrar explícitamente un movimiento o aplicar una toma aprobada.
+- Pages deployment `f660e79c-1d44-4dba-9933-7da7d9a835cb`, construido desde ese commit, terminó `success` y quedó asociado a `admin.gudex.cl`.
+- Comprobación externa sin sesión: Worker `/health` y `/tarjeta-aceite` `200`; productos, servicios y conteos `401`; `admin.gudex.cl` redirige a Access. No se validaron escrituras autenticadas ni se modificó stock/caja real.
+- La etapa 4 está parcialmente implementada: el catálogo y el conteo físico ya están desplegados; compras, recepción, POS, ventas, caja y la conciliación integral permanecen pendientes. La etapa 5 (R2/adjuntos), etapa 6 (integraciones), validación integral, flujo de usuarios y retiro de Railway/Vercel también siguen pendientes. No apagar Railway.
+
 ## Reglas que se mantienen durante el proyecto
 
 1. Trabajar primero en recursos `*-staging`; producción y DNS permanecen intactos hasta la etapa de corte.
