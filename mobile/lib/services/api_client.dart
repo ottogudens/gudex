@@ -24,6 +24,15 @@ class ApiClient {
     return Map<String, dynamic>.from(body as Map);
   }
 
+  Future<Map<String, dynamic>> loginWithCloudflareAccess() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/auth/access'),
+      headers: _headers,
+    );
+    final body = _decode(response);
+    return Map<String, dynamic>.from(body as Map);
+  }
+
   Future<dynamic> get(String path) async {
     final response = await http
         .get(Uri.parse('$baseUrl$path'), headers: _headers)

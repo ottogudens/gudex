@@ -6,6 +6,7 @@ flutter_version="${FLUTTER_VERSION:-3.47.3}"
 # Only this public API URL is embedded; provider and bridge secrets stay server-side.
 api_url="${API_URL:-${API_BASE_URL:-https://bknd.gudex.cl}}"
 api_url="${api_url%/}"
+cloudflare_access_enabled="${CLOUDFLARE_ACCESS_ENABLED:-false}"
 build_tmp="$(mktemp -d)"
 trap 'rm -rf "$build_tmp"' EXIT
 archive_url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${flutter_version}-stable.tar.xz"
@@ -22,7 +23,7 @@ git config --global --add safe.directory "$build_tmp/flutter"
 "$flutter_bin" config --no-analytics
 "$flutter_bin" precache --web
 "$flutter_bin" pub get
-"$flutter_bin" build web --release --dart-define="API_URL=$api_url"
+"$flutter_bin" build web --release --dart-define="API_URL=$api_url" --dart-define="CLOUDFLARE_ACCESS_ENABLED=$cloudflare_access_enabled"
 
 # Each successful deployment exposes an immutable identifier. The installed
 # PWA polls this small, uncached file and offers the user a controlled reload

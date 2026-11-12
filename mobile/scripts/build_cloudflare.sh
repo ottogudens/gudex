@@ -11,5 +11,6 @@ case "$API_URL" in
   *) echo "API_URL debe usar HTTPS." >&2; exit 2 ;;
 esac
 
+export CLOUDFLARE_ACCESS_ENABLED=true
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 bash "$script_dir/build_vercel.sh"

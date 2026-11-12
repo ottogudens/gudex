@@ -1,9 +1,11 @@
 import { argon2id, argon2Verify } from "hash-wasm";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const WEB_ORIGIN = "https://gudexapp-staging.pages.dev";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const commonPasswords = new Set(["123456", "12345678", "123456789", "1234567890", "qwerty", "qwerty123", "password", "password1", "password123", "abc12345", "qwertyuiop", "11111111", "00000000", "lubricentro", "mecanico", "administrador", "gudex1234"]);
+const accessJwks = new Map();
 
 function response(body, status = 200, origin = null) {
   const headers = new Headers({"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store, max-age=0","X-Content-Type-Options":"nosniff"});
@@ -48,6 +50,13 @@ function validatePassword(password) {
   return null;
 }
 async function auth(request, env, path) {
+  const access = await accessUser(request, env);
+  if(access) {
+    if(access.error) return {error:fail(401,"Autenticación Cloudflare Access inválida")};
+    if(access.user.role==="customer" && path!=="/api/v1/account/password") return {error:fail(403,"Este recurso no está disponible para clientes")};
+    if(access.user.role!=="admin" && path.startsWith("/api/v1/users")) return {error:fail(403,"Se requiere el rol de administrador")};
+    return {user:access.user};
+  }
   const [,scheme,token]=/^\s*(\S+)\s+(.+?)\s*$/.exec(request.headers.get("Authorization")||"")||[];
   if(scheme?.toLowerCase()!=="bearer" || !token) return {error:fail(401,"Autenticación requerida")};
   const claims=await verifyToken(token,env.JWT_SECRET); if(!claims) return {error:fail(401,"Autenticación requerida")};
@@ -56,6 +65,22 @@ async function auth(request, env, path) {
   if(user.role==="customer" && path!=="/api/v1/account/password") return {error:fail(403,"Este recurso no está disponible para clientes")};
   if(user.role!=="admin" && path.startsWith("/api/v1/users")) return {error:fail(403,"Se requiere el rol de administrador")};
   return {user};
+}
+async function accessUser(request, env) {
+  const token=request.headers.get("Cf-Access-Jwt-Assertion");
+  if(!token) return null;
+  const team=String(env.ACCESS_TEAM_DOMAIN||"").replace(/\/$/,"");
+  const audiences=String(env.ACCESS_AUDS||"").split(",").map(x=>x.trim()).filter(Boolean);
+  if(!team || !audiences.length || !env.ACCESS_EMAIL || !env.ACCESS_ADMIN_EMAIL) return {error:true};
+  try {
+    let jwks=accessJwks.get(team);
+    if(!jwks){jwks=createRemoteJWKSet(new URL(`${team}/cdn-cgi/access/certs`));accessJwks.set(team,jwks);}
+    const {payload}=await jwtVerify(token,jwks,{issuer:team,audience:audiences});
+    if(typeof payload.email!=="string" || payload.email.toLowerCase()!==String(env.ACCESS_EMAIL).toLowerCase()) return {error:true};
+    const user=await env.DB.prepare("SELECT id,email,full_name,role,customer_id,active,token_version,created_at FROM user WHERE email=? AND role='admin'").bind(String(env.ACCESS_ADMIN_EMAIL).toLowerCase()).first();
+    if(!user || !user.active) return {error:true};
+    return {user};
+  } catch { return {error:true}; }
 }
 const userRead = ({id,email,full_name,role,customer_id,active,created_at})=>({id,email,full_name,role,customer_id,active,created_at});
 const customerFields = "id,full_name,rut,email,phone,notes,created_at,archived_at";
@@ -81,8 +106,13 @@ async function handle(request, env) {
     const access_token=await sign({sub:user.email,role:user.role,ver:user.token_version||0,exp:Math.floor(Date.now()/1000)+28800},env.JWT_SECRET);
     return response({access_token,token_type:"bearer",role:user.role,full_name:user.full_name,expires_in:28800},200,origin);
   }
+  if(method==="POST"&&path==="/auth/access") {
+    const access=await accessUser(request,env);
+    if(!access || access.error) return response({detail:"Inicia sesión con Cloudflare Access para continuar"},401,origin);
+    return response({access_token:"cloudflare-access",token_type:"bearer",role:access.user.role,full_name:access.user.full_name,expires_in:28800},200,origin);
+  }
   if(!path.startsWith("/api/v1/")) return response({detail:"No encontrado"},404,origin);
-  if(typeof env.JWT_SECRET!=="string" || env.JWT_SECRET.length<32) return response({detail:"Servicio de autenticación no configurado"},503,origin);
+  if(!request.headers.get("Cf-Access-Jwt-Assertion") && (typeof env.JWT_SECRET!=="string" || env.JWT_SECRET.length<32)) return response({detail:"Servicio de autenticación no configurado"},503,origin);
   const {user, error}=await auth(request,env,path); if(error)return response(error.body,error.status,origin);
   try {
     if(path==="/api/v1/account/password"&&method==="POST") {

@@ -31,6 +31,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     }
   }
 
+  Future<void> _submitCloudflareAccess() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final session = await ApiClient(apiBaseUrl).loginWithCloudflareAccess();
+      await ref.read(authProvider.notifier).signIn(session);
+    } catch (error) {
+      setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   void dispose() {
     _email.dispose();
@@ -81,14 +93,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         const SizedBox(height: 22),
                         Text('Gestión simple para tu lubricentro', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         const SizedBox(height: 28),
-                        TextField(controller: _email, keyboardType: TextInputType.emailAddress,
-                          autofillHints: const [AutofillHints.username, AutofillHints.email],
-                          decoration: const InputDecoration(labelText: 'Correo', prefixIcon: Icon(Icons.mail_outline))),
-                        const SizedBox(height: 14),
-                        TextField(controller: _password, obscureText: true,
-                          autofillHints: const [AutofillHints.password],
-                          decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock_outline)),
-                          onSubmitted: (_) => _submit()),
+                        if (!cloudflareAccessEnabled) ...[
+                          TextField(controller: _email, keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [AutofillHints.username, AutofillHints.email],
+                            decoration: const InputDecoration(labelText: 'Correo', prefixIcon: Icon(Icons.mail_outline))),
+                          const SizedBox(height: 14),
+                          TextField(controller: _password, obscureText: true,
+                            autofillHints: const [AutofillHints.password],
+                            decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock_outline)),
+                            onSubmitted: (_) => _submit()),
+                        ],
                         if (_error != null) ...[
                           const SizedBox(height: 14),
                           Container(
@@ -99,10 +113,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         ],
                         const SizedBox(height: 22),
                         FilledButton(
-                          onPressed: _busy ? null : _submit,
+                          onPressed: _busy ? null : cloudflareAccessEnabled ? _submitCloudflareAccess : _submit,
                           child: _busy
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('Ingresar'),
+                              : Text(cloudflareAccessEnabled ? 'Continuar con Cloudflare Access' : 'Ingresar'),
                         ),
                       ]),
                     ),

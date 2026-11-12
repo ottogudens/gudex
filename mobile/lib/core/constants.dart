@@ -67,3 +67,4 @@ String spanishRole(dynamic value) {
 
 /// Default API URL, overridable via `--dart-define=API_URL=…`
 const apiBaseUrl = String.fromEnvironment('API_URL', defaultValue: String.fromEnvironment('API_BASE_URL', defaultValue: 'https://bknd.gudex.cl'));
+const cloudflareAccessEnabled = bool.fromEnvironment('CLOUDFLARE_ACCESS_ENABLED', defaultValue: false);

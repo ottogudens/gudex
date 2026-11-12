@@ -2,7 +2,15 @@
   "name": "gudexapp-cloudflare-api",
   "private": true,
   "type": "module",
-  "scripts": {"build": "esbuild src/index.js --bundle --format=esm --outfile=dist/index.js"},
-  "dependencies": {"hash-wasm": "^4.12.0"},
-  "devDependencies": {"esbuild": "^0.25.0"}
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --format=esm --outfile=dist/index.js",
+    "build:staging": "esbuild src/access_staging.js --bundle --format=esm --outfile=dist/access_staging.js"
+  },
+  "dependencies": {
+    "hash-wasm": "^4.12.0",
+    "jose": "^6.2.17"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
 }
