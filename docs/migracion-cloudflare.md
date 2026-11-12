@@ -25,6 +25,7 @@ Referencias oficiales: [FastAPI en Python Workers](https://developers.cloudflare
 - `backend/app/main.py` centraliza una cantidad amplia de rutas; hay routers separados para compras, caja, inspecciones, importaciones, operaciones e integraciones.
 - El backend declara aproximadamente 230 operaciones HTTP entre rutas centrales y routers. La autenticación usa JWT HS256 de 8 horas y `pwdlib` con su hasher recomendado (Argon2); la migración debe decidir cómo verificar esos hashes en Workers o cómo forzar un restablecimiento seguro de contraseña.
 - Credenciales OAuth e integración se cifran con Fernet. Hay que preservar de forma segura la clave o planificar la reautorización; no copiar secretos al frontend ni al repositorio.
+- Por decisión del usuario, no se migrarán hashes de contraseñas ni tokens de sesión/recuperación. Se conservarán perfiles y relaciones de usuario como inactivos, con contraseña pendiente, y se emitirán claves nuevas después de cargar y conciliar los datos.
 - La API guarda archivos en `UPLOAD_DIR`; la configuración actual aprovecha un volumen Railway y reporta si falta persistencia en producción.
 - Flutter Web compila mediante `mobile/scripts/build_vercel.sh`, que descarga Flutter SDK y usa `API_URL`; hay referencias directas a `https://bknd.gudex.cl` en la app.
 - Se agregó `mobile/scripts/build_cloudflare.sh`, que reutiliza el build Flutter y exige una `API_URL` HTTPS para staging, más `mobile/web/_headers` para evitar caché obsoleta de la PWA.
@@ -37,7 +38,7 @@ El usuario confirmó que esta es la cuenta destino. La cuenta muestra la zona `f
 
 Se creó el proyecto Pages `gudexapp-staging` (`gudexapp-staging.pages.dev`) como proyecto de carga directa, con raíz `/mobile`, comando documentado `bash scripts/build_cloudflare.sh` y salida `build/web`. Los proyectos de carga directa no ejecutan builds Git y no se pueden convertir después a Git integration; este proyecto deberá recibir el artefacto compilado desde CI o desde un equipo local. Todavía no tiene despliegue (`latest_deployment: null`); no se le configuró una API para evitar apuntarlo al backend productivo. No se modificó DNS.
 
-También se creó la base D1 `gudexapp-staging` (UUID `ba3fa019-fb27-4740-bb96-7a3504517099`). Se generó y aplicó el esquema inicial desde los modelos SQLModel: 59 tablas de aplicación, 118 índices y un registro de migraciones. La base no contiene filas ni datos de producción. El generador y el SQL resultante están en `cloudflare/d1/`.
+También se creó la base D1 `gudexapp-staging` (UUID `ba3fa019-fb27-4740-bb96-7a3504517099`). Se generó y aplicó el esquema inicial desde los modelos SQLModel: 59 tablas de aplicación, 118 índices y un registro de migraciones. La consulta más reciente confirmó cero clientes, vehículos, productos, órdenes y usuarios: aún no hay datos importados. El generador y el SQL resultante están en `cloudflare/d1/`.
 
 Se desplegó el Worker `gudexapp-api-staging` en `https://gudexapp-api-staging.agenciaskalechile.workers.dev`, ligado a esa D1, con logs de invocación habilitados y previews desactivadas. `GET /health` respondió `200 {"status":"ok","database":"ok"}`. El Worker aún no implementa rutas funcionales: el resto responde 501.
 
@@ -48,7 +49,7 @@ Se inició localmente la primera migración de autenticación, usuarios internos
 ### 0. Congelar línea base y proteger retorno
 
 1. Cuenta Cloudflare destino confirmada; confirmar acceso/control de DNS para `gudex.cl`, proyecto Railway/Vercel y ambientes productivos.
-2. Guardar respaldo verificado de PostgreSQL y de todos los adjuntos; medir tamaños, recuentos por tabla y referencias entre registros.
+2. Usar el respaldo de datos confirmado por el usuario; antes de importarlo, verificar su formato, tamaño, recuentos por tabla y referencias. Transferir adjuntos por separado a R2.
 3. Documentar secretos y callbacks configurados sin copiar sus valores al repositorio.
 4. Mantener Railway y Vercel activos como rollback hasta completar el periodo de observación.
 
@@ -64,7 +65,8 @@ Se inició localmente la primera migración de autenticación, usuarios internos
 1. Revisar el esquema inicial generado desde SQLModel y mapear sus 59 tablas a las operaciones de D1; validar constraints, índices y transacciones con cada dominio.
 2. Convertir las 35 revisiones Alembic en migraciones D1 aditivas. Respetar secuencias de estados, atomicidad de venta/caja/stock, importaciones y recepción de compras.
 3. Migrar adjuntos a R2 con manifiesto de origen/destino, checksum y verificación de descargas con autorización.
-4. Ensayar exportación/importación en staging y reconciliar conteos, sumas de caja/stock y referencias de archivos.
+4. No exportar `user.password_hash`, tokens de sesión/recuperación ni credenciales de integración. Preservar perfiles de usuario requeridos por relaciones y desactivarlos hasta emitir nuevas claves.
+5. Ensayar importación en staging y reconciliar conteos, sumas de caja/stock y referencias de archivos.
 
 ### 3. API por dominios
 
