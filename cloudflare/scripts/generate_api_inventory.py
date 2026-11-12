@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -14,6 +15,66 @@ from app.main import app  # noqa: E402
 
 
 METHOD_ORDER = ("GET", "POST", "PUT", "PATCH", "DELETE")
+CALL_START_PATTERN = re.compile(r"\b(?:[\w.]+\.)?(?:api|client)\.(get|post|put|patch|delete)\s*\(\s*(['\"])")
+
+
+def dart_api_calls(content: str):
+    """Read API call strings while respecting quotes nested in `${...}`."""
+    for match in CALL_START_PATTERN.finditer(content):
+        method, quote = match.group(1), match.group(2)
+        i, depth, escaped = match.end(), 0, False
+        while i < len(content):
+            char = content[i]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif depth == 0 and content.startswith("${", i):
+                depth = 1
+                i += 1
+            elif depth > 0 and char == "{":
+                depth += 1
+            elif depth > 0 and char == "}":
+                depth -= 1
+            elif depth == 0 and char == quote:
+                yield method, content[match.end() : i]
+                break
+            i += 1
+
+
+def flutter_consumers(paths: list[str]) -> dict[tuple[str, str], set[str]]:
+    """Map literal Flutter ApiClient calls to matching FastAPI paths."""
+    sources = list((REPO / "mobile" / "lib").rglob("*.dart"))
+    constants: dict[str, str] = {}
+    content_by_path: dict[Path, str] = {}
+    assignment = re.compile(r"(?:const|final|static\s+const)\s+\w+\s+(\w+)\s*=\s*(['\"])(.*?)\2", re.DOTALL)
+    for source in sources:
+        content = source.read_text(encoding="utf-8")
+        content_by_path[source] = content
+        for name, _, value in assignment.findall(content):
+            if "/api/v1/" in value:
+                constants[name] = value
+
+    consumers: dict[tuple[str, str], set[str]] = {}
+    for source, content in content_by_path.items():
+        for method, raw in dart_api_calls(content):
+            candidates = [raw]
+            for name, value in constants.items():
+                if raw.startswith(f"${name}"):
+                    candidates.append(value + raw[len(name) + 1 :])
+            if raw.startswith("$_root"):
+                candidates.append("/api/v1/bulk/{param}" + raw[len("$_root") :])
+            for candidate in candidates:
+                if "/api/v1/" not in candidate:
+                    continue
+                template = candidate.split("?", 1)[0]
+                template = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "{param}", template)
+                template = template.replace("\\'", "'")
+                for api_path in paths:
+                    pattern = re.sub(r"\{[^}]+\}", r"[^/]+", api_path)
+                    if re.fullmatch(pattern, template):
+                        consumers.setdefault((method.upper(), api_path), set()).add(source.relative_to(REPO).as_posix())
+    return consumers
 
 
 def domain_for(path: str, tags: list[str]) -> str:
@@ -75,6 +136,7 @@ def main() -> None:
         for method in methods:
             route_lookup[(path, method)] = route
 
+    consumers = flutter_consumers(list(spec["paths"]))
     operations = []
     for path, path_item in spec["paths"].items():
         for method, operation in path_item.items():
@@ -105,10 +167,12 @@ def main() -> None:
             tags = domain_for(path, operation.get("tags", []))
             summary = " ".join(operation.get("summary", "").split())
             operation_id = operation.get("operationId", "")
-            operations.append((tags.casefold(), path, METHOD_ORDER.index(method), method, path, tags, summary, access, operation_id, source))
+            screens = ", ".join(sorted(consumers.get((method, path), set()))) or "sin coincidencia literal; revisar llamada dinámica"
+            operations.append((tags.casefold(), path, METHOD_ORDER.index(method), method, path, tags, summary, access, operation_id, source, screens))
 
     operations.sort()
     counts = Counter(row[5] for row in operations)
+    mapped_count = sum(1 for row in operations if row[10] != "sin coincidencia literal; revisar llamada dinámica")
     lines = [
         "# Inventario de API para la migración a Cloudflare",
         "",
@@ -116,6 +180,8 @@ def main() -> None:
         "Este reporte es una línea base del contrato HTTP; las reglas de negocio, efectos laterales, límites de cliente, formatos de archivo e idempotencia requieren revisión del código y validación funcional antes de portar cada grupo.",
         "",
         f"Operaciones HTTP documentadas: **{len(operations)}** en **{len(spec['paths'])}** paths OpenAPI.",
+        f"Consumidores Flutter encontrados mediante coincidencia estática: **{mapped_count}** operaciones; las restantes requieren confirmar llamadas dinámicas o que el flujo no tenga pantalla Flutter.",
+        "La búsqueda es estática y puede omitir rutas ensambladas mediante variables, concatenación, cargas de archivo o clientes auxiliares.",
         "",
         "## Conteo por dominio o etiqueta",
         "",
@@ -127,11 +193,11 @@ def main() -> None:
         "",
         "## Rutas",
         "",
-        "| Método | Ruta | Dominio | Resumen | Acceso observado | Operation ID | Código origen |",
-        "|---|---|---|---|---|---|---|",
+        "| Método | Ruta | Dominio | Resumen | Acceso observado | Operation ID | Código origen | Consumidor Flutter (coincidencia estática) |",
+        "|---|---|---|---|---|---|---|---|",
     ])
-    for _, _, _, method, path, tags, summary, access, operation_id, source in operations:
-        cells = [method, f"`{path}`", tags, summary, access, f"`{operation_id}`" if operation_id else "", f"`{source}`" if source else "pendiente"]
+    for _, _, _, method, path, tags, summary, access, operation_id, source, screens in operations:
+        cells = [method, f"`{path}`", tags, summary, access, f"`{operation_id}`" if operation_id else "", f"`{source}`" if source else "pendiente", screens]
         lines.append("| " + " | ".join(value.replace("|", "\\|") for value in cells) + " |")
     lines.extend([
         "",
@@ -146,7 +212,7 @@ def main() -> None:
     destination = REPO / "docs" / "inventario-api-cloudflare.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text("\n".join(lines), encoding="utf-8")
-    print(f"{destination}: {len(operations)} operaciones; {len(counts)} dominios")
+    print(f"{destination}: {len(operations)} operaciones; {mapped_count} mapeadas a Flutter; {len(counts)} dominios")
 
 
 if __name__ == "__main__":

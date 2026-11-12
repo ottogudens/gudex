@@ -22,6 +22,15 @@ Worker a datos productivos. El CORS inicial solo admite
 en el origen) y el resto de las rutas FastAPI. El Worker no está listo para uso
 funcional ni producción.
 
+## Acceso temporal de staging
+
+Cloudflare Access protege `https://gudexapp-staging.pages.dev` y los aliases
+`*.gudexapp-staging.pages.dev` con una política que permite solo al correo
+propietario de la cuenta, usando PIN por correo y sesiones de 8 horas. Se verificó
+que el hostname canónico y el alias de la última publicación redirigen a Access.
+Esta capa protege la interfaz; no sustituye usuarios/roles Gudex ni hace funcionar
+el formulario de login, porque el Worker remoto todavía solo implementa `/health`.
+
 El esquema inicial de 59 tablas y 118 índices se genera sin datos desde los
 modelos actuales con `python cloudflare/d1/generate_initial_schema.py`.
 Para compilar el Worker local: `npm ci` y `npm run build`. No subir el directorio
