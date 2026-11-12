@@ -13,6 +13,8 @@ from urllib.parse import urlencode, urlparse
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
+from fastapi.encoders import jsonable_encoder
+import json
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, text, update
 from sqlmodel import Session, select
@@ -24,7 +26,7 @@ from app.inspection_templates import seed_default_inspection_templates
 from app.models import (
     Appointment, CalendarImportSettings, Customer, CustomerAccessToken, CustomerEngagementVisit, DiagnosticFinding, ExternalCalendarEvent, Inspection, IntegrationCredential, LoyaltyRedemption, LoyaltyReward, LoyaltyTransaction, MarketingCampaign, Payment, Product, Quote, QuoteItem, QuoteRequest, Sale, SaleItem, ScannerReport, Service,
     StockMovement, User, UserRole, Vehicle, MaintenancePlan, MaintenanceExecution, WorkOrder, WorkOrderAssignment, WorkOrderService, WorkSession, WorkStatus,
-    WorkOrderReception, WorkOrderEvidence, WorkOrderQualityCheck, InstalledPart, WorkshopBay,
+    WorkOrderReception, WorkOrderEvidence, WorkOrderQualityCheck, InstalledPart, WorkshopBay, VehicleTechnicalEntry, OilServiceCard,
 )
 from app.schemas import (
     AppointmentCreate, AppointmentUpdate, AssignedWorkOrderRead, CustomerAccessTokenConfirm, CustomerCreate, CustomerPasswordResetRequest, CustomerPortalAccessCreate, InspectionCreate, PaymentCreate, PaymentRead, ProductCreate, QuoteCreate, QuoteRead, QuoteRequestCreate,
@@ -532,6 +534,60 @@ def health():
         return Response('{"status":"error","database":"unavailable"}', status_code=503, media_type="application/json")
     return {"status": "ok", "service": settings.app_name, "database": "ok",
             "persistent_uploads": uploads_are_persistent()}
+
+
+@app.get("/api/v1/backups/customers-vehicles", dependencies=[Depends(require_admin)])
+def backup_customers_vehicles(session: Session = Depends(get_session)):
+    """Export customers, vehicles and linked maintenance/service history as JSON."""
+    customers = session.exec(select(Customer).order_by(Customer.id)).all()
+    customer_ids = [row.id for row in customers]
+    vehicles = session.exec(select(Vehicle).where(Vehicle.customer_id.in_(customer_ids)).order_by(Vehicle.id)).all() if customer_ids else []
+    vehicle_ids = [row.id for row in vehicles]
+    orders = session.exec(select(WorkOrder).where(WorkOrder.customer_id.in_(customer_ids)).order_by(WorkOrder.id)).all() if customer_ids else []
+    order_ids = [row.id for row in orders]
+    plans = session.exec(select(MaintenancePlan).where(MaintenancePlan.vehicle_id.in_(vehicle_ids)).order_by(MaintenancePlan.id)).all() if vehicle_ids else []
+    plan_ids = [row.id for row in plans]
+    quote_rows = session.exec(select(Quote).where(Quote.work_order_id.in_(order_ids)).order_by(Quote.id)).all() if order_ids else []
+    quote_ids = [row.id for row in quote_rows]
+
+    def rows(model, statement):
+        return [item.model_dump(mode="json") for item in session.exec(statement).all()]
+
+    payload = {
+        "format": "gudex-customers-vehicles-backup",
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "scope": "Clientes, vehículos y su historial de mantenciones y servicios",
+        "attachments_included": False,
+        "records": {
+            "customers": [item.model_dump(mode="json") for item in customers],
+            "vehicles": [item.model_dump(mode="json") for item in vehicles],
+            "work_orders": [item.model_dump(mode="json") for item in orders],
+            "work_order_services": rows(WorkOrderService, select(WorkOrderService).where(WorkOrderService.work_order_id.in_(order_ids)).order_by(WorkOrderService.id)) if order_ids else [],
+            "inspections": rows(Inspection, select(Inspection).where(Inspection.work_order_id.in_(order_ids)).order_by(Inspection.id)) if order_ids else [],
+            "installed_parts": rows(InstalledPart, select(InstalledPart).where(InstalledPart.work_order_id.in_(order_ids)).order_by(InstalledPart.id)) if order_ids else [],
+            "work_sessions": rows(WorkSession, select(WorkSession).where(WorkSession.work_order_id.in_(order_ids)).order_by(WorkSession.id)) if order_ids else [],
+            "maintenance_plans": [item.model_dump(mode="json") for item in plans],
+            "maintenance_executions": rows(MaintenanceExecution, select(MaintenanceExecution).where(MaintenanceExecution.vehicle_id.in_(vehicle_ids)).order_by(MaintenanceExecution.id)) if vehicle_ids else [],
+            "oil_service_cards": rows(OilServiceCard, select(OilServiceCard).where(OilServiceCard.vehicle_id.in_(vehicle_ids)).order_by(OilServiceCard.id)) if vehicle_ids else [],
+            "vehicle_technical_entries": rows(VehicleTechnicalEntry, select(VehicleTechnicalEntry).where(VehicleTechnicalEntry.vehicle_id.in_(vehicle_ids)).order_by(VehicleTechnicalEntry.id)) if vehicle_ids else [],
+            "scanner_reports": rows(ScannerReport, select(ScannerReport).where(ScannerReport.vehicle_id.in_(vehicle_ids)).order_by(ScannerReport.id)) if vehicle_ids else [],
+            "diagnostic_findings": rows(DiagnosticFinding, select(DiagnosticFinding).where(DiagnosticFinding.vehicle_id.in_(vehicle_ids)).order_by(DiagnosticFinding.id)) if vehicle_ids else [],
+            "work_order_assignments": rows(WorkOrderAssignment, select(WorkOrderAssignment).where(WorkOrderAssignment.work_order_id.in_(order_ids)).order_by(WorkOrderAssignment.id)) if order_ids else [],
+            "work_order_receptions": rows(WorkOrderReception, select(WorkOrderReception).where(WorkOrderReception.work_order_id.in_(order_ids)).order_by(WorkOrderReception.id)) if order_ids else [],
+            "work_order_evidence": rows(WorkOrderEvidence, select(WorkOrderEvidence).where(WorkOrderEvidence.work_order_id.in_(order_ids)).order_by(WorkOrderEvidence.id)) if order_ids else [],
+            "work_order_quality_checks": rows(WorkOrderQualityCheck, select(WorkOrderQualityCheck).where(WorkOrderQualityCheck.work_order_id.in_(order_ids)).order_by(WorkOrderQualityCheck.id)) if order_ids else [],
+            "quotes": [item.model_dump(mode="json") for item in quote_rows],
+            "quote_items": rows(QuoteItem, select(QuoteItem).where(QuoteItem.quote_id.in_(quote_ids)).order_by(QuoteItem.id)) if quote_ids else [],
+        },
+    }
+    records = payload["records"]
+    payload["counts"] = {name: len(value) for name, value in records.items()}
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    content = json.dumps(jsonable_encoder(payload), ensure_ascii=False, indent=2)
+    return Response(content=content, media_type="application/json; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="gudex-respaldo-clientes-vehiculos-{stamp}.json"',
+                             "Cache-Control": "no-store"})
 
 
 @app.post("/api/v1/customers", response_model=Customer, status_code=201, dependencies=[Depends(require_admin)])

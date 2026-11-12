@@ -3,7 +3,7 @@ set -euo pipefail
 
 flutter_version="${FLUTTER_VERSION:-3.47.3}"
 # Flutter reads compile-time definitions, not the build process environment.
-# Only this public URL is embedded; bridge tokens must remain in Railway.
+# Only this public API URL is embedded; provider and bridge secrets stay server-side.
 api_url="${API_URL:-${API_BASE_URL:-https://bknd.gudex.cl}}"
 api_url="${api_url%/}"
 build_tmp="$(mktemp -d)"
@@ -27,7 +27,7 @@ git config --global --add safe.directory "$build_tmp/flutter"
 # Each successful deployment exposes an immutable identifier. The installed
 # PWA polls this small, uncached file and offers the user a controlled reload
 # whenever Vercel publishes a newer build.
-deploy_version="${VERCEL_DEPLOYMENT_ID:-${VERCEL_GIT_COMMIT_SHA:-${GITHUB_SHA:-}}}"
+deploy_version="${CF_PAGES_COMMIT_SHA:-${VERCEL_DEPLOYMENT_ID:-${VERCEL_GIT_COMMIT_SHA:-${GITHUB_SHA:-}}}}"
 if [[ -z "$deploy_version" ]]; then
   deploy_version="$(git rev-parse --verify HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
 fi

@@ -18,6 +18,7 @@ mobile/.packages
 .vercel/
 .next/
 node_modules/
+/cloudflare/api/dist/
 .DS_Store
 .vercel
 .env*.local

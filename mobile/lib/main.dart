@@ -172,6 +172,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   Timer? _appointmentAlertTimer;
   int _pendingAppointmentCount = 0;
   bool _checkingAppointments = false;
+  bool _creatingCustomerBackup = false;
 
   @override
   void initState() {
@@ -203,6 +204,44 @@ class _HomePageState extends ConsumerState<HomePage> {
       // Keep the last visible alert during a temporary connection failure.
     } finally {
       _checkingAppointments = false;
+    }
+  }
+
+  Future<void> _backupCustomersAndVehicles(ApiClient api) async {
+    if (_creatingCustomerBackup) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Respaldar clientes y vehículos'),
+        content: const Text(
+          'Se descargará un archivo JSON con los clientes, vehículos y sus historiales de servicios, mantenciones, inspecciones y órdenes. Incluye datos personales; guárdalo en un lugar protegido. Los archivos adjuntos no están incluidos.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Descargar respaldo')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _creatingCustomerBackup = true);
+    try {
+      final bytes = await api.getBytes('/api/v1/backups/customers-vehicles');
+      await FilePicker.saveFile(
+        dialogTitle: 'Guardar respaldo de clientes y vehículos',
+        fileName: 'gudex-respaldo-clientes-vehiculos.json',
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        bytes: bytes,
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Respaldo enviado a descargas. Protege este archivo porque contiene datos personales.')),
+      );
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo crear el respaldo: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _creatingCustomerBackup = false);
     }
   }
   bool _navExpanded = true;
@@ -568,6 +607,17 @@ class _HomePageState extends ConsumerState<HomePage> {
                     MaterialPageRoute(
                         builder: (_) =>
                             AssistantScreen(api: api, role: widget.role)))),
+            if (widget.role == 'admin')
+              IconButton(
+                  tooltip: _creatingCustomerBackup
+                      ? 'Creando respaldo…'
+                      : 'Respaldar clientes y vehículos',
+                  icon: _creatingCustomerBackup
+                      ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.backup_outlined),
+                  onPressed: _creatingCustomerBackup
+                      ? null
+                      : () => _backupCustomersAndVehicles(api)),
             if (widget.role == 'admin')
               IconButton(
                   tooltip: 'Integraciones',
