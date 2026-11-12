@@ -62,14 +62,25 @@ información de contacto ni historial completo. El resto de rutas requiere una
 aserción válida de Cloudflare Access. Los adjuntos de imágenes no se copiaron a
 R2; la tarjeta sirve sus campos de texto y kilometraje.
 
+Esta versión añade lectura y mantenimiento del catálogo: productos,
+movimientos de stock, servicios y categorías; también altas/ediciones y archivo
+seguro de productos. El conteo físico permite crear sesiones ciegas, registrar
+SKU escaneados, enviar diferencias a revisión y aplicarlas por el administrador
+en una transacción D1. El stock esperado se oculta mientras el conteo ciego está
+abierto; toda diferencia aplicada deja movimientos de inventario. La revisión de
+código hizo atómica la creación de producto y su línea de conteo y redujo las
+consultas por lote. Aún no se ha migrado el resto de ventas/compras, caja, uso de
+repuestos en órdenes ni archivos R2.
+
 Pages de `admin.gudex.cl` reenvía las rutas API al Worker de producción. La
 versión actual se desplegó el 12-11-2026; las consultas sin aserción a órdenes
 responden HTTP 401, mientras `/health` y la tarjeta pública responden HTTP 200.
 No se validó un recorrido interno autenticado de punta a punta. La cobertura de
 la API sigue siendo parcial: inspecciones, cotizaciones, sesiones, control de
-calidad, repuestos, caja, inventario, compras, ventas, portal, integraciones y
-archivos todavía requieren portar y validar sus operaciones. Railway permanece
-como rollback y esta API de Cloudflare no lo llama.
+calidad, repuestos, caja, compras, ventas, portal, integraciones y archivos,
+además de las operaciones de inventario distintas del catálogo y conteo descritos
+arriba, todavía requieren portar y validar. Railway permanece como rollback y
+esta API de Cloudflare no lo llama.
 
 ## Acceso temporal de staging
 

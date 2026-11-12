@@ -1,6 +1,8 @@
 const WEB_ORIGIN = "https://gudexapp-staging.pages.dev";
 import { publicOilCard } from "./public_oil_card.js";
 import { handleWorkOrders } from "./work_orders.js";
+import { handleCatalog } from "./catalog.js";
+import { handleInventoryCounts } from "./inventory_counts.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -205,6 +207,10 @@ export default {
     if (!user) return json({ detail: "Inicia sesión con Cloudflare Access para continuar" }, 401, origin);
     if (method === "POST" && path === "/auth/access") return json({ access_token: "cloudflare-access", token_type: "bearer", role: user.role, full_name: user.full_name, expires_in: 28800 }, 200, origin);
     try {
+      const inventoryResponse = await handleInventoryCounts(request, env, user);
+      if (inventoryResponse) return inventoryResponse;
+      const catalogResponse = await handleCatalog(request, env, user);
+      if (catalogResponse) return catalogResponse;
       const workOrdersResponse = await handleWorkOrders(request, env, user);
       if (workOrdersResponse) return workOrdersResponse;
       const fields = "id,full_name,rut,email,phone,notes,created_at,archived_at";
