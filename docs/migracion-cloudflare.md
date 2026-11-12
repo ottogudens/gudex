@@ -32,15 +32,15 @@ Referencias oficiales: [FastAPI en Python Workers](https://developers.cloudflare
 - `baileys-bridge` guarda su sesión en filesystem persistente (`/data/baileys-auth`) y está documentado como conector no oficial limitado a pruebas.
 - El checkout está en detached HEAD (`70b98f9`) y limpio al momento del levantamiento.
 
-## Estado de la cuenta Cloudflare consultada
+## Estado de la cuenta Cloudflare consultada (12-11-2026)
 
-El usuario confirmó que esta es la cuenta destino. La cuenta muestra la zona `fibrapucon.cl` como pendiente, dos Workers y dos bases D1 de otros proyectos; todavía no aparece `gudex.cl`. La API de R2 indica que R2 debe habilitarse desde el dashboard.
+El usuario confirmó que esta es la cuenta destino. En la verificación más reciente, la zona `gudex.cl` todavía no aparece en esa cuenta. No se modificó DNS. R2 requiere habilitación desde el dashboard.
 
-Se creó el proyecto Pages `gudexapp-staging` (`gudexapp-staging.pages.dev`) como proyecto de carga directa, con raíz `/mobile`, comando documentado `bash scripts/build_cloudflare.sh` y salida `build/web`. Los proyectos de carga directa no ejecutan builds Git y no se pueden convertir después a Git integration; este proyecto deberá recibir el artefacto compilado desde CI o desde un equipo local. Todavía no tiene despliegue (`latest_deployment: null`); no se le configuró una API para evitar apuntarlo al backend productivo. No se modificó DNS.
+El proyecto Pages `gudexapp-staging` (`gudexapp-staging.pages.dev`) está conectado por GitHub al repositorio `ottogudens/gudex`, con rama de producción actual `codex/cloudflare-migration-customer-backup`, raíz `/mobile`, comando `bash scripts/build_cloudflare.sh` y salida `build/web`. El último build publicado desde el commit `ffcd0e0` terminó exitosamente. Staging apunta a la API staging, no a producción.
 
-También se creó la base D1 `gudexapp-staging` (UUID `ba3fa019-fb27-4740-bb96-7a3504517099`). Se generó y aplicó el esquema inicial desde los modelos SQLModel: 59 tablas de aplicación, 118 índices y un registro de migraciones. La consulta más reciente confirmó cero clientes, vehículos, productos, órdenes y usuarios: aún no hay datos importados. El generador y el SQL resultante están en `cloudflare/d1/`.
+La base D1 `gudexapp-staging` (UUID `ba3fa019-fb27-4740-bb96-7a3504517099`) tiene el esquema inicial de 59 tablas y 118 índices, y los respaldos JSON/XLSX importados y conciliados; ver sección de carga y [plan de desarrollo por etapas](plan-desarrollo-migracion-cloudflare.md).
 
-Se desplegó el Worker `gudexapp-api-staging` en `https://gudexapp-api-staging.agenciaskalechile.workers.dev`, ligado a esa D1, con logs de invocación habilitados y previews desactivadas. `GET /health` respondió `200 {"status":"ok","database":"ok"}`. El Worker aún no implementa rutas funcionales: el resto responde 501.
+El Worker `gudexapp-api-staging` está vinculado a esa D1. `GET /health` responde `200 {"status":"ok","database":"ok"}`. En el Worker remoto aún no se han publicado las rutas de la app, por lo que el resto no está funcional.
 
 ### Carga de respaldos a D1 staging
 
@@ -48,7 +48,7 @@ El 12 de noviembre de 2026 se importaron a `gudexapp-staging` los respaldos entr
 
 La importación se ejecutó en lotes desde un manifiesto temporal local excluido del repositorio. La lectura posterior confirmó los conteos esperados y `PRAGMA foreign_key_check` sin filas. Se preservaron cuatro IDs de usuarios históricos referenciados como cuentas mecánico inactivas con `RESET_REQUIRED`; no se copiaron hashes ni tokens de acceso/recuperación. Además, se creó en D1 staging la cuenta administrativa solicitada por el usuario con rol `admin` y activa. Su contraseña solo se guardó como hash Argon2id; no se documenta aquí.
 
-La UI Pages de staging ya compila y está publicada. Aún no se puede iniciar sesión ni operar con estos datos hasta desplegar y conectar las rutas funcionales del Worker; al momento de esta carga, el endpoint remoto confirmado sigue siendo `/health`.
+La UI Pages de staging ya compila y está publicada. Aún no se puede iniciar sesión ni operar con estos datos hasta desplegar y conectar las rutas funcionales del Worker; el endpoint remoto confirmado es `/health`.
 
 Se inició localmente la primera migración de autenticación, usuarios internos y CRUD básico de clientes en `cloudflare/api/src/index.js`, con verificación de Argon2id compatible y tokens HS256. El bundle compila, pero no se actualizó el Worker remoto: Cloudflare rechazó el aumento de CPU porque la cuenta está en el plan Free. El límite es necesario para verificar los parámetros Argon2id existentes; debilitarlos rompería compatibilidad y seguridad. La clave JWT temporal generada para este intento se eliminó después del rechazo. Para desplegar esta versión hay que habilitar un plan que permita configurar límites CPU y volver a generar el secreto JWT; todavía falta validar compatibilidad completa de datos y permisos antes de conectar Pages.
 
@@ -61,42 +61,7 @@ Se inició localmente la primera migración de autenticación, usuarios internos
 3. Documentar secretos y callbacks configurados sin copiar sus valores al repositorio.
 4. Mantener Railway y Vercel activos como rollback hasta completar el periodo de observación.
 
-### 1. Frontend de prueba en Cloudflare Pages
-
-1. El proyecto Pages `gudexapp-staging` y la base D1 `gudexapp-staging` ya están creados y separados de producción. D1 tiene esquema inicial sin datos. Pages aún no tiene despliegue y es de carga directa; publicar el artefacto Flutter desde CI/local o crear un proyecto separado con Git integration para builds automáticos.
-2. Definir `API_URL` como variable HTTPS de una API de staging. El script falla si falta para evitar publicar por accidente una versión de pruebas apuntando a producción.
-3. Pages aplica fallback SPA cuando el output tiene `index.html`; los encabezados de caché están en `mobile/web/_headers`.
-4. Usar hostname `pages.dev`; no cambiar DNS de producción todavía.
-
-### 2. Capa de datos y almacenamiento
-
-1. Revisar el esquema inicial generado desde SQLModel y mapear sus 59 tablas a las operaciones de D1; validar constraints, índices y transacciones con cada dominio.
-2. Convertir las 35 revisiones Alembic en migraciones D1 aditivas. Respetar secuencias de estados, atomicidad de venta/caja/stock, importaciones y recepción de compras.
-3. Migrar adjuntos a R2 con manifiesto de origen/destino, checksum y verificación de descargas con autorización.
-4. No exportar `user.password_hash`, tokens de sesión/recuperación ni credenciales de integración. Preservar perfiles de usuario requeridos por relaciones y desactivarlos hasta emitir nuevas claves.
-5. Ensayar importación en staging y reconciliar conteos, sumas de caja/stock y referencias de archivos.
-
-### 3. API por dominios
-
-1. Empezar con autenticación, usuarios, clientes y vehículos; conservar formato de token y contratos consumidos por Flutter.
-   - Resolver antes la verificación de hashes Argon2 existentes. Si el runtime destino no puede verificarlos, planificar renovación de credenciales y expiración de sesiones sin bloquear permanentemente cuentas.
-2. Migrar órdenes, inspecciones, cotizaciones, inventario, compras, caja y POS en grupos con pruebas de regresión de permisos y efectos contables.
-3. Migrar pagos/webhooks, Google OAuth, asistente IA, campañas, fidelización y operaciones de taller; actualizar callbacks y secretos en los proveedores externos.
-4. Reemplazar rutas locales de archivos por objetos R2, con autorización antes de leer o emitir enlaces limitados.
-5. Mantener API antigua y nueva en paralelo durante pruebas, con datos de staging aislados. Evitar doble escritura en producción salvo que se diseñe una reconciliación explícita.
-
-### 4. Bridge opcional y dominios
-
-1. Decidir si se mantiene Baileys. Si sí, migrarlo en una fase separada a Containers y diseñar persistencia duradera de credenciales; no confiar en el disco local del Container.
-2. Activar R2 y crear recursos D1/Workers en la cuenta que controlará `gudex.cl`.
-3. Configurar dominios personalizados para web y API, TLS, CORS/orígenes permitidos, redirects OAuth y webhooks de pagos.
-
-### 5. Corte y retirada
-
-1. Ejecutar migración final con ventana de escritura controlada, respaldar y congelar cambios en el origen.
-2. Importar delta final, validar salud, autenticación por rol, portal cliente, inventario, caja, compra y venta con datos de control.
-3. Cambiar DNS y URLs públicas; monitorear errores y latencia. Mantener rollback disponible.
-4. Retirar Railway/Vercel solo tras periodo estable, respaldo final y confirmación de que archivos y callbacks antiguos ya no reciben tráfico.
+El plan operativo vigente por etapas, dominios y criterios de salida está en [plan-desarrollo-migracion-cloudflare.md](plan-desarrollo-migracion-cloudflare.md). Esta sección sustituye la hoja de ruta anterior que ya estaba desactualizada.
 
 ## Criterios de aceptación
 

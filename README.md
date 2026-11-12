@@ -32,7 +32,7 @@ La API se sirve en `http://127.0.0.1:8000`; la documentación interactiva está 
 Instala Flutter, entra a `mobile/`, ejecuta `flutter pub get` y `flutter run`. En el emulador Android, la dirección inicial de API es `http://10.0.2.2:8000`; para un teléfono físico, ingresa la dirección local del servidor que ambos dispositivos puedan alcanzar.
 
 Para desplegar backend y PostgreSQL en Railway, y Flutter Web en Vercel, sigue el [manual de despliegue y pruebas](docs/despliegue-railway-vercel.md).
-La migración de la plataforma a Cloudflare está en [plan de migración](docs/migracion-cloudflare.md); Railway y Vercel siguen siendo los destinos productivos hasta completar el corte.
+El [estado técnico de la migración](docs/migracion-cloudflare.md) y el [plan de desarrollo por etapas](docs/plan-desarrollo-migracion-cloudflare.md) describen el avance y los criterios para completar el traslado a Cloudflare. Railway y Vercel siguen siendo los destinos productivos hasta completar el corte.
 
 ## Módulos MVP
 
