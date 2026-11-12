@@ -1,0 +1,34 @@
+name: Deploy Cloudflare API staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-api-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloudflare/api/package-lock.json
+      - run: npm ci
+      - run: npm run build:staging
+      - name: Deploy Worker to staging
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: d6c0dd01f8d91bd5b42881b7f578ffd0
+          workingDirectory: cloudflare/api
+          command: deploy --config wrangler.toml

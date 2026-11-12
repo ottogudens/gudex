@@ -6,7 +6,11 @@ El Worker desplegado `gudexapp-api-staging` está en
 CRUD básico de clientes y vehículos, y lectura del historial del vehículo.
 También gestiona planes de mantención, vencimientos y registro idempotente de
 ejecuciones, actualizando kilometraje y la tarjeta de aceite dentro de una batch
-de D1. No acepta llamadas de negocio sin una aserción JWT válida de Access. La
+de D1. La verificación live del 12-11-2026 confirmó `/health` con HTTP 200 y
+`/api/v1/customers` directo sin aserción con HTTP 401. Pages devuelve HTTP 302
+hacia Access para la app y sus rutas API. No se simuló un inicio interactivo con
+PIN ni se validó el recorrido de negocio autenticado en Flutter. No acepta
+llamadas de negocio sin una aserción JWT válida de Access. La
 política de staging limita el acceso a una identidad propietaria; su aserción se
 verifica con firma RS256, emisor y audiencias antes de mapearla al administrador
 `admin@gudex.cl` en D1.
@@ -48,4 +52,11 @@ modelos actuales con `python cloudflare/d1/generate_initial_schema.py`.
 Para compilar la versión completa local: `npm ci` y `npm run build`. La entrada
 reducida de staging se compila con `npm run build:staging`. El Worker todavía se
 despliega manualmente; Workers Builds no está conectado a esta ruta del repo.
-No subir `dist/`; es un artefacto generado.
+El workflow `.github/workflows/cloudflare-api-staging.yml` está preparado para
+ejecución manual. Para activarlo, agrega `CLOUDFLARE_API_TOKEN` como Actions
+secret del repositorio `ottogudens/gudex`, con permisos limitados para Workers
+Scripts y lectura del binding D1, y luego ejecútalo desde GitHub Actions. No se
+pudo configurar el secreto desde este entorno (no hay sesión de Wrangler ni CLI
+`gh`). El token no se almacena en el repo ni se solicita en el chat. El workflow
+solo despliega staging, y `wrangler.toml` solo apunta al Worker y D1 de staging;
+producción continúa separada. No subir `dist/`; es un artefacto generado.
