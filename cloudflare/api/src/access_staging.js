@@ -1,4 +1,5 @@
 const WEB_ORIGIN = "https://gudexapp-staging.pages.dev";
+import { publicOilCard } from "./public_oil_card.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -198,6 +199,7 @@ export default {
       try { await env.DB.prepare("SELECT 1").first(); return json({ status: "ok", database: "ok" }, 200, origin); }
       catch { return json({ status: "unavailable", database: "error" }, 503, origin); }
     }
+    if (method === "GET" && path === "/tarjeta-aceite") return publicOilCard(request, env);
     const user = await authorizedUser(request, env);
     if (!user) return json({ detail: "Inicia sesión con Cloudflare Access para continuar" }, 401, origin);
     if (method === "POST" && path === "/auth/access") return json({ access_token: "cloudflare-access", token_type: "bearer", role: user.role, full_name: user.full_name, expires_in: 28800 }, 200, origin);

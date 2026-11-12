@@ -5,7 +5,9 @@
   "scripts": {
     "build": "esbuild src/index.js --bundle --format=esm --outfile=dist/index.js",
     "build:staging": "esbuild src/access_staging.js --bundle --format=esm --outfile=dist/access_staging.js",
-    "deploy:staging": "wrangler deploy --config wrangler.toml"
+    "build:production": "esbuild src/access_staging.js --bundle --format=esm --outfile=dist/access_production.js",
+    "deploy:staging": "wrangler deploy --config wrangler.toml",
+    "deploy:production": "wrangler deploy --config wrangler-production.toml"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",

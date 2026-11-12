@@ -1,0 +1,16 @@
+name = "gudexapp-api-production"
+main = "src/access_staging.js"
+compatibility_date = "2026-11-12"
+account_id = "d6c0dd01f8d91bd5b42881b7f578ffd0"
+workers_dev = true
+
+[vars]
+ACCESS_TEAM_DOMAIN = "https://green-disk-746c.cloudflareaccess.com"
+ACCESS_AUDS = "e4e7830eb24d5245269da9a8dbddd7da6b528120405a44d2303ca04680929b5c,ec92b08b7cd59da78c0f130dd4804c7f5c1a8849be0bfb582dedbeb9839e4ad2"
+ACCESS_EMAIL = "agenciaskalechile@gmail.com"
+ACCESS_ADMIN_EMAIL = "admin@gudex.cl"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gudexapp-production"
+database_id = "01e28fec-5510-4370-aaf8-db07540eac78"

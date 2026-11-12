@@ -1,4 +1,4 @@
-const API_ORIGIN = "https://gudexapp-api-staging.agenciaskalechile.workers.dev";
+const API_ORIGIN = "https://gudexapp-api-production.agenciaskalechile.workers.dev";
 
 export async function onRequest(context) {
   const { request, next } = context;

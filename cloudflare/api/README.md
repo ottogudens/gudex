@@ -39,6 +39,31 @@ mayoría de las rutas FastAPI. Los
 adjuntos de scanner/fotos aún no están en R2 y el historial no expone sus archivos.
 No usar en producción.
 
+## API y base de datos de producción
+
+Se creó `gudexapp-production` y se importaron los datos de negocio disponibles
+desde la D1 de staging: clientes, vehículos, historial y planes de mantención,
+tarjetas de aceite, productos y servicios. Se conservaron IDs y claves foráneas.
+La conciliación registró 296 filas en 19 tablas con datos y cero violaciones de
+claves foráneas. No se copiaron hashes de contraseña, tokens de autenticación ni
+credenciales cifradas de integraciones. Los usuarios históricos permanecen
+inactivos con clave pendiente; el administrador se autentica mediante la política
+de Cloudflare Access existente.
+
+El Worker `gudexapp-api-production` usa esa D1 y el mismo conjunto parcial de
+rutas de clientes, vehículos e historial disponible en staging. El hostname
+`bknd.gudex.cl` está asociado al Worker. `GET /tarjeta-aceite` es público, consulta
+solo vehículos con `public_service_card_enabled=1` y no entrega información de
+contacto ni historial completo. El resto de rutas requiere una aserción válida de
+Cloudflare Access. Los adjuntos de imágenes no se copiaron a R2; la tarjeta sirve
+sus campos de texto y kilometraje.
+
+Pages de `admin.gudex.cl` ahora reenvía las rutas API al Worker de producción.
+La cobertura de la API sigue siendo parcial; las funcionalidades todavía no
+portadas requieren su implementación en Workers antes de considerar terminada
+la migración integral. Railway permanece como rollback y no es llamado por esta
+API de Cloudflare.
+
 ## Acceso temporal de staging
 
 Cloudflare Access protege `https://gudexapp-staging.pages.dev`, los aliases
