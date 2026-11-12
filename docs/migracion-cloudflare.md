@@ -42,6 +42,14 @@ También se creó la base D1 `gudexapp-staging` (UUID `ba3fa019-fb27-4740-bb96-7
 
 Se desplegó el Worker `gudexapp-api-staging` en `https://gudexapp-api-staging.agenciaskalechile.workers.dev`, ligado a esa D1, con logs de invocación habilitados y previews desactivadas. `GET /health` respondió `200 {"status":"ok","database":"ok"}`. El Worker aún no implementa rutas funcionales: el resto responde 501.
 
+### Carga de respaldos a D1 staging
+
+El 12 de noviembre de 2026 se importaron a `gudexapp-staging` los respaldos entregados por el usuario: JSON de clientes/vehículos/trabajos y dos planillas XLSX de productos y servicios. Se cargaron 20 clientes, 18 vehículos, 7 órdenes, 6 servicios en órdenes, 21 inspecciones, 7 planes y 6 ejecuciones de mantención, 12 tarjetas de aceite, 82 entradas técnicas, 8 reportes de escáner, 8 sesiones de trabajo, 3 asignaciones, 1 recepción, 1 control de calidad, 2 cotizaciones, 19 productos, 60 servicios y 10 categorías. Los adjuntos no estaban incluidos en el JSON y no se migraron.
+
+La importación se ejecutó en lotes desde un manifiesto temporal local excluido del repositorio. La lectura posterior confirmó los conteos esperados y `PRAGMA foreign_key_check` sin filas. Se preservaron cuatro IDs de usuarios históricos referenciados como cuentas mecánico inactivas con `RESET_REQUIRED`; no se copiaron hashes ni tokens de acceso/recuperación. Además, se creó en D1 staging la cuenta administrativa solicitada por el usuario con rol `admin` y activa. Su contraseña solo se guardó como hash Argon2id; no se documenta aquí.
+
+La UI Pages de staging ya compila y está publicada. Aún no se puede iniciar sesión ni operar con estos datos hasta desplegar y conectar las rutas funcionales del Worker; al momento de esta carga, el endpoint remoto confirmado sigue siendo `/health`.
+
 Se inició localmente la primera migración de autenticación, usuarios internos y CRUD básico de clientes en `cloudflare/api/src/index.js`, con verificación de Argon2id compatible y tokens HS256. El bundle compila, pero no se actualizó el Worker remoto: Cloudflare rechazó el aumento de CPU porque la cuenta está en el plan Free. El límite es necesario para verificar los parámetros Argon2id existentes; debilitarlos rompería compatibilidad y seguridad. La clave JWT temporal generada para este intento se eliminó después del rechazo. Para desplegar esta versión hay que habilitar un plan que permita configurar límites CPU y volver a generar el secreto JWT; todavía falta validar compatibilidad completa de datos y permisos antes de conectar Pages.
 
 ## Fases de migración
