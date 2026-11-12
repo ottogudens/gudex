@@ -34,6 +34,7 @@ Referencias oficiales consultadas: [límites de CPU de Workers](https://develope
 - Pages deployment `f660e79c-1d44-4dba-9933-7da7d9a835cb`, construido desde ese commit, terminó `success` y quedó asociado a `admin.gudex.cl`.
 - Comprobación externa sin sesión: Worker `/health` y `/tarjeta-aceite` `200`; productos, servicios y conteos `401`; `admin.gudex.cl` redirige a Access. No se validaron escrituras autenticadas ni se modificó stock/caja real.
 - La etapa 4 está parcialmente implementada: el catálogo y el conteo físico ya están desplegados; compras, recepción, POS, ventas, caja y la conciliación integral permanecen pendientes. La etapa 5 (R2/adjuntos), etapa 6 (integraciones), validación integral, flujo de usuarios y retiro de Railway/Vercel también siguen pendientes. No apagar Railway.
+- Se amplió el taller con repuestos instalados por orden, historial por vehículo, resumen de uso y verificación de compatibilidad ligada a la identidad técnica. El Worker `gudexapp-api-production` recibió el deployment `6c3d0b5c78e149b0bd7f173c3980e913`. En observación al redactar este cambio, Pages construía el commit `f8ecefbcb8c5be7b2e53a383f6bdeee8288eaf97`; `/health` seguía respondiendo `200` y rutas de repuestos sin Access `401`.
 
 ## Reglas que se mantienen durante el proyecto
 
