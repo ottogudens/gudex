@@ -1048,7 +1048,7 @@ class _VehicleHistoryScreenState extends ConsumerState<VehicleHistoryScreen> {
               title: Text('${r['filename']}'),
               subtitle: Text(
                   '${_date(r['scanned_at'])} · ${r['mileage_km'] ?? '—'} km'),
-              trailing: IconButton(
+              trailing: r['download_url'] == null ? null : IconButton(
                   tooltip: 'Abrir informe PDF',
                   icon: const Icon(Icons.picture_as_pdf_outlined),
                   onPressed: () async {

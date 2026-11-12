@@ -2,11 +2,12 @@
 
 El Worker desplegado `gudexapp-api-staging` está en
 `https://gudexapp-api-staging.agenciaskalechile.workers.dev` y usa la D1
-`gudexapp-staging`. Staging implementa `GET /health`, login por Cloudflare Access
-y CRUD básico de clientes. No acepta llamadas de negocio sin una aserción JWT
-válida de Access. La política de staging limita el acceso a una identidad
-propietaria; su aserción se verifica con firma RS256, emisor y audiencias antes
-de mapearla al usuario administrador `admin@gudex.cl` en D1.
+`gudexapp-staging`. Staging implementa `GET /health`, login por Cloudflare Access,
+CRUD básico de clientes y vehículos, y lectura del historial del vehículo.
+No acepta llamadas de negocio sin una aserción JWT válida de Access. La política
+de staging limita el acceso a una identidad propietaria; su aserción se verifica
+con firma RS256, emisor y audiencias antes de mapearla al administrador
+`admin@gudex.cl` en D1.
 
 La entrada de staging es `src/access_staging.js`; la implementación que conserva
 login Gudex por contraseña, usuarios y otros endpoints permanece en `src/index.js`.
@@ -25,7 +26,9 @@ Las variables `ACCESS_TEAM_DOMAIN`, `ACCESS_AUDS`, `ACCESS_EMAIL` y
 `ACCESS_ADMIN_EMAIL` deben concordar con las aplicaciones y la política de
 Cloudflare Access. Nunca apuntar este Worker a datos productivos. Esta modalidad
 es solo para staging y un administrador; faltan usuarios internos, rate-limits,
-historial de vehículos y la mayoría de las rutas FastAPI. No usar en producción.
+las escrituras del historial de vehículos y la mayoría de las rutas FastAPI. Los
+adjuntos de scanner/fotos aún no están en R2 y el historial no expone sus archivos.
+No usar en producción.
 
 ## Acceso temporal de staging
 
@@ -40,5 +43,6 @@ temporal de un solo administrador, no reemplaza la identidad multiusuario Gudex.
 El esquema inicial de 59 tablas y 118 índices se genera sin datos desde los
 modelos actuales con `python cloudflare/d1/generate_initial_schema.py`.
 Para compilar la versión completa local: `npm ci` y `npm run build`. La entrada
-reducida de staging se compila con `npm run build:staging`. No subir `dist/`; es
-un artefacto generado.
+reducida de staging se compila con `npm run build:staging`. El Worker todavía se
+despliega manualmente; Workers Builds no está conectado a esta ruta del repo.
+No subir `dist/`; es un artefacto generado.
