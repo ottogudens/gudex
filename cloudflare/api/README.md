@@ -79,6 +79,11 @@ principal (órdenes atrasadas/activas, citas, stock bajo, cotizaciones y ventas
 del día). La navegación de escritorio inicia con todos los grupos del menú
 abiertos y los accesos del panel dirigen a sus módulos correspondientes.
 
+El flujo de taller también cubre recepción del vehículo, listas de inspección y
+plantillas, diagnósticos estructurados y revisión de control de calidad. Los
+adjuntos, informes PDF y bahías del taller aún no están migrados; inspección y
+diagnóstico funcionan sin adjuntar archivos.
+
 Pages de `admin.gudex.cl` reenvía las rutas API al Worker de producción. La
 versión actual se desplegó el 12-11-2026; las consultas sin aserción a órdenes
 responden HTTP 401, mientras `/health` y la tarjeta pública responden HTTP 200.

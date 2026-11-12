@@ -1953,7 +1953,7 @@ class _WorkOrderDetailsState extends State<WorkOrderDetails> {
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () {
             if (module.text.trim().isEmpty || (dtc.text.trim().isEmpty && symptom.text.trim().isEmpty && test.text.trim().isEmpty && conclusion.text.trim().isEmpty)) return;
             if (confirmed && conclusion.text.trim().isEmpty) return;
-            Navigator.pop(context, {'module': module.text.trim(), 'dtc_code': dtc.text.trim(), 'symptom': symptom.text.trim(), 'test_performed': test.text.trim(), 'test_result': result.text.trim(), 'conclusion': conclusion.text.trim(), 'confirmed': confirmed});
+            Navigator.pop(context, {'module': module.text.trim(), 'dtc_code': dtc.text.trim(), 'symptom': symptom.text.trim(), 'test_performed': test.text.trim(), 'test_result': result.text.trim(), 'conclusion': conclusion.text.trim(), 'technician_confirmed': confirmed});
           }, child: const Text('Guardar'))],
         ),
       ));

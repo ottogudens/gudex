@@ -5,6 +5,7 @@ import { handleCatalog } from "./catalog.js";
 import { handleInventoryCounts } from "./inventory_counts.js";
 import { handleParts, vehicleParts } from "./parts.js";
 import { handleDashboard } from "./dashboard.js";
+import { handleWorkshopOperations } from "./workshop_operations.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -210,6 +211,8 @@ export default {
     try {
       const dashboardResponse = await handleDashboard(request, env, user);
       if (dashboardResponse) return dashboardResponse;
+      const workshopResponse = await handleWorkshopOperations(request, env, user);
+      if (workshopResponse) return workshopResponse;
       const inventoryResponse = await handleInventoryCounts(request, env, user);
       if (inventoryResponse) return inventoryResponse;
       const partsResponse = await handleParts(request, env, user);
