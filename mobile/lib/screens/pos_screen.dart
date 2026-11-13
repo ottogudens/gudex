@@ -340,7 +340,7 @@ class _PosScreenState extends State<PosScreen> {
     try {
       await openGudexPdf(
         widget.api,
-        '/api/v1/sales/${sale['id']}/receipt.pdf',
+        '/api/v1/sales/${sale['id']}/receipt.pdf?format=thermal',
         'Gudex-comprobante-${sale['id']}.pdf',
       );
     } catch (error) {
@@ -349,6 +349,71 @@ class _PosScreenState extends State<PosScreen> {
           SnackBar(content: Text('No se pudo abrir el comprobante: $error')),
         );
     }
+  }
+
+  Future<void> _emailSaleReceipt(Map<String, dynamic> sale) async {
+    try {
+      final response = await widget.api.post(
+        '/api/v1/sales/${sale['id']}/email-receipt',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Comprobante enviado a ${response['email']}')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'No se pudo enviar el comprobante: ${error.toString().replaceFirst('Exception: ', '')}',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _offerReceiptOptions(Map<String, dynamic> sale) async {
+    Map<String, dynamic>? customer;
+    for (final item in _customers) {
+      if (item['id'] == sale['customer_id']) {
+        customer = item;
+        break;
+      }
+    }
+    final email = '${customer?['email'] ?? ''}'.trim();
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Comprobante de venta'),
+        content: Text(
+          email.isNotEmpty
+              ? '¿Cómo quieres entregar el comprobante?\nCorreo del cliente: $email'
+              : 'El cliente no tiene un correo registrado. Puedes imprimir el comprobante.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Ahora no'),
+          ),
+          if (email.isNotEmpty)
+            TextButton.icon(
+              onPressed: () => Navigator.pop(context, 'email'),
+              icon: const Icon(Icons.email_outlined),
+              label: const Text('Enviar correo'),
+            ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, 'print'),
+            icon: const Icon(Icons.print_outlined),
+            label: const Text('Imprimir 80 mm'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'email') await _emailSaleReceipt(sale);
+    if (action == 'print') await _printSaleReceipt(sale);
   }
 
   bool _hasPendingCheckout(Map<String, dynamic> sale) {
@@ -609,6 +674,7 @@ class _PosScreenState extends State<PosScreen> {
       setState(() => _paymentNotice = message);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
+      await _offerReceiptOptions(sale);
     } catch (error) {
       if (sale != null) {
         await _refresh();
@@ -623,6 +689,7 @@ class _PosScreenState extends State<PosScreen> {
             duration: const Duration(seconds: 7),
           ),
         );
+        await _offerReceiptOptions(sale);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

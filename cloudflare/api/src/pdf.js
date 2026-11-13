@@ -20,24 +20,27 @@ function wrapped(value, width = 88) {
   return lines.length ? lines : [""];
 }
 
-function makeStream(lines, pageIndex, pageCount) {
-  const visible = lines.slice(pageIndex * 48, (pageIndex + 1) * 48);
-  const commands = ["BT", "/F1 10 Tf", "50 790 Td", "14 TL"];
+function makeStream(lines, pageIndex, pageCount, thermal = false, pageHeight = 842) {
+  const perPage = thermal ? lines.length : 48;
+  const visible = lines.slice(pageIndex * perPage, (pageIndex + 1) * perPage);
+  const commands = thermal ? ["BT", "/F1 8 Tf", `12 ${pageHeight - 18} Td`, "10 TL"] : ["BT", "/F1 10 Tf", "50 790 Td", "14 TL"];
   for (const line of visible) commands.push(`(${clean(line)}) Tj`, "T*");
   commands.push(`(Pagina ${pageIndex + 1} de ${pageCount}) Tj`, "ET");
   return commands.join("\n");
 }
 
-export function createTextPdf(title, details) {
+export function createTextPdf(title, details, { thermal = false } = {}) {
   const lines = [];
-  for (const value of ["Gudex Lubricentro y Serviteca", title, "", ...details]) lines.push(...wrapped(value));
-  const pageCount = Math.max(1, Math.ceil(lines.length / 48)), objects = [];
+  const width = thermal ? 38 : 88;
+  for (const value of ["Gudex Lubricentro y Serviteca", title, "", ...details]) lines.push(...wrapped(value, width));
+  const pageCount = thermal ? 1 : Math.max(1, Math.ceil(lines.length / 48)), objects = [];
+  const pageHeight = thermal ? Math.max(140, Math.ceil(lines.length * 10 + 28)) : 842;
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");
   const kids = Array.from({ length: pageCount }, (_, i) => `${3 + i * 2} 0 R`).join(" ");
   objects.push(`<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>`);
   for (let i = 0; i < pageCount; i++) {
-    const pageId = 3 + i * 2, streamId = pageId + 1, stream = makeStream(lines, i, pageCount);
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${streamId} 0 R >>`);
+    const pageId = 3 + i * 2, streamId = pageId + 1, stream = makeStream(lines, i, pageCount, thermal, pageHeight);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${thermal ? 226.77 : 595} ${pageHeight}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${streamId} 0 R >>`);
     objects.push(`<< /Length ${enc.encode(stream).length} >>\nstream\n${stream}\nendstream`);
   }
   let output = "%PDF-1.4\n", offsets = [0];

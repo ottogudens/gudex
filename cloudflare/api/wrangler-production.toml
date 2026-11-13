@@ -9,6 +9,10 @@ ACCESS_TEAM_DOMAIN = "https://green-disk-746c.cloudflareaccess.com"
 ACCESS_AUDS = "e4e7830eb24d5245269da9a8dbddd7da6b528120405a44d2303ca04680929b5c,ec92b08b7cd59da78c0f130dd4804c7f5c1a8849be0bfb582dedbeb9839e4ad2"
 ACCESS_EMAIL = "agenciaskalechile@gmail.com"
 ACCESS_ADMIN_EMAIL = "admin@gudex.cl"
+EMAIL_FROM = "comprobantes@gudex.cl"
+
+[[send_email]]
+name = "EMAIL"
 
 [[d1_databases]]
 binding = "DB"

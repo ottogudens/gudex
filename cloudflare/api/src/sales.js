@@ -85,7 +85,42 @@ export async function handleSales(request, env, user) {
       ...items.results.map(row => `${row.quantity} x ${row.description} | ${money(row.line_total_clp)}`),
       "", `Subtotal: ${money(sale.subtotal_clp)}`, `Descuento: ${money(sale.discount_clp)}`, `Total: ${money(sale.total_clp)}`, "Pagos:",
       ...(payments.results.length ? payments.results.map(row => `${row.method} - ${row.status}: ${money(row.amount_clp)}`) : ["Sin pagos registrados"])];
-    return pdfResponse(createTextPdf("Comprobante de venta", details), `Gudex-${sale.receipt_code}.pdf`, true);
+    const thermal = url.searchParams.get("format") === "thermal";
+    return pdfResponse(createTextPdf("Comprobante de venta", details, { thermal }), `Gudex-${sale.receipt_code}.pdf`, true);
+  }
+  const emailReceipt = path.match(/^\/api\/v1\/sales\/(\d+)\/email-receipt$/);
+  if (emailReceipt && method === "POST") {
+    if (!env.EMAIL || !env.EMAIL_FROM) return fail("El envío de correo no está configurado en Cloudflare Email Sending", 503);
+    const sale = await one(db, "SELECT * FROM sale WHERE id=?", Number(emailReceipt[1])); if (!sale) return fail("Venta no encontrada", 404);
+    if (!sale.customer_id) return fail("La venta no tiene un cliente registrado", 422);
+    const [customer, vehicle, items, payments] = await Promise.all([
+      one(db, "SELECT * FROM customer WHERE id=?", sale.customer_id),
+      sale.vehicle_id ? one(db, "SELECT * FROM vehicle WHERE id=?", sale.vehicle_id) : null,
+      db.prepare("SELECT * FROM saleitem WHERE sale_id=? ORDER BY id").bind(sale.id).all(),
+      db.prepare("SELECT * FROM payment WHERE sale_id=? ORDER BY created_at").bind(sale.id).all(),
+    ]);
+    if (!customer?.email) return fail("El cliente no tiene un correo registrado", 422);
+    const money = value => `$${Number(value || 0).toLocaleString("es-CL")} CLP`;
+    const details = [`Comprobante: ${sale.receipt_code}`, `Fecha: ${sale.created_at}`, `Estado: ${sale.status}`,
+      `Cliente: ${customer.full_name}`, `Patente: ${vehicle?.plate || "No informada"}`, "", "Detalle de productos y servicios:",
+      ...items.results.map(row => `${row.quantity} x ${row.description} | ${money(row.line_total_clp)}`),
+      "", `Subtotal: ${money(sale.subtotal_clp)}`, `Descuento: ${money(sale.discount_clp)}`, `Total: ${money(sale.total_clp)}`, "Pagos:",
+      ...(payments.results.length ? payments.results.map(row => `${row.method} - ${row.status}: ${money(row.amount_clp)}`) : ["Sin pagos registrados"])];
+    const pdf = createTextPdf("Comprobante de venta", details);
+    try {
+      await env.EMAIL.send({
+        to: customer.email,
+        from: { email: env.EMAIL_FROM, name: "Gudex Lubricentro y Serviteca" },
+        subject: `Comprobante de venta ${sale.receipt_code}`,
+        text: `Hola ${customer.full_name}, adjuntamos el comprobante de tu compra ${sale.receipt_code} por ${money(sale.total_clp)}.`,
+        html: `<p>Hola ${String(customer.full_name).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c])},</p><p>Adjuntamos el comprobante de tu compra <strong>${sale.receipt_code}</strong> por <strong>${money(sale.total_clp)}</strong>.</p><p>Gudex Lubricentro y Serviteca</p>`,
+        attachments: [{ content: pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength), filename: `Gudex-${sale.receipt_code}.pdf`, type: "application/pdf", disposition: "attachment" }],
+      });
+      return json({ sent: true, email: customer.email });
+    } catch (error) {
+      console.error("Sale receipt email failed", error?.code || "unknown");
+      return fail("Cloudflare no pudo enviar el correo. Revisa que gudex.cl esté habilitado para Email Sending.", 503);
+    }
   }
   if (/^\/api\/v1\/sales\/\d+\/mercado-pago\/checkout$/.test(path) && method === "POST") return fail("Checkout Mercado Pago requiere migrar y configurar sus secretos en Cloudflare", 503);
   return null;
