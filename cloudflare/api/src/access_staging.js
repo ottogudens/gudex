@@ -9,6 +9,7 @@ import { handleWorkshopOperations } from "./workshop_operations.js";
 import { handleUsers } from "./users.js";
 import { handleCash } from "./cash.js";
 import { handleAdminReads } from "./admin_reads.js";
+import { handleSales } from "./sales.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -216,6 +217,8 @@ export default {
       if (usersResponse) return usersResponse;
       const cashResponse = await handleCash(request, env, user);
       if (cashResponse) return cashResponse;
+      const salesResponse = await handleSales(request, env, user);
+      if (salesResponse) return salesResponse;
       const adminReadResponse = await handleAdminReads(request, env, user);
       if (adminReadResponse) return adminReadResponse;
       const dashboardResponse = await handleDashboard(request, env, user);
