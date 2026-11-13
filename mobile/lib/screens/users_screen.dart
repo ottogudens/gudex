@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import '../core/constants.dart';
 import '../services/api_client.dart';
 
+const _commonPasswords = {
+  '123456', '12345678', '123456789', '1234567890', 'qwerty', 'qwerty123',
+  'password', 'password1', 'password123', 'abc12345', 'qwertyuiop',
+  '11111111', '00000000', 'lubricentro', 'mecanico', 'administrador', 'gudex1234',
+};
+
 class UsersScreen extends StatefulWidget {
   const UsersScreen({required this.api, super.key});
   final ApiClient api;
@@ -37,16 +43,23 @@ class _UsersScreenState extends State<UsersScreen> {
     final saved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: Text(isNew ? 'Nuevo usuario' : 'Editar usuario'),
       content: StatefulBuilder(builder: (context, update) => Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextFormField(controller: name, decoration: const InputDecoration(labelText: 'Nombre completo'),
-          validator: (value) => value == null || value.trim().length < 2 ? 'Ingresa el nombre' : null),
+        TextFormField(controller: name, maxLength: 120, decoration: const InputDecoration(labelText: 'Nombre completo'),
+          validator: (value) => value == null || value.trim().length < 2 ? 'Ingresa el nombre' : value.trim().length > 120 ? 'El nombre no puede superar 120 caracteres' : null),
         if (isNew) TextFormField(controller: email, keyboardType: TextInputType.emailAddress,
           decoration: const InputDecoration(labelText: 'Correo'),
           validator: (value) => value == null || !value.contains('@') ? 'Ingresa un correo válido' : null),
-        TextFormField(controller: password, obscureText: true,
+        TextFormField(controller: password, obscureText: true, maxLength: 200,
           decoration: InputDecoration(labelText: isNew ? 'Contraseña inicial' : 'Nueva contraseña (opcional)',
-            helperText: isNew ? 'Mínimo 6 caracteres' : 'Déjala vacía para conservar la actual'),
-          validator: (value) => (isNew || (value?.isNotEmpty ?? false)) && (value?.length ?? 0) < 6
-            ? 'Usa al menos 6 caracteres' : null),
+            helperText: isNew ? 'De 6 a 200 caracteres; evita claves comunes' : 'Déjala vacía para conservar la actual'),
+          validator: (value) {
+            final entered = value ?? '';
+            if (isNew && entered.isEmpty) return 'Ingresa una contraseña inicial';
+            if (entered.isEmpty) return null;
+            if (entered.length < 6) return 'Usa al menos 6 caracteres';
+            if (entered.length > 200) return 'La contraseña no puede superar 200 caracteres';
+            if (_commonPasswords.contains(entered.toLowerCase())) return 'Esa contraseña es demasiado común; elige otra';
+            return null;
+          }),
         if (!isNew) TextFormField(controller: confirmPassword, obscureText: true,
           decoration: const InputDecoration(labelText: 'Confirmar nueva contraseña'),
           validator: (value) => password.text.isNotEmpty && value != password.text
