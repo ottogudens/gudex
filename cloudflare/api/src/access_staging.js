@@ -6,6 +6,9 @@ import { handleInventoryCounts } from "./inventory_counts.js";
 import { handleParts, vehicleParts } from "./parts.js";
 import { handleDashboard } from "./dashboard.js";
 import { handleWorkshopOperations } from "./workshop_operations.js";
+import { handleUsers } from "./users.js";
+import { handleCash } from "./cash.js";
+import { handleAdminReads } from "./admin_reads.js";
 const encoder = new TextEncoder();
 const jwksPromises = new Map();
 
@@ -209,6 +212,12 @@ export default {
     if (!user) return json({ detail: "Inicia sesión con Cloudflare Access para continuar" }, 401, origin);
     if (method === "POST" && path === "/auth/access") return json({ access_token: "cloudflare-access", token_type: "bearer", role: user.role, full_name: user.full_name, expires_in: 28800 }, 200, origin);
     try {
+      const usersResponse = await handleUsers(request, env, user);
+      if (usersResponse) return usersResponse;
+      const cashResponse = await handleCash(request, env, user);
+      if (cashResponse) return cashResponse;
+      const adminReadResponse = await handleAdminReads(request, env, user);
+      if (adminReadResponse) return adminReadResponse;
       const dashboardResponse = await handleDashboard(request, env, user);
       if (dashboardResponse) return dashboardResponse;
       const workshopResponse = await handleWorkshopOperations(request, env, user);
