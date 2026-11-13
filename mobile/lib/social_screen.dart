@@ -476,8 +476,9 @@ class _SocialEditorState extends State<_SocialEditor> {
     _objective = post['objective'];
     _image = post['image_base64'];
     _dirty = false;
-    _preview =
-        widget.api.getBytes('$_socialRoot/posts/${post['id']}/preview.png');
+    _preview = _image.trim().isEmpty
+        ? null
+        : widget.api.getBytes('$_socialRoot/posts/${post['id']}/preview.png');
   }
 
   Map<String, dynamic> _payload() => {
@@ -740,7 +741,7 @@ class _SocialEditorState extends State<_SocialEditor> {
       ]));
   Widget _previewPanel() =>
       Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Vista previa del diseño guardado',
+        Text('Vista previa de la imagen adjunta',
             style: Theme.of(context).textTheme.titleMedium),
         if (_dirty)
           const Padding(
@@ -750,7 +751,7 @@ class _SocialEditorState extends State<_SocialEditor> {
         if (_preview == null)
           const Padding(
               padding: EdgeInsets.all(36),
-              child: Text('Guarda el borrador para ver el diseño.'))
+              child: Text('Adjunta una imagen y guarda el borrador. La exportación incluye la imagen original y el texto, sin composición gráfica automática.'))
         else
           FutureBuilder<Uint8List>(
               future: _preview,

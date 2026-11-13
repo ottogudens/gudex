@@ -1,3 +1,5 @@
+import { createTextPdf, pdfResponse } from "./pdf.js";
+import { createZip } from "./zip.js";
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers } });
 const one = async (db, sql, ...args) => db.prepare(sql).bind(...args).first();
 const fail = (detail, status = 422) => json({ detail }, status);
@@ -98,7 +100,23 @@ export async function handleAdminReads(request, env, user) {
       if (existing.work_order_id) statements.push(db.prepare("UPDATE workorder SET status=? WHERE id=?").bind(approved ? "approved" : "quote_rejected", existing.work_order_id));
       await db.batch(statements); return json(await one(db, "SELECT * FROM quote WHERE id=?", id));
     }
-    if (method === "GET" && action === "pdf") return fail("Generación PDF aún no está disponible en Cloudflare", 501);
+    if (method === "GET" && action === "pdf") {
+      const [customer, vehicle, order, items] = await Promise.all([
+        existing.customer_id ? one(db, "SELECT * FROM customer WHERE id=?", existing.customer_id) : null,
+        existing.vehicle_id ? one(db, "SELECT * FROM vehicle WHERE id=?", existing.vehicle_id) : null,
+        existing.work_order_id ? one(db, "SELECT * FROM workorder WHERE id=?", existing.work_order_id) : null,
+        db.prepare("SELECT * FROM quoteitem WHERE quote_id=? ORDER BY id").bind(id).all(),
+      ]);
+      const money = value => `$${Number(value || 0).toLocaleString("es-CL")} CLP`;
+      const details = [`Cotizacion COT-${id}`, `Fecha: ${existing.created_at}`, `Estado: ${existing.status}`,
+        `Cliente: ${customer?.full_name || existing.prospect_name || "Cotizacion rapida"}`, `Correo: ${customer?.email || existing.prospect_email || "No informado"}`,
+        `Vehiculo: ${vehicle ? `${vehicle.plate} - ${vehicle.make} ${vehicle.model}` : existing.prospect_vehicle || "No informado"}`,
+        `Orden de trabajo: ${order?.code || "No asociada"}`, "", `Descripcion: ${existing.description}`, "Detalle:",
+        ...items.results.map(line => `${line.quantity} x ${line.description} | ${money(line.line_total_clp)}`),
+        "", `Mano de obra: ${money(existing.labor_clp)}`, `Repuestos: ${money(existing.parts_clp)}`,
+        `Total cotizado: ${money(existing.labor_clp + existing.parts_clp)}`, `Notas: ${existing.notes || "-"}`];
+      return pdfResponse(createTextPdf("Cotizacion", details), `cotizacion-${id}.pdf`);
+    }
     if (method === "POST" && action === "email") return fail("Envío de cotizaciones por correo requiere migrar la integración Gmail", 501);
   }
   const quoteRequest = path.match(/^\/api\/v1\/quote-requests\/(\d+)\/draft$/);
@@ -176,8 +194,31 @@ export async function handleAdminReads(request, env, user) {
       const caption = [intro,row.brief,price,brand.call_to_action,brand.contact,ending].filter(Boolean).join("\n\n").slice(0,2200), headline = (row.source_name || row.title).slice(0,140);
       await db.prepare("UPDATE socialpost SET caption=?,headline=?,generation_method='template',status='draft',updated_at=? WHERE id=?").bind(caption,headline,new Date().toISOString(),id).run(); return json(await one(db,"SELECT * FROM socialpost WHERE id=?",id));
     }
-    if (action === "preview.png" && method === "GET") return fail("La vista previa gráfica requiere migrar el generador de imágenes a Cloudflare",501);
-    if (action === "export" && method === "GET") return fail("La exportación PNG requiere migrar el generador gráfico a Cloudflare",501);
+    if (action === "preview.png" && method === "GET") {
+      if (!row.image_base64) return fail("Agrega una imagen para ver la previsualización", 422);
+      try {
+        const decoded = atob(row.image_base64), bytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
+        const mime = bytes[0] === 0x89 && bytes[1] === 0x50 ? "image/png" : bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg" : bytes[0] === 0x52 && bytes[1] === 0x49 ? "image/webp" : null;
+        if (!mime) return fail("La imagen guardada no tiene un formato compatible", 422);
+        return new Response(bytes, { headers: { "Content-Type": mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
+      } catch { return fail("No se pudo leer la imagen de la publicación", 422); }
+    }
+    if (action === "export" && method === "GET") {
+      if (!["approved", "planned", "published"].includes(row.status)) return fail("Aprueba la publicación antes de exportar", 409);
+      const files = [
+        { name: "texto.txt", bytes: new TextEncoder().encode(row.caption || "") },
+        { name: "LEEME.txt", bytes: new TextEncoder().encode(`Red: ${row.network}\nFormato: ${row.format}\nEl texto se puede copiar desde texto.txt. La imagen descargada corresponde al archivo original adjunto, sin composicion automatica con la marca.\nGudex no ha enviado esta publicacion a ninguna red social.\n`) },
+      ];
+      if (row.image_base64) {
+        try {
+          const decoded = atob(row.image_base64), bytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
+          const ext = bytes[0] === 0x89 && bytes[1] === 0x50 ? "png" : bytes[0] === 0xff && bytes[1] === 0xd8 ? "jpg" : bytes[0] === 0x52 && bytes[1] === 0x49 ? "webp" : null;
+          if (!ext) return fail("La imagen guardada no tiene un formato compatible", 422);
+          files.push({ name: `imagen-original.${ext}`, bytes });
+        } catch { return fail("No se pudo leer la imagen de la publicacion", 422); }
+      }
+      return new Response(createZip(files), { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="gudex-publicacion-${id}.zip"`, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
+    }
   }
   return null;
 }
